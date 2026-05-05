@@ -1,0 +1,39 @@
+database_path: memory_experiment_180_best.db
+embedding_dim: 768
+logs_dir: logs
+top_k: 8
+
+server:
+  host: 127.0.0.1
+  port: 8765
+
+embedding:
+  backend: wsl_llama_cpp
+  model_name: embeddinggemma-300M-Q8_0.gguf
+  gguf_path: "\\wsl.localhost\\Ubuntu\\home\\victo\\models\\embeddinggemma-300M-Q8_0.gguf"
+  wsl_model_path: /home/victo/models/embeddinggemma-300M-Q8_0.gguf
+  gguf_n_ctx: 2048
+  gguf_n_threads: 8
+  wsl_python: /home/victo/.openclaw/workspace/module/.venv_mlcpu/bin/python
+  dim: 768
+  normalize: true
+  max_text_chars: 1000
+  sidecar: true
+  allow_hash_fallback: false
+
+thresholds:
+  low: 0.5
+  new: 1.5
+  recall_low: 0.45
+  recall_mid: 0.65
+  recall_high: 0.82
+  contradiction: 0.75
+  domain_shift: 0.60
+
+gcl:
+  base_update_rate: 0.18
+  drift_beta: 0.95
+  curvature_beta: 0.95
+  angular_weight: 0.50
+  radial_weight: 0.05
+  orthogonal_weight: 0.35
