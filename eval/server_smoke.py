@@ -57,6 +57,18 @@ def main() -> None:
                 },
             )
             retrieved = post_json(f"{base}/retrieve", {"query": "persistent semantic memory retrieval", "top_k": 2})
+            top = retrieved["results"][0]
+            feedback = post_json(
+                f"{base}/feedback",
+                {
+                    "query": "persistent semantic memory retrieval",
+                    "memory_id": top["memory_id"],
+                    "label": "useful",
+                    "rank": 1,
+                    "retrieval_score": top["score"],
+                    "notes": "server smoke feedback check",
+                },
+            )
             stats = get_json(f"{base}/stats")
             post_json(f"{base}/shutdown", {})
             thread.join(timeout=5)
@@ -69,7 +81,10 @@ def main() -> None:
         assert batch["stored"] == 2
         assert batch["results"][0]["embedding_backend"] == "wsl_llama_cpp"
         assert retrieved["results"]
+        assert feedback["ok"] is True
+        assert feedback["feedback"]["label"] == "useful"
         assert stats["memories"] == 3
+        assert stats["retrieval_feedback"] == 1
         assert stats["vector_dimensions"] == [768]
         print(
             json.dumps(
@@ -78,6 +93,7 @@ def main() -> None:
                     "elapsed_sec": round(time.perf_counter() - start, 6),
                     "stats": stats,
                     "top_result": retrieved["results"][0]["memory_type"],
+                    "feedback": feedback["feedback"],
                 },
                 indent=2,
             )

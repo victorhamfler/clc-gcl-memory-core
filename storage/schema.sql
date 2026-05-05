@@ -77,6 +77,20 @@ CREATE TABLE IF NOT EXISTS memory_sources (
     FOREIGN KEY(memory_id) REFERENCES memories(id)
 );
 
+CREATE TABLE IF NOT EXISTS retrieval_feedback (
+    id TEXT PRIMARY KEY,
+    query TEXT,
+    memory_id TEXT NOT NULL,
+    label TEXT NOT NULL,
+    rating REAL DEFAULT 0.0,
+    rank INTEGER,
+    retrieval_score REAL,
+    notes TEXT,
+    metadata TEXT,
+    created_at TEXT,
+    FOREIGN KEY(memory_id) REFERENCES memories(id)
+);
+
 CREATE TABLE IF NOT EXISTS runs (
     id TEXT PRIMARY KEY,
     command TEXT NOT NULL,
@@ -105,5 +119,8 @@ CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type);
 CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at);
 CREATE INDEX IF NOT EXISTS idx_events_memory ON events(memory_id);
 CREATE INDEX IF NOT EXISTS idx_memory_sources_source ON memory_sources(source);
+CREATE INDEX IF NOT EXISTS idx_retrieval_feedback_memory ON retrieval_feedback(memory_id);
+CREATE INDEX IF NOT EXISTS idx_retrieval_feedback_label ON retrieval_feedback(label);
+CREATE INDEX IF NOT EXISTS idx_retrieval_feedback_created ON retrieval_feedback(created_at);
 CREATE INDEX IF NOT EXISTS idx_relations_source ON relations(source_memory_id);
 CREATE INDEX IF NOT EXISTS idx_relations_target ON relations(target_memory_id);

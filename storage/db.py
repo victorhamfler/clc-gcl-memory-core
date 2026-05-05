@@ -158,6 +158,116 @@ class MemoryDB:
             for row in rows
         ]
 
+    def add_retrieval_feedback(
+        self,
+        memory_id: str,
+        label: str,
+        query: str | None = None,
+        rating: float | None = None,
+        rank: int | None = None,
+        retrieval_score: float | None = None,
+        notes: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if not self.memory_exists_id(memory_id):
+            raise ValueError(f"unknown memory_id: {memory_id}")
+        normalized_label = str(label or "").strip().lower()
+        if not normalized_label:
+            raise ValueError("feedback label is required")
+        feedback_id = new_id("fb")
+        created_at = utc_now()
+        self.conn.execute(
+            """
+            INSERT INTO retrieval_feedback (
+                id, query, memory_id, label, rating, rank,
+                retrieval_score, notes, metadata, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                feedback_id,
+                query,
+                memory_id,
+                normalized_label,
+                None if rating is None else float(rating),
+                None if rank is None else int(rank),
+                None if retrieval_score is None else float(retrieval_score),
+                notes,
+                json.dumps(metadata or {}, separators=(",", ":")),
+                created_at,
+            ),
+        )
+        self.add_event(
+            memory_id,
+            "retrieval_feedback",
+            rating,
+            {
+                "feedback_id": feedback_id,
+                "label": normalized_label,
+                "query": query,
+                "rank": rank,
+                "retrieval_score": retrieval_score,
+            },
+        )
+        return {
+            "id": feedback_id,
+            "memory_id": memory_id,
+            "label": normalized_label,
+            "rating": rating,
+            "created_at": created_at,
+        }
+
+    def memory_exists_id(self, memory_id: str) -> bool:
+        row = self.conn.execute(
+            "SELECT 1 FROM memories WHERE id=? AND deprecated=0 LIMIT 1",
+            (memory_id,),
+        ).fetchone()
+        return row is not None
+
+    def feedback_counts(self) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            """
+            SELECT label, COUNT(*) AS count, AVG(rating) AS avg_rating
+            FROM retrieval_feedback
+            GROUP BY label
+            ORDER BY count DESC, label
+            """
+        ).fetchall()
+        return [
+            {
+                "label": row["label"],
+                "count": int(row["count"] or 0),
+                "avg_rating": None if row["avg_rating"] is None else round(float(row["avg_rating"]), 4),
+            }
+            for row in rows
+        ]
+
+    def recent_feedback(self, limit: int = 20) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            """
+            SELECT id, query, memory_id, label, rating, rank, retrieval_score, notes, metadata, created_at
+            FROM retrieval_feedback
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (int(limit),),
+        ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "query": row["query"],
+                "memory_id": row["memory_id"],
+                "label": row["label"],
+                "rating": None if row["rating"] is None else float(row["rating"]),
+                "rank": None if row["rank"] is None else int(row["rank"]),
+                "retrieval_score": None if row["retrieval_score"] is None else float(row["retrieval_score"]),
+                "notes": row["notes"],
+                "metadata": json.loads(row["metadata"] or "{}"),
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
     def list_domains(self) -> list[DomainState]:
         rows = self.conn.execute("SELECT * FROM domains ORDER BY memory_count DESC, updated_at DESC").fetchall()
         return [self._domain_from_row(row) for row in rows]
@@ -302,10 +412,12 @@ class MemoryDB:
         memories = self.conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
         domains = self.conn.execute("SELECT COUNT(*) FROM domains").fetchone()[0]
         contradictions = self.conn.execute("SELECT COUNT(*) FROM contradictions").fetchone()[0]
+        feedback = self.conn.execute("SELECT COUNT(*) FROM retrieval_feedback").fetchone()[0]
         return {
             "memories": memories,
             "domains": domains,
             "contradictions": contradictions,
+            "retrieval_feedback": feedback,
             "vector_dimensions": self.vector_dimensions(),
             "embedding_signature": self.get_runtime_state("embedding_signature"),
         }

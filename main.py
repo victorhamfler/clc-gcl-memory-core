@@ -40,8 +40,15 @@ def show_stats() -> dict:
         for d in db.list_domains()
     ]
     sources = db.source_counts()
+    feedback = db.feedback_counts()
     db.close()
-    return {"database": str(DB_PATH), **stats, "domains_detail": domains, "sources_detail": sources}
+    return {
+        "database": str(DB_PATH),
+        **stats,
+        "domains_detail": domains,
+        "sources_detail": sources,
+        "feedback_detail": feedback,
+    }
 
 
 def main() -> None:

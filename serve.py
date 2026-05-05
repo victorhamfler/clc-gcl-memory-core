@@ -14,6 +14,18 @@ from core.runtime import create_pipeline, pipeline_stats
 
 
 ROOT = Path(__file__).resolve().parent
+FEEDBACK_RATINGS = {
+    "excellent": 2.0,
+    "useful": 1.0,
+    "good": 1.0,
+    "ok": 0.25,
+    "neutral": 0.0,
+    "missing_source": -0.5,
+    "wrong_domain": -0.75,
+    "stale": -0.75,
+    "wrong": -1.0,
+    "bad": -1.0,
+}
 
 
 class MemoryApi:
@@ -60,6 +72,33 @@ class MemoryApi:
         top_k = max(1, int(payload.get("top_k") or 5))
         return {"results": self.pipeline.retrieve(query, top_k=top_k)}
 
+    def feedback(self, payload: dict[str, Any]) -> dict[str, Any]:
+        memory_id = str(payload.get("memory_id") or "").strip()
+        label = str(payload.get("label") or "").strip().lower()
+        if not memory_id:
+            raise ValueError("POST /feedback requires JSON field 'memory_id'")
+        if not label:
+            raise ValueError("POST /feedback requires JSON field 'label'")
+        rating = payload.get("rating")
+        if rating is None:
+            rating = FEEDBACK_RATINGS.get(label, 0.0)
+        metadata = payload.get("metadata")
+        if metadata is not None and not isinstance(metadata, dict):
+            raise ValueError("'metadata' must be a JSON object when provided")
+        return {
+            "ok": True,
+            "feedback": self.pipeline.db.add_retrieval_feedback(
+                memory_id=memory_id,
+                label=label,
+                query=str(payload.get("query") or "").strip() or None,
+                rating=float(rating),
+                rank=payload.get("rank"),
+                retrieval_score=payload.get("retrieval_score"),
+                notes=str(payload.get("notes") or "").strip() or None,
+                metadata=metadata,
+            ),
+        }
+
 
 def make_handler(api: MemoryApi):
     class Handler(BaseHTTPRequestHandler):
@@ -87,6 +126,8 @@ def make_handler(api: MemoryApi):
                     self._send_json(200, api.ingest_batch(payload))
                 elif path == "/retrieve":
                     self._send_json(200, api.retrieve(payload))
+                elif path == "/feedback":
+                    self._send_json(200, api.feedback(payload))
                 elif path == "/shutdown":
                     self._send_json(200, {"ok": True, "shutdown": True})
                     threading.Thread(target=self.server.shutdown, daemon=True).start()
@@ -142,7 +183,7 @@ def main() -> None:
             {
                 "ok": True,
                 "url": f"http://{host}:{port}",
-                "endpoints": ["/health", "/stats", "/ingest", "/ingest_batch", "/retrieve"],
+                "endpoints": ["/health", "/stats", "/ingest", "/ingest_batch", "/retrieve", "/feedback"],
             },
             indent=2,
         ),

@@ -28,12 +28,25 @@ python serve.py --host 127.0.0.1 --port 8765
 - `POST /ingest`
 - `POST /ingest_batch`
 - `POST /retrieve`
+- `POST /feedback`
 
 Example:
 
 ```powershell
 $body = @{ query = "what can the geometry controller contribute to the AI memory program"; top_k = 3 } | ConvertTo-Json
 Invoke-RestMethod -Uri "http://127.0.0.1:8765/retrieve" -Method Post -ContentType "application/json" -Body $body
+```
+
+Store retrieval feedback:
+
+```powershell
+python feedback.py mem_example useful --query "example query" --rank 1
+```
+
+Manual feedback session:
+
+```powershell
+python eval/interactive_retrieval_test.py --top-k 3
 ```
 
 ## Experiment Workflow
