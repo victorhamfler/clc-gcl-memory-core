@@ -91,6 +91,30 @@ CREATE TABLE IF NOT EXISTS retrieval_feedback (
     FOREIGN KEY(memory_id) REFERENCES memories(id)
 );
 
+CREATE TABLE IF NOT EXISTS agent_sessions (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    title TEXT,
+    metadata TEXT,
+    created_at TEXT,
+    updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS session_turns (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    query TEXT,
+    answer TEXT,
+    confidence REAL,
+    conflict INTEGER DEFAULT 0,
+    evidence_memory_ids TEXT,
+    metadata TEXT,
+    created_at TEXT,
+    FOREIGN KEY(session_id) REFERENCES agent_sessions(id)
+);
+
 CREATE TABLE IF NOT EXISTS runs (
     id TEXT PRIMARY KEY,
     command TEXT NOT NULL,
@@ -122,5 +146,9 @@ CREATE INDEX IF NOT EXISTS idx_memory_sources_source ON memory_sources(source);
 CREATE INDEX IF NOT EXISTS idx_retrieval_feedback_memory ON retrieval_feedback(memory_id);
 CREATE INDEX IF NOT EXISTS idx_retrieval_feedback_label ON retrieval_feedback(label);
 CREATE INDEX IF NOT EXISTS idx_retrieval_feedback_created ON retrieval_feedback(created_at);
+CREATE INDEX IF NOT EXISTS idx_agent_sessions_agent ON agent_sessions(agent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_sessions_updated ON agent_sessions(updated_at);
+CREATE INDEX IF NOT EXISTS idx_session_turns_session ON session_turns(session_id);
+CREATE INDEX IF NOT EXISTS idx_session_turns_created ON session_turns(created_at);
 CREATE INDEX IF NOT EXISTS idx_relations_source ON relations(source_memory_id);
 CREATE INDEX IF NOT EXISTS idx_relations_target ON relations(target_memory_id);

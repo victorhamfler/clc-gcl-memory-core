@@ -59,4 +59,6 @@ def pipeline_stats(pipeline: MemoryPipeline) -> dict[str, Any]:
         "domains_detail": domains,
         "sources_detail": pipeline.db.source_counts(),
         "feedback_detail": pipeline.db.feedback_counts(),
+        "relations_detail": pipeline.db.relation_counts(),
+        "sessions_detail": pipeline.db.list_sessions(limit=10),
     }

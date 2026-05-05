@@ -45,11 +45,89 @@ class MemoryApi:
     def stats(self) -> dict[str, Any]:
         return pipeline_stats(self.pipeline)
 
+    def create_session(self, payload: dict[str, Any]) -> dict[str, Any]:
+        metadata = payload.get("metadata")
+        if metadata is not None and not isinstance(metadata, dict):
+            raise ValueError("'metadata' must be a JSON object when provided")
+        return {
+            "ok": True,
+            "session": self.pipeline.db.create_session(
+                agent_id=str(payload.get("agent_id") or "default").strip() or "default",
+                title=str(payload.get("title") or "").strip() or None,
+                metadata=metadata,
+                session_id=str(payload.get("session_id") or "").strip() or None,
+            ),
+        }
+
+    def sessions(self, payload: dict[str, Any]) -> dict[str, Any]:
+        agent_id = str(payload.get("agent_id") or "").strip() or None
+        limit = max(1, int(payload.get("limit") or 20))
+        return {"ok": True, "sessions": self.pipeline.db.list_sessions(agent_id=agent_id, limit=limit)}
+
+    def session_history(self, payload: dict[str, Any]) -> dict[str, Any]:
+        session_id = str(payload.get("session_id") or "").strip()
+        if not session_id:
+            raise ValueError("POST /session_history requires JSON field 'session_id'")
+        limit = max(1, int(payload.get("limit") or 50))
+        session = self.pipeline.db.get_session(session_id)
+        if session is None:
+            raise ValueError(f"unknown session_id: {session_id}")
+        return {
+            "ok": True,
+            "session": session,
+            "turns": self.pipeline.db.session_history(session_id, limit=limit),
+        }
+
     def ingest(self, payload: dict[str, Any]) -> dict[str, Any]:
         text = str(payload.get("text") or "").strip()
         if not text:
             raise ValueError("POST /ingest requires JSON field 'text'")
         return self.pipeline.ingest(text)
+
+    def teach(self, payload: dict[str, Any]) -> dict[str, Any]:
+        text = str(payload.get("text") or "").strip()
+        if not text:
+            raise ValueError("POST /teach requires JSON field 'text'")
+        metadata = payload.get("metadata")
+        if metadata is not None and not isinstance(metadata, dict):
+            raise ValueError("'metadata' must be a JSON object when provided")
+        return self.pipeline.teach(
+            text,
+            source=str(payload.get("source") or "").strip() or None,
+            session_id=str(payload.get("session_id") or "").strip() or None,
+            agent_id=str(payload.get("agent_id") or "default").strip() or "default",
+            store_session=bool(payload.get("store_session", True)),
+            metadata=metadata,
+        )
+
+    def correct(self, payload: dict[str, Any]) -> dict[str, Any]:
+        correction = str(payload.get("correction") or payload.get("text") or "").strip()
+        if not correction:
+            raise ValueError("POST /correct requires JSON field 'correction' or 'text'")
+        target_memory_ids = payload.get("target_memory_ids")
+        if target_memory_ids is None and payload.get("target_memory_id") is not None:
+            target_memory_ids = [payload.get("target_memory_id")]
+        if target_memory_ids is None:
+            target_memory_ids = []
+        if not isinstance(target_memory_ids, list):
+            raise ValueError("'target_memory_ids' must be a JSON list when provided")
+        metadata = payload.get("metadata")
+        if metadata is not None and not isinstance(metadata, dict):
+            raise ValueError("'metadata' must be a JSON object when provided")
+        return self.pipeline.correct(
+            correction,
+            target_memory_ids=[str(item) for item in target_memory_ids],
+            target_query=str(payload.get("target_query") or "").strip() or None,
+            top_k=max(1, int(payload.get("top_k") or 5)),
+            source=str(payload.get("source") or "").strip() or None,
+            session_id=str(payload.get("session_id") or "").strip() or None,
+            agent_id=str(payload.get("agent_id") or "default").strip() or "default",
+            store_session=bool(payload.get("store_session", True)),
+            stale_label=str(payload.get("stale_label") or "stale").strip().lower() or "stale",
+            stale_rating=float(payload.get("stale_rating") if payload.get("stale_rating") is not None else -0.75),
+            relation_type=str(payload.get("relation_type") or "corrects").strip().lower() or "corrects",
+            metadata=metadata,
+        )
 
     def ingest_batch(self, payload: dict[str, Any]) -> dict[str, Any]:
         raw_texts = payload.get("texts")
@@ -71,6 +149,24 @@ class MemoryApi:
             raise ValueError("POST /retrieve requires JSON field 'query'")
         top_k = max(1, int(payload.get("top_k") or 5))
         return {"results": self.pipeline.retrieve(query, top_k=top_k)}
+
+    def ask(self, payload: dict[str, Any]) -> dict[str, Any]:
+        query = str(payload.get("query") or "").strip()
+        if not query:
+            raise ValueError("POST /ask requires JSON field 'query'")
+        top_k = max(1, int(payload.get("top_k") or 5))
+        return {
+            "ok": True,
+            **self.pipeline.ask(
+                query,
+                top_k=top_k,
+                session_id=str(payload.get("session_id") or "").strip() or None,
+                agent_id=str(payload.get("agent_id") or "default").strip() or "default",
+                store_session=bool(payload.get("store_session", True)),
+                remember=bool(payload.get("remember", False)),
+                memory_text=str(payload.get("memory_text") or "").strip() or None,
+            ),
+        }
 
     def feedback(self, payload: dict[str, Any]) -> dict[str, Any]:
         memory_id = str(payload.get("memory_id") or "").strip()
@@ -124,8 +220,20 @@ def make_handler(api: MemoryApi):
                     self._send_json(200, api.ingest(payload))
                 elif path == "/ingest_batch":
                     self._send_json(200, api.ingest_batch(payload))
+                elif path == "/teach":
+                    self._send_json(200, api.teach(payload))
+                elif path == "/correct":
+                    self._send_json(200, api.correct(payload))
                 elif path == "/retrieve":
                     self._send_json(200, api.retrieve(payload))
+                elif path == "/ask":
+                    self._send_json(200, api.ask(payload))
+                elif path == "/sessions":
+                    self._send_json(200, api.sessions(payload))
+                elif path == "/session":
+                    self._send_json(200, api.create_session(payload))
+                elif path == "/session_history":
+                    self._send_json(200, api.session_history(payload))
                 elif path == "/feedback":
                     self._send_json(200, api.feedback(payload))
                 elif path == "/shutdown":
@@ -183,7 +291,20 @@ def main() -> None:
             {
                 "ok": True,
                 "url": f"http://{host}:{port}",
-                "endpoints": ["/health", "/stats", "/ingest", "/ingest_batch", "/retrieve", "/feedback"],
+                "endpoints": [
+                    "/health",
+                    "/stats",
+                    "/ingest",
+                    "/ingest_batch",
+                    "/teach",
+                    "/correct",
+                    "/retrieve",
+                    "/ask",
+                    "/session",
+                    "/sessions",
+                    "/session_history",
+                    "/feedback",
+                ],
             },
             indent=2,
         ),

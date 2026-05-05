@@ -158,6 +158,217 @@ class MemoryDB:
             for row in rows
         ]
 
+    def memory_ids_for_source(self, source: str) -> list[str]:
+        rows = self.conn.execute(
+            """
+            SELECT m.id
+            FROM memories m
+            JOIN memory_sources s ON s.memory_id = m.id
+            WHERE s.source=? AND m.deprecated=0
+            ORDER BY s.chunk_index ASC, m.created_at ASC
+            """,
+            (source,),
+        ).fetchall()
+        return [row["id"] for row in rows]
+
+    def create_session(
+        self,
+        agent_id: str = "default",
+        title: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        now = utc_now()
+        normalized_agent_id = str(agent_id or "default").strip() or "default"
+        sid = str(session_id or "").strip() or new_id("sess")
+        self.conn.execute(
+            """
+            INSERT INTO agent_sessions (id, agent_id, title, metadata, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                agent_id=excluded.agent_id,
+                title=COALESCE(excluded.title, agent_sessions.title),
+                metadata=excluded.metadata,
+                updated_at=excluded.updated_at
+            """,
+            (
+                sid,
+                normalized_agent_id,
+                title,
+                json.dumps(metadata or {}, separators=(",", ":")),
+                now,
+                now,
+            ),
+        )
+        self.conn.commit()
+        return {
+            "id": sid,
+            "agent_id": normalized_agent_id,
+            "title": title,
+            "metadata": metadata or {},
+            "created_at": now,
+            "updated_at": now,
+        }
+
+    def get_session(self, session_id: str) -> dict[str, Any] | None:
+        row = self.conn.execute("SELECT * FROM agent_sessions WHERE id=?", (session_id,)).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row["id"],
+            "agent_id": row["agent_id"],
+            "title": row["title"],
+            "metadata": json.loads(row["metadata"] or "{}"),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def ensure_session(
+        self,
+        session_id: str | None = None,
+        agent_id: str = "default",
+        title: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        sid = str(session_id or "").strip()
+        if sid:
+            existing = self.get_session(sid)
+            if existing is not None:
+                return existing
+            return self.create_session(agent_id=agent_id, title=title, metadata=metadata, session_id=sid)
+        return self.create_session(agent_id=agent_id, title=title, metadata=metadata)
+
+    def add_session_turn(
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        query: str | None = None,
+        answer: str | None = None,
+        confidence: float | None = None,
+        conflict: bool = False,
+        evidence_memory_ids: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if self.get_session(session_id) is None:
+            raise ValueError(f"unknown session_id: {session_id}")
+        turn_id = new_id("turn")
+        created_at = utc_now()
+        self.conn.execute(
+            """
+            INSERT INTO session_turns (
+                id, session_id, role, content, query, answer, confidence,
+                conflict, evidence_memory_ids, metadata, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                turn_id,
+                session_id,
+                str(role or "").strip().lower() or "event",
+                content,
+                query,
+                answer,
+                None if confidence is None else float(confidence),
+                1 if conflict else 0,
+                json.dumps(evidence_memory_ids or [], separators=(",", ":")),
+                json.dumps(metadata or {}, separators=(",", ":")),
+                created_at,
+            ),
+        )
+        self.conn.execute(
+            "UPDATE agent_sessions SET updated_at=? WHERE id=?",
+            (created_at, session_id),
+        )
+        self.conn.commit()
+        return {
+            "id": turn_id,
+            "session_id": session_id,
+            "role": str(role or "").strip().lower() or "event",
+            "created_at": created_at,
+        }
+
+    def session_history(self, session_id: str, limit: int = 50) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            """
+            SELECT *
+            FROM session_turns
+            WHERE session_id=?
+            ORDER BY created_at ASC
+            LIMIT ?
+            """,
+            (session_id, int(limit)),
+        ).fetchall()
+        return [self._session_turn_from_row(row) for row in rows]
+
+    def recent_session_turns(self, session_id: str, limit: int = 8) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            """
+            SELECT *
+            FROM session_turns
+            WHERE session_id=?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (session_id, int(limit)),
+        ).fetchall()
+        turns = [self._session_turn_from_row(row) for row in rows]
+        return list(reversed(turns))
+
+    def latest_assistant_evidence(self, session_id: str) -> list[str]:
+        rows = self.conn.execute(
+            """
+            SELECT evidence_memory_ids
+            FROM session_turns
+            WHERE session_id=? AND role='assistant'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (session_id,),
+        ).fetchall()
+        if not rows:
+            return []
+        return [str(item) for item in json.loads(rows[0]["evidence_memory_ids"] or "[]") if str(item or "").strip()]
+
+    def list_sessions(self, agent_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+        if agent_id:
+            rows = self.conn.execute(
+                """
+                SELECT s.*, COUNT(t.id) AS turn_count
+                FROM agent_sessions s
+                LEFT JOIN session_turns t ON t.session_id = s.id
+                WHERE s.agent_id=?
+                GROUP BY s.id
+                ORDER BY s.updated_at DESC
+                LIMIT ?
+                """,
+                (agent_id, int(limit)),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                """
+                SELECT s.*, COUNT(t.id) AS turn_count
+                FROM agent_sessions s
+                LEFT JOIN session_turns t ON t.session_id = s.id
+                GROUP BY s.id
+                ORDER BY s.updated_at DESC
+                LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "agent_id": row["agent_id"],
+                "title": row["title"],
+                "metadata": json.loads(row["metadata"] or "{}"),
+                "turn_count": int(row["turn_count"] or 0),
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        ]
+
     def add_retrieval_feedback(
         self,
         memory_id: str,
@@ -268,6 +479,81 @@ class MemoryDB:
             for row in rows
         ]
 
+    def feedback_summary_for_memories(self, memory_ids: list[str]) -> dict[str, dict[str, Any]]:
+        ids = [str(memory_id) for memory_id in memory_ids if str(memory_id or "").strip()]
+        if not ids:
+            return {}
+        placeholders = ",".join("?" for _ in ids)
+        rows = self.conn.execute(
+            f"""
+            SELECT memory_id, COUNT(*) AS count, AVG(rating) AS avg_rating,
+                   SUM(CASE WHEN rating > 0 THEN 1 ELSE 0 END) AS positive,
+                   SUM(CASE WHEN rating < 0 THEN 1 ELSE 0 END) AS negative
+            FROM retrieval_feedback
+            WHERE memory_id IN ({placeholders})
+            GROUP BY memory_id
+            """,
+            ids,
+        ).fetchall()
+        return {
+            row["memory_id"]: {
+                "count": int(row["count"] or 0),
+                "avg_rating": 0.0 if row["avg_rating"] is None else float(row["avg_rating"]),
+                "positive": int(row["positive"] or 0),
+                "negative": int(row["negative"] or 0),
+            }
+            for row in rows
+        }
+
+    def feedback_reliability_for_candidates(self, memory_ids: list[str]) -> dict[str, dict[str, dict[str, Any]]]:
+        ids = [str(memory_id) for memory_id in memory_ids if str(memory_id or "").strip()]
+        if not ids:
+            return {"domains": {}, "sources": {}}
+        placeholders = ",".join("?" for _ in ids)
+        domain_rows = self.conn.execute(
+            f"""
+            SELECT m.domain_id AS key, COUNT(f.id) AS count, AVG(f.rating) AS avg_rating
+            FROM retrieval_feedback f
+            JOIN memories m ON m.id = f.memory_id
+            WHERE m.domain_id IN (
+                SELECT DISTINCT domain_id
+                FROM memories
+                WHERE id IN ({placeholders}) AND domain_id IS NOT NULL
+            )
+            GROUP BY m.domain_id
+            """,
+            ids,
+        ).fetchall()
+        source_rows = self.conn.execute(
+            f"""
+            SELECT s.source AS key, COUNT(f.id) AS count, AVG(f.rating) AS avg_rating
+            FROM retrieval_feedback f
+            JOIN memory_sources s ON s.memory_id = f.memory_id
+            WHERE s.source IN (
+                SELECT DISTINCT source
+                FROM memory_sources
+                WHERE memory_id IN ({placeholders}) AND source IS NOT NULL
+            )
+            GROUP BY s.source
+            """,
+            ids,
+        ).fetchall()
+        return {
+            "domains": self._feedback_reliability_map(domain_rows),
+            "sources": self._feedback_reliability_map(source_rows),
+        }
+
+    @staticmethod
+    def _feedback_reliability_map(rows: list[sqlite3.Row]) -> dict[str, dict[str, Any]]:
+        return {
+            row["key"]: {
+                "count": int(row["count"] or 0),
+                "avg_rating": 0.0 if row["avg_rating"] is None else float(row["avg_rating"]),
+            }
+            for row in rows
+            if row["key"] is not None
+        }
+
     def list_domains(self) -> list[DomainState]:
         rows = self.conn.execute("SELECT * FROM domains ORDER BY memory_count DESC, updated_at DESC").fetchall()
         return [self._domain_from_row(row) for row in rows]
@@ -349,6 +635,17 @@ class MemoryDB:
         return [decode_vector(row["embedding"]) for row in rows]
 
     def add_relation(self, source: str, target: str, relation_type: str, weight: float = 1.0) -> None:
+        existing = self.conn.execute(
+            """
+            SELECT 1
+            FROM relations
+            WHERE source_memory_id=? AND target_memory_id=? AND relation_type=?
+            LIMIT 1
+            """,
+            (source, target, relation_type),
+        ).fetchone()
+        if existing is not None:
+            return
         self.conn.execute(
             """
             INSERT INTO relations (id, source_memory_id, target_memory_id, relation_type, weight, created_at)
@@ -357,6 +654,65 @@ class MemoryDB:
             (new_id("rel"), source, target, relation_type, float(weight), utc_now()),
         )
         self.conn.commit()
+
+    def supersession_summary_for_candidates(self, memory_ids: list[str]) -> dict[str, dict[str, Any]]:
+        ids = [str(memory_id) for memory_id in memory_ids if str(memory_id or "").strip()]
+        if not ids:
+            return {}
+        placeholders = ",".join("?" for _ in ids)
+        rows = self.conn.execute(
+            f"""
+            SELECT source_memory_id, target_memory_id, relation_type, weight
+            FROM relations
+            WHERE relation_type IN ('supersedes', 'corrects', 'updates')
+              AND (source_memory_id IN ({placeholders}) OR target_memory_id IN ({placeholders}))
+            """,
+            ids + ids,
+        ).fetchall()
+        summary: dict[str, dict[str, Any]] = {
+            memory_id: {
+                "outgoing_count": 0,
+                "incoming_count": 0,
+                "outgoing_weight": 0.0,
+                "incoming_weight": 0.0,
+                "relation_types": [],
+            }
+            for memory_id in ids
+        }
+        for row in rows:
+            source_id = row["source_memory_id"]
+            target_id = row["target_memory_id"]
+            relation_type = row["relation_type"]
+            weight = float(row["weight"] or 0.0)
+            if source_id in summary:
+                item = summary[source_id]
+                item["outgoing_count"] += 1
+                item["outgoing_weight"] += weight
+                item["relation_types"].append(relation_type)
+            if target_id in summary:
+                item = summary[target_id]
+                item["incoming_count"] += 1
+                item["incoming_weight"] += weight
+                item["relation_types"].append(relation_type)
+        return summary
+
+    def relation_counts(self) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            """
+            SELECT relation_type, COUNT(*) AS count, AVG(weight) AS avg_weight
+            FROM relations
+            GROUP BY relation_type
+            ORDER BY count DESC, relation_type
+            """
+        ).fetchall()
+        return [
+            {
+                "relation_type": row["relation_type"],
+                "count": int(row["count"] or 0),
+                "avg_weight": None if row["avg_weight"] is None else round(float(row["avg_weight"]), 4),
+            }
+            for row in rows
+        ]
 
     def add_contradiction(self, new_memory_id: str, old_memory_id: str, score: float) -> None:
         self.conn.execute(
@@ -413,13 +769,35 @@ class MemoryDB:
         domains = self.conn.execute("SELECT COUNT(*) FROM domains").fetchone()[0]
         contradictions = self.conn.execute("SELECT COUNT(*) FROM contradictions").fetchone()[0]
         feedback = self.conn.execute("SELECT COUNT(*) FROM retrieval_feedback").fetchone()[0]
+        relations = self.conn.execute("SELECT COUNT(*) FROM relations").fetchone()[0]
+        sessions = self.conn.execute("SELECT COUNT(*) FROM agent_sessions").fetchone()[0]
+        session_turns = self.conn.execute("SELECT COUNT(*) FROM session_turns").fetchone()[0]
         return {
             "memories": memories,
             "domains": domains,
             "contradictions": contradictions,
             "retrieval_feedback": feedback,
+            "relations": relations,
+            "sessions": sessions,
+            "session_turns": session_turns,
             "vector_dimensions": self.vector_dimensions(),
             "embedding_signature": self.get_runtime_state("embedding_signature"),
+        }
+
+    @staticmethod
+    def _session_turn_from_row(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "session_id": row["session_id"],
+            "role": row["role"],
+            "content": row["content"],
+            "query": row["query"],
+            "answer": row["answer"],
+            "confidence": None if row["confidence"] is None else float(row["confidence"]),
+            "conflict": bool(row["conflict"]),
+            "evidence_memory_ids": json.loads(row["evidence_memory_ids"] or "[]"),
+            "metadata": json.loads(row["metadata"] or "{}"),
+            "created_at": row["created_at"],
         }
 
     def _domain_from_row(self, row: sqlite3.Row) -> DomainState:

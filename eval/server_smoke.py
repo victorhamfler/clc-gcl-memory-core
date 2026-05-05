@@ -57,6 +57,44 @@ def main() -> None:
                 },
             )
             retrieved = post_json(f"{base}/retrieve", {"query": "persistent semantic memory retrieval", "top_k": 2})
+            asked = post_json(
+                f"{base}/ask",
+                {
+                    "query": "How should persistent memory retrieval work?",
+                    "top_k": 2,
+                    "agent_id": "server_smoke_agent",
+                },
+            )
+            asked_again = post_json(
+                f"{base}/ask",
+                {
+                    "query": "What should batch ingestion store?",
+                    "top_k": 2,
+                    "agent_id": "server_smoke_agent",
+                    "session_id": asked["session_id"],
+                },
+            )
+            history = post_json(f"{base}/session_history", {"session_id": asked["session_id"]})
+            sessions = post_json(f"{base}/sessions", {"agent_id": "server_smoke_agent"})
+            taught = post_json(
+                f"{base}/teach",
+                {
+                    "text": "Server smoke teaching memory: the agent should preserve API evidence ids.",
+                    "agent_id": "server_smoke_agent",
+                    "session_id": asked["session_id"],
+                },
+            )
+            corrected = post_json(
+                f"{base}/correct",
+                {
+                    "correction": "server smoke correction: API evidence ids must remain visible in assistant turns.",
+                    "target_memory_id": taught["memory"]["memory_id"],
+                    "target_query": "API evidence ids",
+                    "agent_id": "server_smoke_agent",
+                    "session_id": asked["session_id"],
+                    "top_k": 2,
+                },
+            )
             top = retrieved["results"][0]
             feedback = post_json(
                 f"{base}/feedback",
@@ -81,10 +119,23 @@ def main() -> None:
         assert batch["stored"] == 2
         assert batch["results"][0]["embedding_backend"] == "wsl_llama_cpp"
         assert retrieved["results"]
+        assert asked["ok"] is True
+        assert asked["evidence"]
+        assert asked["answer"]
+        assert asked_again["session_id"] == asked["session_id"]
+        assert len(history["turns"]) == 4
+        assert sessions["sessions"][0]["turn_count"] == 4
+        assert taught["ok"] is True
+        assert corrected["ok"] is True
+        assert corrected["relations"]
+        assert corrected["feedback"]
         assert feedback["ok"] is True
         assert feedback["feedback"]["label"] == "useful"
-        assert stats["memories"] == 3
-        assert stats["retrieval_feedback"] == 1
+        assert stats["memories"] == 5
+        assert stats["retrieval_feedback"] >= 2
+        assert stats["relations"] >= 1
+        assert stats["sessions"] == 1
+        assert stats["session_turns"] >= 6
         assert stats["vector_dimensions"] == [768]
         print(
             json.dumps(
@@ -93,6 +144,15 @@ def main() -> None:
                     "elapsed_sec": round(time.perf_counter() - start, 6),
                     "stats": stats,
                     "top_result": retrieved["results"][0]["memory_type"],
+                    "ask": {
+                        "answer": asked["answer"],
+                        "confidence": asked["confidence"],
+                        "session_id": asked["session_id"],
+                        "evidence_count": len(asked["evidence"]),
+                        "turn_count": len(history["turns"]),
+                    },
+                    "teach_memory_id": taught["memory"]["memory_id"],
+                    "correct_memory_id": corrected["correction_memory"]["memory_id"],
                     "feedback": feedback["feedback"],
                 },
                 indent=2,

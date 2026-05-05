@@ -66,9 +66,36 @@ class CSDLayer:
             "instead of the previous",
         )
         correction_hint = any(word in lower for word in correction_words)
+        contradiction_words = (
+            "must not",
+            "should not",
+            "do not",
+            "does not",
+            "not always",
+            "no longer",
+            "never",
+            "instead",
+            "rather than",
+            "not ",
+        )
+        contradiction_hint = any(word in lower for word in contradiction_words)
+        additive_words = (
+            "also",
+            "include examples",
+            "include an example",
+            "add ",
+            "additionally",
+            "clarification",
+            "correction note",
+        )
+        additive_hint = any(word in lower for word in additive_words)
         if not correction_hint or not recall.items:
             return 0.0
         best = max((item.score for item in recall.items if not domain_id or item.domain_id == domain_id), default=0.0)
-        if best < 0.78:
+        if not contradiction_hint:
             return 0.0
-        return clamp(0.25 + 0.75 * max(0.0, best))
+        if additive_hint and not any(word in lower for word in ("must not", "should not", "not always", "no longer", "never")):
+            return 0.0
+        if best < 0.62:
+            return 0.0
+        return clamp(0.35 + 0.65 * max(0.0, best))

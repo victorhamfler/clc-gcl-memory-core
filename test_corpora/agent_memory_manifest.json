@@ -1,0 +1,69 @@
+{
+  "name": "agent_memory_adaptation",
+  "description": "Synthetic agent memory corpus for testing instruction updates, stale memories, and adaptive retrieval.",
+  "versions": [
+    {
+      "id": "v1",
+      "path": "agent_memory_v1",
+      "role": "baseline"
+    },
+    {
+      "id": "v2",
+      "path": "agent_memory_v2",
+      "role": "current"
+    }
+  ],
+  "supersession_relations": [
+    {
+      "relation_type": "supersedes",
+      "source": "agent_memory_v2/updates_v2.md",
+      "targets": [
+        "agent_memory_v1/agent_profile.md",
+        "agent_memory_v1/conflicts_v1.md",
+        "agent_memory_v1/project_memory.md"
+      ],
+      "weight": 1.0,
+      "reason": "Version 2 updates replace selected v1 identity, repository policy, scheduling, and priority instructions."
+    },
+    {
+      "relation_type": "corrects",
+      "source": "agent_memory_v2/corrections_v2.md",
+      "targets": [
+        "agent_memory_v1/agent_profile.md",
+        "agent_memory_v1/conflicts_v1.md"
+      ],
+      "weight": 1.0,
+      "reason": "Correction document explicitly states current truth when v1 and v2 memories conflict."
+    },
+    {
+      "relation_type": "updates",
+      "source": "agent_memory_v2/user_preferences_v2.md",
+      "targets": [
+        "agent_memory_v1/user_profile.md",
+        "agent_memory_v1/tool_rules.md"
+      ],
+      "weight": 0.75,
+      "reason": "The newer user preference document restates current Git and GitHub behavior."
+    },
+    {
+      "relation_type": "updates",
+      "source": "agent_memory_v2/adaptation_protocol_v2.md",
+      "targets": [
+        "agent_memory_v1/project_memory.md",
+        "agent_memory_v1/task_playbook.md"
+      ],
+      "weight": 0.75,
+      "reason": "The newer adaptation protocol refines the earlier project and task memory."
+    },
+    {
+      "relation_type": "updates",
+      "source": "agent_memory_v2/new_tasks_v2.md",
+      "targets": [
+        "agent_memory_v1/task_playbook.md",
+        "agent_memory_v1/project_memory.md"
+      ],
+      "weight": 0.75,
+      "reason": "The newer task document makes adaptation experiments the current task direction."
+    }
+  ]
+}
