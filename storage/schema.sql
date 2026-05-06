@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS memories (
     curiosity REAL DEFAULT 0.0,
     focus REAL DEFAULT 0.0,
     clc_state TEXT,
+    namespace TEXT DEFAULT 'global',
     created_at TEXT,
     updated_at TEXT,
     last_recalled TEXT,
@@ -29,6 +30,7 @@ CREATE TABLE IF NOT EXISTS vectors (
 CREATE TABLE IF NOT EXISTS domains (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
+    namespace TEXT DEFAULT 'global',
     anchor_vector BLOB,
     effective_dimension REAL DEFAULT 1.0,
     drift_ema REAL DEFAULT 0.0,
@@ -139,6 +141,8 @@ CREATE TABLE IF NOT EXISTS runtime_state (
 );
 
 CREATE INDEX IF NOT EXISTS idx_memories_domain ON memories(domain_id);
+CREATE INDEX IF NOT EXISTS idx_memories_namespace ON memories(namespace);
+CREATE INDEX IF NOT EXISTS idx_domains_namespace_name ON domains(namespace, name);
 CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type);
 CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at);
 CREATE INDEX IF NOT EXISTS idx_events_memory ON events(memory_id);

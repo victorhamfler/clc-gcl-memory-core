@@ -4,7 +4,7 @@ import math
 
 from core.math_utils import EPS, clamp, cosine, dot, effective_dimension_from_vectors, normalize, norm, weighted_average
 from core.models import CLCDecision, DomainState, GCLUpdateResult, SignalPacket
-from storage.db import MemoryDB, new_id
+from storage.db import MemoryDB, new_id, normalize_namespace
 
 
 class GCLMemoryUpdater:
@@ -13,9 +13,28 @@ class GCLMemoryUpdater:
         self.base_update_rate = float(base_update_rate)
         self.beta = float(beta)
 
-    def apply(self, signal: SignalPacket, decision: CLCDecision, preferred_domain: DomainState | None) -> GCLUpdateResult:
+    def apply(
+        self,
+        signal: SignalPacket,
+        decision: CLCDecision,
+        preferred_domain: DomainState | None,
+        namespace: str = "global",
+    ) -> GCLUpdateResult:
+        memory_namespace = normalize_namespace(namespace)
+        if decision.state == "PROTECT" and preferred_domain is None:
+            domain = self._create_domain(signal, memory_namespace)
+            return GCLUpdateResult(
+                action="no_anchor_update",
+                domain_id=domain.id,
+                angular_drift=0.0,
+                radial_drift=0.0,
+                orthogonal_drift=0.0,
+                combined_drift=0.0,
+                curvature=0.0,
+                anchor_update_strength=0.0,
+            )
         if decision.state == "SPLIT_DOMAIN" or preferred_domain is None:
-            domain = self._create_domain(signal)
+            domain = self._create_domain(signal, memory_namespace)
             return GCLUpdateResult(
                 action="create_domain",
                 domain_id=domain.id,
@@ -63,9 +82,10 @@ class GCLMemoryUpdater:
             anchor_update_strength=update_rate,
         )
 
-    def _create_domain(self, signal: SignalPacket) -> DomainState:
+    def _create_domain(self, signal: SignalPacket, namespace: str = "global") -> DomainState:
+        memory_namespace = normalize_namespace(namespace)
         name = signal.domains[0] if signal.domains else "general"
-        existing = self.db.get_domain_by_name(name)
+        existing = self.db.get_domain_by_name(name, namespace=memory_namespace)
         if existing is not None and existing.anchor_vector:
             existing.memory_count += 1
             self.db.upsert_domain(existing)
@@ -73,6 +93,7 @@ class GCLMemoryUpdater:
         domain = DomainState(
             id=new_id("dom"),
             name=name,
+            namespace=memory_namespace,
             anchor_vector=normalize(signal.embedding),
             effective_dimension=1.0,
             stability=0.0,

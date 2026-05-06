@@ -12,9 +12,25 @@ from core.encoder import build_encoder
 from core.gcl_memory import GCLMemoryUpdater
 from core.models import MemoryNode
 from core.recall import RecallEngine
-from core.resolver import resolve_answer
+from core.resolver import compact_evidence, resolve_answer
 from core.symbolic import build_signal_packet
-from storage.db import MemoryDB, new_id, utc_now
+from storage.db import MemoryDB, new_id, normalize_namespace, utc_now
+
+
+DEFAULT_RETRIEVAL_WEIGHTS = {
+    "vector": 0.45,
+    "importance": 0.08,
+    "stability": 0.08,
+    "domain": 0.08,
+    "text": 0.10,
+    "source": 0.12,
+    "feedback": 0.08,
+    "domain_reliability": 0.03,
+    "source_reliability": 0.03,
+    "supersession": 0.10,
+    "relation_supersession": 0.10,
+    "summary_relation": 0.08,
+}
 
 
 class MemoryPipeline:
@@ -25,13 +41,16 @@ class MemoryPipeline:
         embedding_dim: int = 128,
         top_k: int = 8,
         embedding_config: dict[str, Any] | None = None,
+        retrieval_weights: dict[str, Any] | None = None,
+        clc_thresholds: dict[str, Any] | None = None,
     ):
         self.root = root
         self.db = MemoryDB(db_path)
         self.encoder = build_encoder(embedding_config, default_dim=embedding_dim)
+        self.retrieval_weights = self._normalize_retrieval_weights(retrieval_weights)
         self.recall_engine = RecallEngine(self.db, top_k=top_k)
         self.csd = CSDLayer(self.db)
-        self.controller = CLCController()
+        self.controller = CLCController(clc_thresholds)
         self.gcl = GCLMemoryUpdater(self.db)
         self.log_path = root / "logs" / "memory_events.jsonl"
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -42,17 +61,22 @@ class MemoryPipeline:
             close_encoder()
         self.db.close()
 
-    def ingest(self, text: str, source: str | None = None) -> dict[str, Any]:
+    def ingest(self, text: str, source: str | None = None, namespace: str | None = None) -> dict[str, Any]:
+        memory_namespace = normalize_namespace(namespace)
         embedding = self.encoder.embed(text)
         embedding_signature = self._ensure_embedding_signature(embedding)
         signal = build_signal_packet(text, embedding)
         self._apply_source_domain_hint(signal, source)
-        recall = self.recall_engine.recall(embedding)
+        recall = self.recall_engine.recall(
+            embedding,
+            namespaces=self._namespace_scope(memory_namespace),
+            domain_namespaces=[memory_namespace],
+        )
         diagnostics = self.csd.diagnose(signal, recall)
         signals = self.controller.compute_signals(signal, diagnostics, recall)
         decision = self.controller.decide(diagnostics, signals)
-        preferred_domain = self._preferred_domain(signal, recall.nearest_domain)
-        update = self.gcl.apply(signal, decision, preferred_domain)
+        preferred_domain = self._preferred_domain(signal, recall.nearest_domain, memory_namespace)
+        update = self.gcl.apply(signal, decision, preferred_domain, namespace=memory_namespace)
         assigned_domain = self.db.get_domain(update.domain_id)
         now = utc_now()
         memory = MemoryNode(
@@ -72,6 +96,7 @@ class MemoryPipeline:
             clc_state=decision.state,
             created_at=now,
             updated_at=now,
+            namespace=memory_namespace,
         )
         self.db.insert_memory(memory)
         store_contradiction_if_needed(self.db, memory.id, recall, diagnostics.contradiction)
@@ -92,6 +117,7 @@ class MemoryPipeline:
             "domain_id": update.domain_id,
             "domain_name": assigned_domain.name if assigned_domain else (signal.domains[0] if signal.domains else "general"),
             "memory_type": signal.memory_type,
+            "namespace": memory_namespace,
             "clc_state": decision.state,
             "decision_reason": decision.reason,
             "csd_score": round(diagnostics.csd_semantic, 6),
@@ -113,17 +139,27 @@ class MemoryPipeline:
         self._append_log(result)
         return result
 
-    def _preferred_domain(self, signal, nearest_domain):
+    def _preferred_domain(self, signal, nearest_domain, namespace: str | None = None):
+        memory_namespace = normalize_namespace(namespace)
         symbolic = signal.domains[0] if signal.domains else "general"
         if symbolic and symbolic != "general":
-            existing = self.db.get_domain_by_name(symbolic)
+            existing = self.db.get_domain_by_name(symbolic, namespace=memory_namespace)
             if existing is not None:
                 return existing
-            if nearest_domain is None or nearest_domain.name != symbolic:
+            if nearest_domain is None or nearest_domain.name != symbolic or nearest_domain.namespace != memory_namespace:
                 return None
+        if nearest_domain is not None and nearest_domain.namespace != memory_namespace:
+            return None
         return nearest_domain
 
-    def ingest_batch(self, texts: list[str], source: str | None = None, limit: int | None = None) -> dict[str, Any]:
+    def ingest_batch(
+        self,
+        texts: list[str],
+        source: str | None = None,
+        limit: int | None = None,
+        namespace: str | None = None,
+    ) -> dict[str, Any]:
+        memory_namespace = normalize_namespace(namespace)
         cleaned = [str(text or "").strip() for text in texts if str(text or "").strip()]
         if limit is not None:
             cleaned = cleaned[: max(0, int(limit))]
@@ -132,18 +168,19 @@ class MemoryPipeline:
         skipped: list[dict[str, Any]] = []
         for idx, text in enumerate(cleaned):
             try:
-                if self.db.memory_exists_text(text):
+                if self.db.memory_exists_text(text, namespace=memory_namespace):
                     skipped.append({"batch_index": idx, "reason": "duplicate_exact_text", "text_preview": text[:160]})
                     continue
-                item = self.ingest(text, source=source)
+                item = self.ingest(text, source=source, namespace=memory_namespace)
                 item["batch_index"] = idx
                 item["source"] = source
-                self.db.set_memory_source(item["memory_id"], source, idx)
+                self.db.set_memory_source(item["memory_id"], source, idx, metadata={"namespace": memory_namespace})
                 results.append(item)
             except Exception as exc:
                 errors.append({"batch_index": idx, "error": str(exc), "text_preview": text[:160]})
         summary = {
             "source": source,
+            "namespace": memory_namespace,
             "requested": len(texts),
             "accepted": len(cleaned),
             "stored": len(results),
@@ -166,16 +203,22 @@ class MemoryPipeline:
         )
         return summary
 
-    def retrieve(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
+    def retrieve(self, query: str, top_k: int = 5, namespace: str | None = None, include_global: bool = True) -> list[dict[str, Any]]:
+        memory_namespace = normalize_namespace(namespace)
         embedding = self.encoder.embed(query)
         self._ensure_embedding_signature(embedding)
         candidate_k = max(int(top_k), 50)
-        items = self.recall_engine.index.search(embedding, top_k=candidate_k)
+        items = self.recall_engine.index.search(
+            embedding,
+            top_k=candidate_k,
+            namespaces=self._namespace_scope(memory_namespace, include_global=include_global),
+        )
         query_l = str(query or "").lower()
         candidate_ids = [item.memory_id for item in items]
         feedback_by_memory = self.db.feedback_summary_for_memories(candidate_ids)
         reliability = self.db.feedback_reliability_for_candidates(candidate_ids)
         supersession_relations = self.db.supersession_summary_for_candidates(candidate_ids)
+        summary_relations = self.db.summary_relation_summary_for_candidates(candidate_ids)
         source_info_by_memory = {
             item.memory_id: self.db.get_memory_source(item.memory_id)
             for item in items
@@ -199,18 +242,26 @@ class MemoryPipeline:
                 query_l,
                 supersession_relations.get(item.memory_id, {}),
             )
+            summary_relation_score = self._summary_relation_score(
+                query_l,
+                item.text,
+                summary_relations.get(item.memory_id, {}),
+            )
             supersession_score = max(-1.0, min(1.0, heuristic_supersession_score + relation_supersession_score))
+            w = self.retrieval_weights
             score = (
-                0.45 * item.score
-                + 0.08 * item.importance
-                + 0.08 * item.stability
-                + 0.08 * domain_match
-                + 0.10 * text_match
-                + 0.12 * source_match
-                + 0.08 * feedback_score
-                + 0.03 * domain_reliability
-                + 0.03 * source_reliability
-                + 0.10 * supersession_score
+                w["vector"] * item.score
+                + w["importance"] * item.importance
+                + w["stability"] * item.stability
+                + w["domain"] * domain_match
+                + w["text"] * text_match
+                + w["source"] * source_match
+                + w["feedback"] * feedback_score
+                + w["domain_reliability"] * domain_reliability
+                + w["source_reliability"] * source_reliability
+                + w["supersession"] * heuristic_supersession_score
+                + w["relation_supersession"] * relation_supersession_score
+                + w["summary_relation"] * summary_relation_score
             )
             out.append(
                 {
@@ -220,6 +271,7 @@ class MemoryPipeline:
                     "source": source,
                     "chunk_index": source_info["chunk_index"] if source_info else None,
                     "memory_type": item.memory_type,
+                    "namespace": item.namespace,
                     "score": round(score, 6),
                     "cosine": round(item.score, 6),
                     "importance": round(item.importance, 6),
@@ -231,6 +283,7 @@ class MemoryPipeline:
                     "source_reliability": round(source_reliability, 6),
                     "supersession_score": round(supersession_score, 6),
                     "relation_supersession_score": round(relation_supersession_score, 6),
+                    "summary_relation_score": round(summary_relation_score, 6),
                     "text": item.text,
                 }
             )
@@ -246,14 +299,35 @@ class MemoryPipeline:
         store_session: bool = False,
         remember: bool = False,
         memory_text: str | None = None,
+        namespace: str | None = None,
+        include_global: bool = True,
     ) -> dict[str, Any]:
+        memory_namespace = normalize_namespace(namespace)
         session_context = self._session_context(session_id, query=query)
         retrieval_query = self._session_retrieval_query(query, session_context)
         retrieval_top_k = max(int(top_k), 20) if session_context else int(top_k)
-        results = self.retrieve(retrieval_query, top_k=retrieval_top_k)
+        retrieval_pool = self.retrieve(
+            retrieval_query,
+            top_k=max(retrieval_top_k, 20),
+            namespace=memory_namespace,
+            include_global=include_global,
+        )
+        results = retrieval_pool[:retrieval_top_k]
         if session_context:
             results = self._apply_session_evidence_boost(results, session_context)[: max(1, int(top_k))]
+        else:
+            results = results[: max(1, int(top_k))]
         resolved = resolve_answer(query, results)
+        source_context = self._source_diverse_context(retrieval_pool, results, limit=max(1, int(top_k)))
+        source_context = self._with_summary_source_context(source_context, results, limit=max(1, int(top_k)))
+        stale_context = self._stale_companion_context(resolved["evidence"], resolved["raw_results"])
+        resolved["source_context"] = source_context
+        if stale_context:
+            resolved["stale_context"] = stale_context
+            if not resolved["stale"] and resolved["conflict"]:
+                resolved["answer"] = self._append_stale_context_notice(resolved["answer"])
+        else:
+            resolved["stale_context"] = []
         session = None
         user_turn = None
         assistant_turn = None
@@ -292,7 +366,20 @@ class MemoryPipeline:
                     "session_context_used": bool(session_context),
                     "session_context": session_context,
                     "current_count": len(resolved["current"]),
+                    "summary_count": len(resolved.get("summary", [])),
                     "stale_count": len(resolved["stale"]),
+                    "source_context_count": len(source_context),
+                    "source_context_memory_ids": [
+                        item.get("memory_id")
+                        for item in source_context
+                        if item.get("memory_id")
+                    ],
+                    "stale_context_count": len(stale_context),
+                    "stale_context_memory_ids": [
+                        item.get("memory_id")
+                        for item in stale_context
+                        if item.get("memory_id")
+                    ],
                     "disputed_count": len(resolved["disputed"]),
                 },
             )
@@ -305,12 +392,17 @@ class MemoryPipeline:
                     f"Answer: {resolved['answer']}\n"
                     f"Evidence memory ids: {', '.join(evidence_memory_ids)}"
                 )
-            durable_memory = self.ingest(durable_text, source=f"session:{session['id']}" if session else "session")
+            durable_namespace = f"session:{session['id']}" if session else memory_namespace
+            durable_memory = self.ingest(
+                durable_text,
+                source=f"session:{session['id']}" if session else "session",
+                namespace=durable_namespace,
+            )
             self.db.set_memory_source(
                 durable_memory["memory_id"],
                 f"session:{session['id']}" if session else "session",
                 0,
-                metadata={"remembered_from_ask": True, "query": query},
+                metadata={"remembered_from_ask": True, "query": query, "namespace": durable_namespace},
             )
         return {
             "query": query,
@@ -319,6 +411,7 @@ class MemoryPipeline:
             "session_context": session_context,
             "session_id": session["id"] if session else None,
             "agent_id": session["agent_id"] if session else agent_id,
+            "namespace": memory_namespace,
             "user_turn_id": user_turn["id"] if user_turn else None,
             "assistant_turn_id": assistant_turn["id"] if assistant_turn else None,
             "answer": resolved["answer"],
@@ -326,9 +419,12 @@ class MemoryPipeline:
             "conflict": resolved["conflict"],
             "durable_memory": durable_memory,
             "evidence": resolved["evidence"],
+            "source_context": resolved["source_context"],
+            "summary": resolved.get("summary", []),
             "current": resolved["current"],
             "historical": resolved["historical"],
             "stale": resolved["stale"],
+            "stale_context": resolved["stale_context"],
             "disputed": resolved["disputed"],
             "raw_results": resolved["raw_results"],
         }
@@ -341,19 +437,21 @@ class MemoryPipeline:
         agent_id: str = "default",
         store_session: bool = True,
         metadata: dict[str, Any] | None = None,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
+        memory_namespace = normalize_namespace(namespace)
         cleaned = str(text or "").strip()
         if not cleaned:
             raise ValueError("teach text is required")
         session = None
         user_turn = None
         memory_source = source or f"teach:{agent_id}"
-        memory = self.ingest(cleaned, source=memory_source)
+        memory = self.ingest(cleaned, source=memory_source, namespace=memory_namespace)
         self.db.set_memory_source(
             memory["memory_id"],
             memory_source,
             0,
-            metadata={"agent_id": agent_id, "session_id": session_id, **(metadata or {})},
+            metadata={"agent_id": agent_id, "session_id": session_id, "namespace": memory_namespace, **(metadata or {})},
         )
         if store_session or session_id:
             session = self.db.ensure_session(
@@ -379,6 +477,7 @@ class MemoryPipeline:
             "mode": "teach",
             "session_id": session["id"] if session else None,
             "agent_id": session["agent_id"] if session else agent_id,
+            "namespace": memory_namespace,
             "turn_id": user_turn["id"] if user_turn else None,
             "memory": memory,
         }
@@ -397,16 +496,24 @@ class MemoryPipeline:
         stale_rating: float = -0.75,
         relation_type: str = "corrects",
         metadata: dict[str, Any] | None = None,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
+        memory_namespace = normalize_namespace(namespace)
         cleaned = str(correction or "").strip()
         if not cleaned:
             raise ValueError("correction text is required")
-        target_ids = self._correction_targets(target_memory_ids or [], target_query, top_k, session_id=session_id)
+        target_ids = self._correction_targets(
+            target_memory_ids or [],
+            target_query,
+            top_k,
+            session_id=session_id,
+            namespace=memory_namespace,
+        )
         correction_text = cleaned if cleaned.lower().startswith("correction:") else f"Correction: {cleaned}"
         memory_source = source or f"correction:{agent_id}"
         session = None
         turn = None
-        correction_memory = self.ingest(correction_text, source=memory_source)
+        correction_memory = self.ingest(correction_text, source=memory_source, namespace=memory_namespace)
         self.db.set_memory_source(
             correction_memory["memory_id"],
             memory_source,
@@ -416,6 +523,7 @@ class MemoryPipeline:
                 "session_id": session_id,
                 "target_memory_ids": target_ids,
                 "target_query": target_query,
+                "namespace": memory_namespace,
                 **(metadata or {}),
             },
         )
@@ -438,6 +546,7 @@ class MemoryPipeline:
                         "agent_id": agent_id,
                         "session_id": session_id,
                         "correction_memory_id": correction_memory["memory_id"],
+                        "namespace": memory_namespace,
                         **(metadata or {}),
                     },
                 )
@@ -473,11 +582,13 @@ class MemoryPipeline:
                 "session_id": session["id"] if session else session_id,
                 "target_memory_ids": target_ids,
                 "relation_type": relation_type,
+                "namespace": memory_namespace,
             },
         )
         return {
             "ok": True,
             "mode": "correct",
+            "namespace": memory_namespace,
             "session_id": session["id"] if session else None,
             "agent_id": session["agent_id"] if session else agent_id,
             "turn_id": turn["id"] if turn else None,
@@ -493,6 +604,7 @@ class MemoryPipeline:
         target_query: str | None,
         top_k: int,
         session_id: str | None = None,
+        namespace: str | None = None,
     ) -> list[str]:
         out: list[str] = []
         for memory_id in target_memory_ids:
@@ -504,14 +616,23 @@ class MemoryPipeline:
             for mid in self.db.latest_assistant_evidence(session_id):
                 if mid and mid not in out:
                     out.append(mid)
+        if out:
+            return out
         if query:
             context = self._session_context(session_id, query=query)
             retrieval_query = self._session_retrieval_query(query, context)
-            for item in self.retrieve(retrieval_query, top_k=max(1, int(top_k))):
+            for item in self.retrieve(retrieval_query, top_k=max(1, int(top_k)), namespace=namespace):
                 mid = str(item.get("memory_id") or "").strip()
                 if mid and mid not in out:
                     out.append(mid)
         return out
+
+    @staticmethod
+    def _namespace_scope(namespace: str | None, include_global: bool = True) -> list[str]:
+        normalized = normalize_namespace(namespace)
+        if include_global and normalized != "global":
+            return ["global", normalized]
+        return [normalized]
 
     def _session_context(
         self,
@@ -923,6 +1044,221 @@ class MemoryPipeline:
         return max(-1.0, min(1.0, outgoing_score - incoming_score))
 
     @staticmethod
+    def _summary_relation_score(query: str, text: str, summary: dict[str, Any]) -> float:
+        outgoing = float(summary.get("outgoing_weight") or 0.0)
+        incoming = float(summary.get("incoming_weight") or 0.0)
+        if outgoing <= 0.0 and incoming <= 0.0:
+            return 0.0
+        broad_intent = any(
+            term in query
+            for term in (
+                "summary",
+                "summarize",
+                "overview",
+                "main points",
+                "main ideas",
+                "all",
+                "what are",
+                "what should",
+                "general",
+                "overall",
+            )
+        )
+        text_l = str(text or "").lower()
+        summary_text = text_l.startswith("consolidated summary:")
+        if outgoing > 0.0 and summary_text:
+            return min(1.0, outgoing / 4.0) if broad_intent else min(0.35, outgoing / 10.0)
+        if incoming > 0.0:
+            return 0.10 if broad_intent else 0.0
+        return 0.0
+
+    def _stale_companion_context(
+        self,
+        evidence: list[dict[str, Any]],
+        raw_results: list[dict[str, Any]],
+        limit: int = 3,
+    ) -> list[dict[str, Any]]:
+        evidence_ids = {
+            str(item.get("memory_id"))
+            for item in evidence
+            if item.get("memory_id")
+        }
+        source_ids = [
+            str(item.get("memory_id"))
+            for item in evidence
+            if item.get("memory_id") and item.get("memory_state") == "current"
+        ]
+        if not source_ids:
+            source_ids = [
+                str(item.get("memory_id"))
+                for item in evidence
+                if item.get("memory_id")
+                and (
+                    str(item.get("text_preview") or "").lower().startswith("correction:")
+                    or float(item.get("relation_supersession_score") or 0.0) > 0.0
+                    or float(item.get("supersession_score") or 0.0) > 0.0
+                )
+            ]
+        if not source_ids:
+            return []
+
+        raw_by_id = {
+            str(item.get("memory_id")): item
+            for item in raw_results
+            if item.get("memory_id")
+        }
+        companions = self.db.superseded_memories_for_sources(source_ids, limit=limit)
+        companion_ids = [
+            item["memory_id"]
+            for item in companions
+            if item.get("memory_id") and item["memory_id"] not in evidence_ids
+        ]
+        feedback_by_memory = self.db.feedback_summary_for_memories(companion_ids)
+        out: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in companions:
+            memory_id = str(item.get("memory_id") or "")
+            if not memory_id or memory_id in evidence_ids or memory_id in seen:
+                continue
+            seen.add(memory_id)
+            feedback = feedback_by_memory.get(memory_id, {})
+            raw = raw_by_id.get(memory_id, {})
+            relation_weight = max(0.0, float(item.get("relation_weight") or 0.0))
+            row = {
+                "memory_id": memory_id,
+                "rank": None,
+                "memory_state": "stale",
+                "score": raw.get("score", round(-relation_weight, 6)),
+                "source": item.get("source"),
+                "chunk_index": item.get("chunk_index"),
+                "domain_name": item.get("domain_name"),
+                "memory_type": item.get("memory_type"),
+                "feedback_score": round(self._feedback_score(feedback), 6),
+                "supersession_score": raw.get("supersession_score", round(-relation_weight, 6)),
+                "relation_supersession_score": raw.get("relation_supersession_score", round(-relation_weight, 6)),
+                "current_memory_id": item.get("current_memory_id"),
+                "relation_type": item.get("relation_type"),
+                "relation_weight": round(relation_weight, 6),
+                "text": item.get("text"),
+            }
+            compact = compact_evidence(row)
+            compact.update(
+                {
+                    "current_memory_id": row["current_memory_id"],
+                    "relation_type": row["relation_type"],
+                    "relation_weight": row["relation_weight"],
+                }
+            )
+            out.append(compact)
+            if len(out) >= max(1, int(limit)):
+                break
+        return out
+
+    def _with_summary_source_context(
+        self,
+        source_context: list[dict[str, Any]],
+        primary_results: list[dict[str, Any]],
+        limit: int = 4,
+    ) -> list[dict[str, Any]]:
+        summary_ids = [
+            str(item.get("memory_id"))
+            for item in primary_results
+            if item.get("memory_id") and float(item.get("summary_relation_score") or 0.0) > 0.0
+        ]
+        if not summary_ids:
+            return source_context
+        existing = {
+            str(item.get("memory_id"))
+            for item in [*source_context, *primary_results]
+            if item.get("memory_id")
+        }
+        additions = []
+        for row in self.db.summarized_memories_for_sources(summary_ids, limit=max(1, int(limit))):
+            memory_id = str(row.get("memory_id") or "")
+            if not memory_id or memory_id in existing:
+                continue
+            existing.add(memory_id)
+            additions.append(
+                {
+                    "memory_id": memory_id,
+                    "rank": None,
+                    "memory_state": "source",
+                    "score": round(float(row.get("relation_weight") or 0.0), 6),
+                    "source": row.get("source"),
+                    "chunk_index": row.get("chunk_index"),
+                    "domain_name": row.get("domain_name"),
+                    "memory_type": row.get("memory_type"),
+                    "feedback_score": 0.0,
+                    "supersession_score": 0.0,
+                    "relation_supersession_score": 0.0,
+                    "summary_relation_score": round(float(row.get("relation_weight") or 0.0), 6),
+                    "summary_memory_id": row.get("summary_memory_id"),
+                    "relation_type": row.get("relation_type"),
+                    "text_preview": str(row.get("text") or "")[:320],
+                }
+            )
+            if len(additions) >= max(1, int(limit)):
+                break
+        return [*source_context, *additions][: max(1, int(limit))]
+
+    @staticmethod
+    def _append_stale_context_notice(answer: str) -> str:
+        notice = " Superseded context is available separately and should not override the current answer."
+        if "superseded context is available" in answer.lower():
+            return answer
+        return f"{answer.rstrip()}{notice}"
+
+    @classmethod
+    def _source_diverse_context(
+        cls,
+        retrieval_pool: list[dict[str, Any]],
+        primary_results: list[dict[str, Any]],
+        limit: int = 4,
+    ) -> list[dict[str, Any]]:
+        if not retrieval_pool or limit <= 0:
+            return []
+        primary_ids = {
+            str(item.get("memory_id"))
+            for item in primary_results
+            if item.get("memory_id")
+        }
+        used_sources: set[str] = set()
+        for item in primary_results:
+            source_key = cls._source_diversity_key(item.get("source"))
+            if source_key:
+                used_sources.add(source_key)
+
+        top_score = float(retrieval_pool[0].get("score") or 0.0)
+        floor = top_score * 0.40 if top_score > 0.0 else top_score - 0.25
+        out: list[dict[str, Any]] = []
+        for row in retrieval_pool:
+            if len(out) >= max(1, int(limit)):
+                break
+            memory_id = str(row.get("memory_id") or "")
+            if not memory_id or memory_id in primary_ids:
+                continue
+            source_key = cls._source_diversity_key(row.get("source"))
+            if not source_key or source_key in used_sources:
+                continue
+            if float(row.get("score") or 0.0) < floor:
+                continue
+            used_sources.add(source_key)
+            compact = compact_evidence(row)
+            compact["score"] = row.get("score")
+            compact["text_match_score"] = row.get("text_match_score")
+            out.append(compact)
+        return out
+
+    @staticmethod
+    def _source_diversity_key(source: str | None) -> str:
+        if not source:
+            return ""
+        normalized = str(source).replace("\\", "/").strip().lower()
+        if not normalized:
+            return ""
+        return normalized.rsplit("/", 1)[-1] or normalized
+
+    @staticmethod
     def _source_version(source: str | None) -> tuple[str | None, int]:
         if not source:
             return None, 0
@@ -940,6 +1276,18 @@ class MemoryPipeline:
     def _tokens(text: str) -> set[str]:
         cleaned = "".join(ch.lower() if ch.isalnum() else " " for ch in str(text or ""))
         return {token for token in cleaned.split() if len(token) > 1}
+
+    @staticmethod
+    def _normalize_retrieval_weights(weights: dict[str, Any] | None) -> dict[str, float]:
+        normalized = dict(DEFAULT_RETRIEVAL_WEIGHTS)
+        for key, value in (weights or {}).items():
+            if key not in normalized:
+                continue
+            try:
+                normalized[key] = float(value)
+            except (TypeError, ValueError):
+                continue
+        return normalized
 
     def _append_log(self, payload: dict[str, Any]) -> None:
         with self.log_path.open("a", encoding="utf-8") as f:

@@ -36,6 +36,8 @@ def create_pipeline(root: Path, db_path: Path | None = None) -> MemoryPipeline:
         embedding_dim=int(config.get("embedding_dim") or 128),
         top_k=int(config.get("top_k") or 8),
         embedding_config=config.get("embedding"),
+        retrieval_weights=config.get("retrieval_weights"),
+        clc_thresholds=config.get("thresholds"),
     )
 
 
@@ -45,6 +47,7 @@ def pipeline_stats(pipeline: MemoryPipeline) -> dict[str, Any]:
         {
             "id": d.id,
             "name": d.name,
+            "namespace": d.namespace,
             "memory_count": d.memory_count,
             "effective_dimension": round(d.effective_dimension, 4),
             "drift_ema": round(d.drift_ema, 6),
@@ -57,7 +60,9 @@ def pipeline_stats(pipeline: MemoryPipeline) -> dict[str, Any]:
         "database": str(pipeline.db.db_path),
         **stats,
         "domains_detail": domains,
+        "retrieval_weights": pipeline.retrieval_weights,
         "sources_detail": pipeline.db.source_counts(),
+        "namespaces_detail": pipeline.db.namespace_counts(),
         "feedback_detail": pipeline.db.feedback_counts(),
         "relations_detail": pipeline.db.relation_counts(),
         "sessions_detail": pipeline.db.list_sessions(limit=10),

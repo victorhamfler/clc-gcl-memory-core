@@ -19,6 +19,25 @@ def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:16]}"
 
 
+def normalize_namespace(namespace: str | None) -> str:
+    cleaned = str(namespace or "").strip()
+    return cleaned or "global"
+
+
+def normalize_namespaces(namespaces: list[str] | tuple[str, ...] | set[str] | None) -> list[str] | None:
+    if namespaces is None:
+        return None
+    out = []
+    seen = set()
+    for namespace in namespaces:
+        normalized = normalize_namespace(namespace)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        out.append(normalized)
+    return out or ["global"]
+
+
 def encode_vector(vec: list[float] | None) -> bytes | None:
     if vec is None:
         return None
@@ -46,21 +65,41 @@ class MemoryDB:
 
     def init_schema(self, schema_path: str | os.PathLike[str]) -> None:
         sql = Path(schema_path).read_text(encoding="utf-8")
-        self.conn.executescript(sql)
+        try:
+            self.conn.executescript(sql)
+        except sqlite3.OperationalError as exc:
+            if "no such column: namespace" not in str(exc):
+                raise
+            self._ensure_migrations()
+            self.conn.executescript(sql)
+        self._ensure_migrations()
         self.conn.commit()
+
+    def _ensure_migrations(self) -> None:
+        columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(memories)").fetchall()}
+        if "namespace" not in columns:
+            self.conn.execute("ALTER TABLE memories ADD COLUMN namespace TEXT DEFAULT 'global'")
+            self.conn.execute("UPDATE memories SET namespace='global' WHERE namespace IS NULL OR namespace=''")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_namespace ON memories(namespace)")
+        domain_columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(domains)").fetchall()}
+        if "namespace" not in domain_columns:
+            self.conn.execute("ALTER TABLE domains ADD COLUMN namespace TEXT DEFAULT 'global'")
+            self.conn.execute("UPDATE domains SET namespace='global' WHERE namespace IS NULL OR namespace=''")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_domains_namespace_name ON domains(namespace, name)")
 
     def upsert_domain(self, domain: DomainState) -> None:
         now = utc_now()
         self.conn.execute(
             """
             INSERT INTO domains (
-                id, name, anchor_vector, effective_dimension, drift_ema,
+                id, name, namespace, anchor_vector, effective_dimension, drift_ema,
                 drift_var, curvature_ema, stability, memory_count,
                 previous_update_direction, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 name=excluded.name,
+                namespace=excluded.namespace,
                 anchor_vector=excluded.anchor_vector,
                 effective_dimension=excluded.effective_dimension,
                 drift_ema=excluded.drift_ema,
@@ -74,6 +113,7 @@ class MemoryDB:
             (
                 domain.id,
                 domain.name,
+                normalize_namespace(domain.namespace),
                 encode_vector(domain.anchor_vector),
                 domain.effective_dimension,
                 domain.drift_ema,
@@ -92,14 +132,31 @@ class MemoryDB:
         row = self.conn.execute("SELECT * FROM domains WHERE id=?", (domain_id,)).fetchone()
         return self._domain_from_row(row) if row else None
 
-    def get_domain_by_name(self, name: str) -> DomainState | None:
-        row = self.conn.execute("SELECT * FROM domains WHERE name=?", (name,)).fetchone()
+    def get_domain_by_name(self, name: str, namespace: str | None = None) -> DomainState | None:
+        normalized_namespace = normalize_namespace(namespace)
+        row = self.conn.execute(
+            """
+            SELECT *
+            FROM domains
+            WHERE name=? AND COALESCE(namespace, 'global')=?
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """,
+            (name, normalized_namespace),
+        ).fetchone()
         return self._domain_from_row(row) if row else None
 
-    def memory_exists_text(self, text: str) -> bool:
+    def memory_exists_text(self, text: str, namespace: str | None = None) -> bool:
+        normalized_namespace = normalize_namespace(namespace)
         row = self.conn.execute(
-            "SELECT 1 FROM memories WHERE text=? AND deprecated=0 LIMIT 1",
-            (str(text or "").strip(),),
+            """
+            SELECT 1
+            FROM memories
+            WHERE text=? AND deprecated=0
+              AND (? IS NULL OR namespace=?)
+            LIMIT 1
+            """,
+            (str(text or "").strip(), normalized_namespace, normalized_namespace),
         ).fetchone()
         return row is not None
 
@@ -554,20 +611,31 @@ class MemoryDB:
             if row["key"] is not None
         }
 
-    def list_domains(self) -> list[DomainState]:
-        rows = self.conn.execute("SELECT * FROM domains ORDER BY memory_count DESC, updated_at DESC").fetchall()
+    def list_domains(self, namespaces: list[str] | None = None) -> list[DomainState]:
+        normalized_namespaces = normalize_namespaces(namespaces)
+        params: list[Any] = []
+        where = ""
+        if normalized_namespaces is not None:
+            placeholders = ",".join("?" for _ in normalized_namespaces)
+            where = f"WHERE COALESCE(namespace, 'global') IN ({placeholders})"
+            params.extend(normalized_namespaces)
+        rows = self.conn.execute(
+            f"SELECT * FROM domains {where} ORDER BY memory_count DESC, updated_at DESC",
+            params,
+        ).fetchall()
         return [self._domain_from_row(row) for row in rows]
 
     def insert_memory(self, memory: MemoryNode) -> None:
+        namespace = normalize_namespace(memory.namespace)
         self.conn.execute(
             """
             INSERT INTO memories (
                 id, text, summary, domain_id, memory_type, importance,
                 stability, confidence, csd_score, surprise, recall_score,
-                curiosity, focus, clc_state, created_at, updated_at,
+                curiosity, focus, clc_state, namespace, created_at, updated_at,
                 deprecated
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 memory.id,
@@ -584,6 +652,7 @@ class MemoryDB:
                 memory.curiosity,
                 memory.focus,
                 memory.clc_state,
+                namespace,
                 memory.created_at,
                 memory.updated_at,
                 memory.deprecated,
@@ -595,16 +664,30 @@ class MemoryDB:
         )
         self.conn.commit()
 
-    def list_memory_vectors(self, include_deprecated: bool = False) -> list[dict[str, Any]]:
-        where = "" if include_deprecated else "WHERE m.deprecated=0"
+    def list_memory_vectors(
+        self,
+        include_deprecated: bool = False,
+        namespaces: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        clauses = []
+        params: list[Any] = []
+        if not include_deprecated:
+            clauses.append("m.deprecated=0")
+        normalized_namespaces = normalize_namespaces(namespaces)
+        if normalized_namespaces is not None:
+            placeholders = ",".join("?" for _ in normalized_namespaces)
+            clauses.append(f"COALESCE(m.namespace, 'global') IN ({placeholders})")
+            params.extend(normalized_namespaces)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = self.conn.execute(
             f"""
             SELECT m.id, m.text, m.domain_id, m.memory_type, m.importance,
-                   m.stability, m.deprecated, v.embedding
+                   m.stability, COALESCE(m.namespace, 'global') AS namespace, m.deprecated, v.embedding
             FROM memories m
             JOIN vectors v ON v.memory_id = m.id
             {where}
-            """
+            """,
+            params,
         ).fetchall()
         return [
             {
@@ -614,6 +697,7 @@ class MemoryDB:
                 "memory_type": row["memory_type"],
                 "importance": float(row["importance"] or 0.0),
                 "stability": float(row["stability"] or 0.0),
+                "namespace": normalize_namespace(row["namespace"]),
                 "deprecated": bool(row["deprecated"]),
                 "embedding": decode_vector(row["embedding"]),
             }
@@ -695,6 +779,156 @@ class MemoryDB:
                 item["incoming_weight"] += weight
                 item["relation_types"].append(relation_type)
         return summary
+
+    def summary_relation_summary_for_candidates(self, memory_ids: list[str]) -> dict[str, dict[str, Any]]:
+        return self._relation_summary_for_candidates(memory_ids, ("summarizes",))
+
+    def _relation_summary_for_candidates(
+        self,
+        memory_ids: list[str],
+        relation_types: tuple[str, ...],
+    ) -> dict[str, dict[str, Any]]:
+        ids = [str(memory_id) for memory_id in memory_ids if str(memory_id or "").strip()]
+        types = [str(relation_type) for relation_type in relation_types if str(relation_type or "").strip()]
+        if not ids or not types:
+            return {}
+        id_placeholders = ",".join("?" for _ in ids)
+        type_placeholders = ",".join("?" for _ in types)
+        rows = self.conn.execute(
+            f"""
+            SELECT source_memory_id, target_memory_id, relation_type, weight
+            FROM relations
+            WHERE relation_type IN ({type_placeholders})
+              AND (source_memory_id IN ({id_placeholders}) OR target_memory_id IN ({id_placeholders}))
+            """,
+            types + ids + ids,
+        ).fetchall()
+        summary: dict[str, dict[str, Any]] = {
+            memory_id: {
+                "outgoing_count": 0,
+                "incoming_count": 0,
+                "outgoing_weight": 0.0,
+                "incoming_weight": 0.0,
+                "relation_types": [],
+            }
+            for memory_id in ids
+        }
+        for row in rows:
+            source_id = row["source_memory_id"]
+            target_id = row["target_memory_id"]
+            relation_type = row["relation_type"]
+            weight = float(row["weight"] or 0.0)
+            if source_id in summary:
+                item = summary[source_id]
+                item["outgoing_count"] += 1
+                item["outgoing_weight"] += weight
+                item["relation_types"].append(relation_type)
+            if target_id in summary:
+                item = summary[target_id]
+                item["incoming_count"] += 1
+                item["incoming_weight"] += weight
+                item["relation_types"].append(relation_type)
+        return summary
+
+    def superseded_memories_for_sources(self, source_memory_ids: list[str], limit: int = 5) -> list[dict[str, Any]]:
+        ids = [str(memory_id) for memory_id in source_memory_ids if str(memory_id or "").strip()]
+        if not ids:
+            return []
+        placeholders = ",".join("?" for _ in ids)
+        rows = self.conn.execute(
+            f"""
+            SELECT
+                r.source_memory_id AS current_memory_id,
+                r.target_memory_id AS memory_id,
+                r.relation_type,
+                r.weight AS relation_weight,
+                m.text,
+                m.domain_id,
+                d.name AS domain_name,
+                m.memory_type,
+                m.importance,
+                m.stability,
+                s.source,
+                s.chunk_index
+            FROM relations r
+            JOIN memories m ON m.id = r.target_memory_id
+            LEFT JOIN domains d ON d.id = m.domain_id
+            LEFT JOIN memory_sources s ON s.memory_id = m.id
+            WHERE r.relation_type IN ('supersedes', 'corrects', 'updates')
+              AND r.source_memory_id IN ({placeholders})
+              AND m.deprecated=0
+            ORDER BY r.weight DESC, m.updated_at DESC
+            LIMIT ?
+            """,
+            ids + [max(1, int(limit))],
+        ).fetchall()
+        return [
+            {
+                "current_memory_id": row["current_memory_id"],
+                "memory_id": row["memory_id"],
+                "relation_type": row["relation_type"],
+                "relation_weight": float(row["relation_weight"] or 0.0),
+                "text": row["text"],
+                "domain_id": row["domain_id"],
+                "domain_name": row["domain_name"],
+                "memory_type": row["memory_type"],
+                "importance": float(row["importance"] or 0.0),
+                "stability": float(row["stability"] or 0.0),
+                "source": row["source"],
+                "chunk_index": None if row["chunk_index"] is None else int(row["chunk_index"]),
+            }
+            for row in rows
+        ]
+
+    def summarized_memories_for_sources(self, summary_memory_ids: list[str], limit: int = 8) -> list[dict[str, Any]]:
+        ids = [str(memory_id) for memory_id in summary_memory_ids if str(memory_id or "").strip()]
+        if not ids:
+            return []
+        placeholders = ",".join("?" for _ in ids)
+        rows = self.conn.execute(
+            f"""
+            SELECT
+                r.source_memory_id AS summary_memory_id,
+                r.target_memory_id AS memory_id,
+                r.relation_type,
+                r.weight AS relation_weight,
+                m.text,
+                m.domain_id,
+                d.name AS domain_name,
+                m.memory_type,
+                m.importance,
+                m.stability,
+                s.source,
+                s.chunk_index
+            FROM relations r
+            JOIN memories m ON m.id = r.target_memory_id
+            LEFT JOIN domains d ON d.id = m.domain_id
+            LEFT JOIN memory_sources s ON s.memory_id = m.id
+            WHERE r.relation_type='summarizes'
+              AND r.source_memory_id IN ({placeholders})
+              AND m.deprecated=0
+            ORDER BY r.weight DESC, m.updated_at DESC
+            LIMIT ?
+            """,
+            ids + [max(1, int(limit))],
+        ).fetchall()
+        return [
+            {
+                "summary_memory_id": row["summary_memory_id"],
+                "memory_id": row["memory_id"],
+                "relation_type": row["relation_type"],
+                "relation_weight": float(row["relation_weight"] or 0.0),
+                "text": row["text"],
+                "domain_id": row["domain_id"],
+                "domain_name": row["domain_name"],
+                "memory_type": row["memory_type"],
+                "importance": float(row["importance"] or 0.0),
+                "stability": float(row["stability"] or 0.0),
+                "source": row["source"],
+                "chunk_index": None if row["chunk_index"] is None else int(row["chunk_index"]),
+            }
+            for row in rows
+        ]
 
     def relation_counts(self) -> list[dict[str, Any]]:
         rows = self.conn.execute(
@@ -784,6 +1018,18 @@ class MemoryDB:
             "embedding_signature": self.get_runtime_state("embedding_signature"),
         }
 
+    def namespace_counts(self) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            """
+            SELECT COALESCE(namespace, 'global') AS namespace, COUNT(*) AS count
+            FROM memories
+            WHERE deprecated=0
+            GROUP BY COALESCE(namespace, 'global')
+            ORDER BY count DESC, namespace
+            """
+        ).fetchall()
+        return [{"namespace": normalize_namespace(row["namespace"]), "count": int(row["count"] or 0)} for row in rows]
+
     @staticmethod
     def _session_turn_from_row(row: sqlite3.Row) -> dict[str, Any]:
         return {
@@ -805,6 +1051,7 @@ class MemoryDB:
             id=row["id"],
             name=row["name"],
             anchor_vector=decode_vector(row["anchor_vector"]),
+            namespace=normalize_namespace(row["namespace"] if "namespace" in row.keys() else None),
             effective_dimension=float(row["effective_dimension"] or 1.0),
             drift_ema=float(row["drift_ema"] or 0.0),
             drift_var=float(row["drift_var"] or 0.0),

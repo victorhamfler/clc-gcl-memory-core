@@ -23,6 +23,22 @@ py eval/reliability_ranking_smoke.py
 py eval/supersession_ranking_smoke.py
 py eval/mechanism_diagnostics.py
 py eval/mechanism_ablation_eval.py
+py eval/feedback_impact_experiment.py
+py eval/consolidation_safety_smoke.py
+py eval/summary_retrieval_eval.py
+py eval/summary_answer_quality_eval.py
+py eval/subtle_contradiction_eval.py
+py eval/clc_threshold_calibration.py
+py eval/mechanism_component_eval.py
+py eval/memory_maintenance_eval.py
+py eval/maintenance_impact_eval.py
+py eval/maintenance_multi_case_eval.py
+py eval/memory_training_run.py --fast-hash
+py eval/memory_training_run_smoke.py
+py eval/retrieval_weight_optimization.py
+py eval/retrieval_weight_optimization_smoke.py
+py eval/resolver_conflict_classification.py
+py eval/stale_companion_context_smoke.py
 py eval/long_run_drift_eval.py
 py eval/contradiction_precision_eval.py
 py eval/domain_contamination_eval.py
@@ -53,6 +69,12 @@ py serve.py --host 127.0.0.1 --port 8765
 - `POST /sessions`
 - `POST /session_history`
 - `POST /feedback`
+- `POST /consolidation_plan`
+- `POST /consolidate`
+- `POST /consolidation_sources`
+- `POST /memory_review`
+- `POST /memory_weak` (`include_resolved`, `resolved_only`)
+- `POST /memory_improve`
 
 Example:
 
@@ -107,6 +129,15 @@ Useful commands inside the loop:
 /teach <text>       store durable knowledge
 /ask <question>     ask memory and show evidence
 /correct <text>     store a correction linked to the last evidence
+/feedback <label>   train last evidence; optional target: number, memory id, all
+/sources            show evidence, source context, and superseded context
+/why                show retrieval scoring details for the last answer
+/consolidate plan   preview safe summary groups
+/consolidate create create summary memories; options: min=4 max=8 groups=1
+/memory review      inspect weak memories, domain flags, and recommendations
+/memory weak        list weak memory candidates
+/memory resolved    list repaired weak memories
+/memory improve     plan or store a clarifying update for a memory
 /history            show recent session turns
 /new                start a new session
 /quit               exit
@@ -118,7 +149,11 @@ Manual feedback session:
 py eval/interactive_retrieval_test.py --top-k 3
 ```
 
-Stored feedback is used as a bounded reranking signal. Useful and excellent results receive a small boost, while wrong, stale, wrong-domain, or missing-source results are downranked. Feedback also contributes small source/domain reliability signals that can help fresh memories from trusted sources rank better. Retrieval also includes a supersession signal: when versioned sources such as `agent_memory_v1` and `agent_memory_v2` are both present, current/correction queries prefer the newer corrected source while preserving older memories as historical context.
+Stored feedback is used as a bounded reranking signal. Useful and excellent results receive a small boost, while wrong, stale, wrong-domain, or missing-source results are downranked. Feedback also contributes small source/domain reliability signals that can help fresh memories from trusted sources rank better. Retrieval also includes a supersession signal: when versioned sources such as `agent_memory_v1` and `agent_memory_v2` are both present, current/correction queries prefer the newer corrected source while preserving older memories as historical context. `/ask` responses keep primary evidence focused, then expose extra `source_context` for additional relevant files and `stale_context` for superseded relation-linked memories.
+
+Retrieval ranking weights live in `config.yaml` under `retrieval_weights`. The current profile was selected with `py eval/retrieval_weight_optimization.py` and emphasizes source, feedback, supersession, manifest relation, and consolidation-summary signals over raw vector similarity. CLC controller thresholds live under `thresholds`; `py eval/clc_threshold_calibration.py` compares the configured profile against nearby alternatives.
+
+Consolidation is non-destructive. `/consolidate create` and `POST /consolidate` create a new embedded summary memory and connect it to originals with `summarizes` relations. Original memories remain available as evidence, and `POST /consolidation_sources` or `/consolidate sources <summary-id>` can show the source memories behind a summary.
 
 The synthetic agent corpus uses `test_corpora/agent_memory_manifest.json` to make this explicit. The manifest declares source-level `supersedes`, `corrects`, and `updates` relations; the experiment expands those into memory-to-memory relation rows that retrieval can use directly.
 

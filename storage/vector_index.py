@@ -9,8 +9,8 @@ class BruteForceVectorIndex:
     def __init__(self, db: MemoryDB):
         self.db = db
 
-    def search(self, embedding: list[float], top_k: int = 8) -> list[RecallItem]:
-        rows = self.db.list_memory_vectors(include_deprecated=False)
+    def search(self, embedding: list[float], top_k: int = 8, namespaces: list[str] | None = None) -> list[RecallItem]:
+        rows = self.db.list_memory_vectors(include_deprecated=False, namespaces=namespaces)
         scored: list[RecallItem] = []
         for row in rows:
             score = cosine(embedding, row["embedding"])
@@ -23,6 +23,7 @@ class BruteForceVectorIndex:
                     score=score,
                     importance=row["importance"],
                     stability=row["stability"],
+                    namespace=row["namespace"],
                     deprecated=row["deprecated"],
                 )
             )

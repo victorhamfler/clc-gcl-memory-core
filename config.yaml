@@ -29,6 +29,8 @@ thresholds:
   recall_high: 0.82
   contradiction: 0.75
   domain_shift: 0.60
+  focus: 0.68
+  information_gain: 0.45
 
 gcl:
   base_update_rate: 0.18
@@ -37,3 +39,17 @@ gcl:
   angular_weight: 0.50
   radial_weight: 0.05
   orthogonal_weight: 0.35
+
+retrieval_weights:
+  vector: 0.38
+  importance: 0.08
+  stability: 0.08
+  domain: 0.08
+  text: 0.12
+  source: 0.18
+  feedback: 0.10
+  domain_reliability: 0.03
+  source_reliability: 0.03
+  supersession: 0.14
+  relation_supersession: 0.16
+  summary_relation: 0.08

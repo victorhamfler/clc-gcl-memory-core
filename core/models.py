@@ -36,6 +36,7 @@ class MemoryNode:
     clc_state: str
     created_at: str
     updated_at: str
+    namespace: str = "global"
     deprecated: int = 0
 
 
@@ -44,6 +45,7 @@ class DomainState:
     id: str
     name: str
     anchor_vector: list[float]
+    namespace: str = "global"
     effective_dimension: float = 1.0
     drift_ema: float = 0.0
     drift_var: float = 0.0
@@ -62,6 +64,7 @@ class RecallItem:
     score: float
     importance: float
     stability: float
+    namespace: str = "global"
     deprecated: bool = False
 
 

@@ -10,6 +10,8 @@ from urllib.parse import urlparse
 
 from core.chunking import chunk_text
 from core.config import load_config, resolve_project_path
+from core.consolidation import consolidation_plan, create_consolidation_summaries
+from core.maintenance import improvement_plan, memory_review, record_memory_improvement, weak_memories
 from core.runtime import create_pipeline, pipeline_stats
 
 
@@ -82,7 +84,7 @@ class MemoryApi:
         text = str(payload.get("text") or "").strip()
         if not text:
             raise ValueError("POST /ingest requires JSON field 'text'")
-        return self.pipeline.ingest(text)
+        return self.pipeline.ingest(text, namespace=str(payload.get("namespace") or "global").strip() or "global")
 
     def teach(self, payload: dict[str, Any]) -> dict[str, Any]:
         text = str(payload.get("text") or "").strip()
@@ -98,6 +100,7 @@ class MemoryApi:
             agent_id=str(payload.get("agent_id") or "default").strip() or "default",
             store_session=bool(payload.get("store_session", True)),
             metadata=metadata,
+            namespace=str(payload.get("namespace") or "global").strip() or "global",
         )
 
     def correct(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -127,6 +130,7 @@ class MemoryApi:
             stale_rating=float(payload.get("stale_rating") if payload.get("stale_rating") is not None else -0.75),
             relation_type=str(payload.get("relation_type") or "corrects").strip().lower() or "corrects",
             metadata=metadata,
+            namespace=str(payload.get("namespace") or "global").strip() or "global",
         )
 
     def ingest_batch(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -141,14 +145,26 @@ class MemoryApi:
         if not isinstance(raw_texts, list):
             raise ValueError("POST /ingest_batch requires JSON field 'texts' or chunkable 'text'")
         texts = [str(item or "") for item in raw_texts]
-        return self.pipeline.ingest_batch(texts, source=source, limit=payload.get("limit"))
+        return self.pipeline.ingest_batch(
+            texts,
+            source=source,
+            limit=payload.get("limit"),
+            namespace=str(payload.get("namespace") or "global").strip() or "global",
+        )
 
     def retrieve(self, payload: dict[str, Any]) -> dict[str, Any]:
         query = str(payload.get("query") or "").strip()
         if not query:
             raise ValueError("POST /retrieve requires JSON field 'query'")
         top_k = max(1, int(payload.get("top_k") or 5))
-        return {"results": self.pipeline.retrieve(query, top_k=top_k)}
+        return {
+            "results": self.pipeline.retrieve(
+                query,
+                top_k=top_k,
+                namespace=str(payload.get("namespace") or "global").strip() or "global",
+                include_global=bool(payload.get("include_global", True)),
+            )
+        }
 
     def ask(self, payload: dict[str, Any]) -> dict[str, Any]:
         query = str(payload.get("query") or "").strip()
@@ -165,6 +181,8 @@ class MemoryApi:
                 store_session=bool(payload.get("store_session", True)),
                 remember=bool(payload.get("remember", False)),
                 memory_text=str(payload.get("memory_text") or "").strip() or None,
+                namespace=str(payload.get("namespace") or "global").strip() or "global",
+                include_global=bool(payload.get("include_global", True)),
             ),
         }
 
@@ -194,6 +212,93 @@ class MemoryApi:
                 metadata=metadata,
             ),
         }
+
+    def consolidation_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return consolidation_plan(
+            self.pipeline.db,
+            min_domain_memories=max(1, int(payload.get("min_domain_memories") or payload.get("min") or 4)),
+            max_candidates_per_domain=max(1, int(payload.get("max_candidates_per_domain") or payload.get("max") or 8)),
+            namespace=str(payload.get("namespace") or "").strip() or None,
+            include_global=bool(payload.get("include_global", False)),
+        )
+
+    def consolidate(self, payload: dict[str, Any]) -> dict[str, Any]:
+        max_groups = payload.get("max_groups", payload.get("groups"))
+        return create_consolidation_summaries(
+            self.pipeline,
+            min_domain_memories=max(1, int(payload.get("min_domain_memories") or payload.get("min") or 4)),
+            max_candidates_per_domain=max(1, int(payload.get("max_candidates_per_domain") or payload.get("max") or 8)),
+            max_groups=None if max_groups is None else max(0, int(max_groups)),
+            namespace=str(payload.get("namespace") or "").strip() or None,
+            include_global=bool(payload.get("include_global", False)),
+        )
+
+    def consolidation_sources(self, payload: dict[str, Any]) -> dict[str, Any]:
+        summary_memory_id = str(payload.get("summary_memory_id") or payload.get("memory_id") or "").strip()
+        if not summary_memory_id:
+            raise ValueError("POST /consolidation_sources requires JSON field 'summary_memory_id'")
+        return {
+            "ok": True,
+            "summary_memory_id": summary_memory_id,
+            "sources": self.pipeline.db.summarized_memories_for_sources(
+                [summary_memory_id],
+                limit=max(1, int(payload.get("limit") or 20)),
+            ),
+        }
+
+    def memory_review(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return memory_review(
+            self.pipeline.db,
+            weak_limit=max(1, int(payload.get("weak_limit") or payload.get("limit") or 8)),
+            namespace=str(payload.get("namespace") or "").strip() or None,
+            include_global=bool(payload.get("include_global", False)),
+        )
+
+    def memory_weak(self, payload: dict[str, Any]) -> dict[str, Any]:
+        include_resolved = bool(payload.get("include_resolved") or payload.get("resolved") or payload.get("all"))
+        resolved_only = bool(payload.get("resolved_only"))
+        rows = weak_memories(
+            self.pipeline.db,
+            limit=max(1, int(payload.get("limit") or 10)),
+            include_resolved=include_resolved or resolved_only,
+            namespace=str(payload.get("namespace") or "").strip() or None,
+            include_global=bool(payload.get("include_global", False)),
+        )
+        if resolved_only:
+            rows = [item for item in rows if item.get("resolved")]
+        return {
+            "ok": True,
+            "include_resolved": include_resolved or resolved_only,
+            "resolved_only": resolved_only,
+            "weak_memories": rows,
+        }
+
+    def memory_improve(self, payload: dict[str, Any]) -> dict[str, Any]:
+        memory_id = str(payload.get("memory_id") or "").strip()
+        note = str(payload.get("note") or payload.get("text") or "").strip()
+        if not memory_id:
+            return improvement_plan(
+                self.pipeline.db,
+                limit=max(1, int(payload.get("limit") or 5)),
+                namespace=str(payload.get("namespace") or "").strip() or None,
+                include_global=bool(payload.get("include_global", False)),
+            )
+        if not note:
+            return improvement_plan(
+                self.pipeline.db,
+                memory_id=memory_id,
+                limit=1,
+                namespace=str(payload.get("namespace") or "").strip() or None,
+                include_global=bool(payload.get("include_global", False)),
+            )
+        return record_memory_improvement(
+            self.pipeline,
+            memory_id,
+            note,
+            agent_id=str(payload.get("agent_id") or "default").strip() or "default",
+            session_id=str(payload.get("session_id") or "").strip() or None,
+            namespace=str(payload.get("namespace") or "global").strip() or "global",
+        )
 
 
 def make_handler(api: MemoryApi):
@@ -236,6 +341,18 @@ def make_handler(api: MemoryApi):
                     self._send_json(200, api.session_history(payload))
                 elif path == "/feedback":
                     self._send_json(200, api.feedback(payload))
+                elif path == "/consolidation_plan":
+                    self._send_json(200, api.consolidation_plan(payload))
+                elif path == "/consolidate":
+                    self._send_json(200, api.consolidate(payload))
+                elif path == "/consolidation_sources":
+                    self._send_json(200, api.consolidation_sources(payload))
+                elif path == "/memory_review":
+                    self._send_json(200, api.memory_review(payload))
+                elif path == "/memory_weak":
+                    self._send_json(200, api.memory_weak(payload))
+                elif path == "/memory_improve":
+                    self._send_json(200, api.memory_improve(payload))
                 elif path == "/shutdown":
                     self._send_json(200, {"ok": True, "shutdown": True})
                     threading.Thread(target=self.server.shutdown, daemon=True).start()
@@ -304,6 +421,12 @@ def main() -> None:
                     "/sessions",
                     "/session_history",
                     "/feedback",
+                    "/consolidation_plan",
+                    "/consolidate",
+                    "/consolidation_sources",
+                    "/memory_review",
+                    "/memory_weak",
+                    "/memory_improve",
                 ],
             },
             indent=2,

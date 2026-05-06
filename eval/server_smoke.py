@@ -95,6 +95,14 @@ def main() -> None:
                     "top_k": 2,
                 },
             )
+            plan = post_json(f"{base}/consolidation_plan", {"min": 2, "max": 8})
+            consolidated = post_json(f"{base}/consolidate", {"min": 2, "max": 8, "groups": 1})
+            summary_sources = {"sources": []}
+            if consolidated.get("created_summaries"):
+                summary_sources = post_json(
+                    f"{base}/consolidation_sources",
+                    {"summary_memory_id": consolidated["created_summaries"][0]["summary_memory_id"]},
+                )
             top = retrieved["results"][0]
             feedback = post_json(
                 f"{base}/feedback",
@@ -107,6 +115,19 @@ def main() -> None:
                     "notes": "server smoke feedback check",
                 },
             )
+            maintenance_review = post_json(f"{base}/memory_review", {"limit": 3})
+            maintenance_weak = post_json(f"{base}/memory_weak", {"limit": 3})
+            maintenance_plan = post_json(f"{base}/memory_improve", {"limit": 2})
+            weak_target = maintenance_weak["weak_memories"][0]["memory_id"] if maintenance_weak["weak_memories"] else top["memory_id"]
+            maintenance_improve = post_json(
+                f"{base}/memory_improve",
+                {
+                    "memory_id": weak_target,
+                    "note": "Server smoke maintenance update: preserve source labels and evidence ids.",
+                    "agent_id": "server_smoke_agent",
+                },
+            )
+            maintenance_resolved = post_json(f"{base}/memory_weak", {"limit": 5, "resolved_only": True})
             stats = get_json(f"{base}/stats")
             post_json(f"{base}/shutdown", {})
             thread.join(timeout=5)
@@ -129,9 +150,20 @@ def main() -> None:
         assert corrected["ok"] is True
         assert corrected["relations"]
         assert corrected["feedback"]
+        assert plan["ok"] is True
+        assert consolidated["ok"] is True
+        assert summary_sources["sources"]
         assert feedback["ok"] is True
         assert feedback["feedback"]["label"] == "useful"
-        assert stats["memories"] == 5
+        assert maintenance_review["ok"] is True
+        assert maintenance_weak["ok"] is True
+        assert maintenance_plan["ok"] is True
+        assert maintenance_improve["ok"] is True
+        assert maintenance_improve["relation"]["relation_type"] == "updates"
+        assert maintenance_resolved["ok"] is True
+        assert maintenance_resolved["resolved_only"] is True
+        assert any(item["memory_id"] == weak_target and item["resolved"] for item in maintenance_resolved["weak_memories"])
+        assert stats["memories"] >= 6
         assert stats["retrieval_feedback"] >= 2
         assert stats["relations"] >= 1
         assert stats["sessions"] == 1
@@ -153,6 +185,14 @@ def main() -> None:
                     },
                     "teach_memory_id": taught["memory"]["memory_id"],
                     "correct_memory_id": corrected["correction_memory"]["memory_id"],
+                    "consolidated": consolidated,
+                    "summary_sources": summary_sources["sources"][:2],
+                    "maintenance": {
+                        "review_recommendations": maintenance_review["recommendations"],
+                        "weak_count": len(maintenance_weak["weak_memories"]),
+                        "resolved_count": len(maintenance_resolved["weak_memories"]),
+                        "improvement_memory_id": maintenance_improve["improvement_memory"]["memory_id"],
+                    },
                     "feedback": feedback["feedback"],
                 },
                 indent=2,

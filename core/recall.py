@@ -12,9 +12,14 @@ class RecallEngine:
         self.index = BruteForceVectorIndex(db)
         self.top_k = top_k
 
-    def recall(self, embedding: list[float]) -> RecallResult:
-        items = self.index.search(embedding, self.top_k)
-        domains = self.db.list_domains()
+    def recall(
+        self,
+        embedding: list[float],
+        namespaces: list[str] | None = None,
+        domain_namespaces: list[str] | None = None,
+    ) -> RecallResult:
+        items = self.index.search(embedding, self.top_k, namespaces=namespaces)
+        domains = self.db.list_domains(namespaces=domain_namespaces or namespaces)
         nearest_domain: DomainState | None = None
         nearest_score = -1.0
         for domain in domains:

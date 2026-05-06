@@ -17,6 +17,21 @@ STATE_UPDATE_STRENGTH = {
 
 
 class CLCController:
+    def __init__(self, thresholds: dict[str, float] | None = None):
+        self.thresholds = {
+            "new": 1.5,
+            "recall_low": 0.45,
+            "recall_mid": 0.65,
+            "recall_high": 0.82,
+            "contradiction": 0.75,
+            "domain_shift": 0.60,
+            "focus": 0.68,
+            "information_gain": 0.45,
+        }
+        for key, value in (thresholds or {}).items():
+            if key in self.thresholds:
+                self.thresholds[key] = float(value)
+
     def compute_signals(self, signal: SignalPacket, diagnostics: CSDDiagnostics, recall: RecallResult) -> CLCSignals:
         surprise = sigmoid(
             1.25 * diagnostics.csd_semantic
@@ -38,19 +53,20 @@ class CLCController:
         return CLCSignals(surprise=surprise, recall=recall_score, curiosity=curiosity, focus=focus)
 
     def decide(self, diagnostics: CSDDiagnostics, signals: CLCSignals) -> CLCDecision:
-        if diagnostics.contradiction > 0.75:
+        t = self.thresholds
+        if diagnostics.contradiction > t["contradiction"]:
             return self._decision("PROTECT", "contradiction_above_threshold")
-        if diagnostics.domain_shift > 0.60 and signals.recall < 0.45:
+        if diagnostics.domain_shift > t["domain_shift"] and signals.recall < t["recall_low"]:
             return self._decision("SPLIT_DOMAIN", "domain_shift_with_low_recall")
-        if diagnostics.csd_semantic > 1.5 and signals.recall < 0.45:
+        if diagnostics.csd_semantic > t["new"] and signals.recall < t["recall_low"]:
             return self._decision("EXPLORE", "high_novelty_low_recall")
-        if diagnostics.csd_semantic > 1.5 and signals.recall >= 0.65:
+        if diagnostics.csd_semantic > t["new"] and signals.recall >= t["recall_mid"]:
             return self._decision("FOCUS", "high_novelty_with_known_memory")
-        if signals.recall > 0.82 and diagnostics.csd_semantic < 0.5:
+        if signals.recall > t["recall_high"] and diagnostics.csd_semantic < 0.5:
             return self._decision("RECALL", "strong_recall_low_novelty")
-        if signals.focus > 0.68:
+        if signals.focus > t["focus"]:
             return self._decision("FOCUS", "high_focus")
-        if diagnostics.information_gain > 0.45:
+        if diagnostics.information_gain > t["information_gain"]:
             return self._decision("LIGHT_UPDATE", "moderate_information_gain")
         return self._decision("IGNORE", "low_signal")
 
