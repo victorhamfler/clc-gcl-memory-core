@@ -12,6 +12,8 @@ The program stores text memories as embedding-backed nodes, assigns them to symb
 - Active database: `memory_experiment_180_best.db`
 - HTTP API default: `http://127.0.0.1:8765`
 
+For the full agent-facing operating guide, see [docs/AGENT_USER_MANUAL.md](docs/AGENT_USER_MANUAL.md).
+
 ## Quick Commands
 
 ```powershell
