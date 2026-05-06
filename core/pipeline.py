@@ -5,12 +5,12 @@ import re
 from pathlib import Path
 from typing import Any
 
-from core.clc_controller import CLCController
+from core.clc_controller import CLCController, STATE_UPDATE_STRENGTH
 from core.contradiction import store_contradiction_if_needed
 from core.csd import CSDLayer
 from core.encoder import build_encoder
 from core.gcl_memory import GCLMemoryUpdater
-from core.models import MemoryNode
+from core.models import CLCDecision, MemoryNode
 from core.recall import RecallEngine
 from core.resolver import compact_evidence, resolve_answer
 from core.symbolic import build_signal_packet
@@ -61,11 +61,24 @@ class MemoryPipeline:
             close_encoder()
         self.db.close()
 
-    def ingest(self, text: str, source: str | None = None, namespace: str | None = None) -> dict[str, Any]:
+    def ingest(
+        self,
+        text: str,
+        source: str | None = None,
+        namespace: str | None = None,
+        priority: str | None = None,
+        force_clc_state: str | None = None,
+        domain_text: str | None = None,
+        prefer_symbolic_domain: bool = False,
+    ) -> dict[str, Any]:
         memory_namespace = normalize_namespace(namespace)
+        cleaned = str(text or "").strip()
+        analysis_text = str(domain_text or cleaned).strip() or cleaned
+        memory_priority = self._normalize_priority(priority)
         embedding = self.encoder.embed(text)
         embedding_signature = self._ensure_embedding_signature(embedding)
-        signal = build_signal_packet(text, embedding)
+        signal = build_signal_packet(analysis_text, embedding)
+        self._apply_priority(signal, memory_priority)
         self._apply_source_domain_hint(signal, source)
         recall = self.recall_engine.recall(
             embedding,
@@ -75,13 +88,19 @@ class MemoryPipeline:
         diagnostics = self.csd.diagnose(signal, recall)
         signals = self.controller.compute_signals(signal, diagnostics, recall)
         decision = self.controller.decide(diagnostics, signals)
-        preferred_domain = self._preferred_domain(signal, recall.nearest_domain, memory_namespace)
+        decision = self._apply_clc_override(decision, memory_priority, force_clc_state)
+        preferred_domain = self._preferred_domain(
+            signal,
+            recall.nearest_domain,
+            memory_namespace,
+            prefer_symbolic_domain=prefer_symbolic_domain,
+        )
         update = self.gcl.apply(signal, decision, preferred_domain, namespace=memory_namespace)
         assigned_domain = self.db.get_domain(update.domain_id)
         now = utc_now()
         memory = MemoryNode(
             id=new_id("mem"),
-            text=text,
+            text=cleaned,
             embedding=embedding,
             domain_id=update.domain_id,
             memory_type=signal.memory_type,
@@ -99,6 +118,13 @@ class MemoryPipeline:
             namespace=memory_namespace,
         )
         self.db.insert_memory(memory)
+        if source:
+            self.db.set_memory_source(
+                memory.id,
+                source,
+                0,
+                metadata={"namespace": memory_namespace, "priority": memory_priority},
+            )
         store_contradiction_if_needed(self.db, memory.id, recall, diagnostics.contradiction)
         self.db.add_event(
             memory.id,
@@ -110,6 +136,9 @@ class MemoryPipeline:
                 "gcl_action": update.action,
                 "domains": signal.domains,
                 "memory_type": signal.memory_type,
+                "priority": memory_priority,
+                "force_clc_state": force_clc_state,
+                "domain_text_used": analysis_text != cleaned,
             },
         )
         result = {
@@ -118,6 +147,7 @@ class MemoryPipeline:
             "domain_name": assigned_domain.name if assigned_domain else (signal.domains[0] if signal.domains else "general"),
             "memory_type": signal.memory_type,
             "namespace": memory_namespace,
+            "priority": memory_priority,
             "clc_state": decision.state,
             "decision_reason": decision.reason,
             "csd_score": round(diagnostics.csd_semantic, 6),
@@ -139,9 +169,18 @@ class MemoryPipeline:
         self._append_log(result)
         return result
 
-    def _preferred_domain(self, signal, nearest_domain, namespace: str | None = None):
+    def _preferred_domain(
+        self,
+        signal,
+        nearest_domain,
+        namespace: str | None = None,
+        prefer_symbolic_domain: bool = False,
+    ):
         memory_namespace = normalize_namespace(namespace)
         symbolic = signal.domains[0] if signal.domains else "general"
+        if prefer_symbolic_domain:
+            existing = self.db.get_domain_by_name(symbolic or "general", namespace=memory_namespace)
+            return existing
         if symbolic and symbolic != "general":
             existing = self.db.get_domain_by_name(symbolic, namespace=memory_namespace)
             if existing is not None:
@@ -158,6 +197,8 @@ class MemoryPipeline:
         source: str | None = None,
         limit: int | None = None,
         namespace: str | None = None,
+        priority: str | None = None,
+        force_clc_state: str | None = None,
     ) -> dict[str, Any]:
         memory_namespace = normalize_namespace(namespace)
         cleaned = [str(text or "").strip() for text in texts if str(text or "").strip()]
@@ -171,7 +212,13 @@ class MemoryPipeline:
                 if self.db.memory_exists_text(text, namespace=memory_namespace):
                     skipped.append({"batch_index": idx, "reason": "duplicate_exact_text", "text_preview": text[:160]})
                     continue
-                item = self.ingest(text, source=source, namespace=memory_namespace)
+                item = self.ingest(
+                    text,
+                    source=source,
+                    namespace=memory_namespace,
+                    priority=priority,
+                    force_clc_state=force_clc_state,
+                )
                 item["batch_index"] = idx
                 item["source"] = source
                 self.db.set_memory_source(item["memory_id"], source, idx, metadata={"namespace": memory_namespace})
@@ -187,6 +234,7 @@ class MemoryPipeline:
             "skipped": len(skipped),
             "errors": len(errors),
             "results": results,
+            "memories": results,
             "skipped_items": skipped,
             "error_items": errors,
         }
@@ -381,6 +429,7 @@ class MemoryPipeline:
                         if item.get("memory_id")
                     ],
                     "disputed_count": len(resolved["disputed"]),
+                    "live_conflict_count": len(resolved.get("live_conflicts", [])),
                 },
             )
         if remember:
@@ -426,6 +475,7 @@ class MemoryPipeline:
             "stale": resolved["stale"],
             "stale_context": resolved["stale_context"],
             "disputed": resolved["disputed"],
+            "live_conflicts": resolved.get("live_conflicts", []),
             "raw_results": resolved["raw_results"],
         }
 
@@ -438,6 +488,8 @@ class MemoryPipeline:
         store_session: bool = True,
         metadata: dict[str, Any] | None = None,
         namespace: str | None = None,
+        priority: str | None = None,
+        force_clc_state: str | None = None,
     ) -> dict[str, Any]:
         memory_namespace = normalize_namespace(namespace)
         cleaned = str(text or "").strip()
@@ -446,12 +498,25 @@ class MemoryPipeline:
         session = None
         user_turn = None
         memory_source = source or f"teach:{agent_id}"
-        memory = self.ingest(cleaned, source=memory_source, namespace=memory_namespace)
+        memory = self.ingest(
+            cleaned,
+            source=memory_source,
+            namespace=memory_namespace,
+            priority=priority,
+            force_clc_state=force_clc_state,
+        )
         self.db.set_memory_source(
             memory["memory_id"],
             memory_source,
             0,
-            metadata={"agent_id": agent_id, "session_id": session_id, "namespace": memory_namespace, **(metadata or {})},
+            metadata={
+                "agent_id": agent_id,
+                "session_id": session_id,
+                "namespace": memory_namespace,
+                "priority": memory.get("priority"),
+                "force_clc_state": force_clc_state,
+                **(metadata or {}),
+            },
         )
         if store_session or session_id:
             session = self.db.ensure_session(
@@ -497,6 +562,8 @@ class MemoryPipeline:
         relation_type: str = "corrects",
         metadata: dict[str, Any] | None = None,
         namespace: str | None = None,
+        priority: str | None = "high",
+        force_clc_state: str | None = None,
     ) -> dict[str, Any]:
         memory_namespace = normalize_namespace(namespace)
         cleaned = str(correction or "").strip()
@@ -513,7 +580,15 @@ class MemoryPipeline:
         memory_source = source or f"correction:{agent_id}"
         session = None
         turn = None
-        correction_memory = self.ingest(correction_text, source=memory_source, namespace=memory_namespace)
+        correction_memory = self.ingest(
+            correction_text,
+            source=memory_source,
+            namespace=memory_namespace,
+            priority=priority,
+            force_clc_state=force_clc_state,
+            domain_text=cleaned,
+            prefer_symbolic_domain=True,
+        )
         self.db.set_memory_source(
             correction_memory["memory_id"],
             memory_source,
@@ -524,6 +599,8 @@ class MemoryPipeline:
                 "target_memory_ids": target_ids,
                 "target_query": target_query,
                 "namespace": memory_namespace,
+                "priority": correction_memory.get("priority"),
+                "force_clc_state": force_clc_state,
                 **(metadata or {}),
             },
         )
@@ -885,8 +962,8 @@ class MemoryPipeline:
 
     @staticmethod
     def _text_affinity(query: str, text: str) -> float:
-        query_tokens = MemoryPipeline._tokens(query)
-        text_tokens = MemoryPipeline._tokens(text)
+        query_tokens = {MemoryPipeline._stem_token(token) for token in MemoryPipeline._tokens(query)}
+        text_tokens = {MemoryPipeline._stem_token(token) for token in MemoryPipeline._tokens(text)}
         if not query_tokens or not text_tokens:
             return 0.0
         stopwords = {
@@ -1276,6 +1353,57 @@ class MemoryPipeline:
     def _tokens(text: str) -> set[str]:
         cleaned = "".join(ch.lower() if ch.isalnum() else " " for ch in str(text or ""))
         return {token for token in cleaned.split() if len(token) > 1}
+
+    @staticmethod
+    def _stem_token(token: str) -> str:
+        token = str(token or "").lower().strip()
+        if len(token) > 5 and token.endswith("ies"):
+            return token[:-3] + "y"
+        if len(token) > 5 and token.endswith("ing"):
+            return token[:-3]
+        if len(token) > 4 and token.endswith("es"):
+            return token[:-2]
+        if len(token) > 3 and token.endswith("s"):
+            return token[:-1]
+        return token
+
+    @staticmethod
+    def _normalize_priority(priority: str | None) -> str:
+        value = str(priority or "normal").strip().lower()
+        aliases = {
+            "": "normal",
+            "default": "normal",
+            "medium": "normal",
+            "important": "high",
+            "urgent": "critical",
+        }
+        value = aliases.get(value, value)
+        return value if value in {"low", "normal", "high", "critical"} else "normal"
+
+    @staticmethod
+    def _apply_priority(signal, priority: str) -> None:
+        if priority == "low":
+            signal.importance = min(signal.importance, 0.35)
+            return
+        if priority == "high":
+            signal.importance = max(signal.importance, 0.8)
+            signal.confidence = max(signal.confidence, 0.75)
+            signal.user_instruction = max(signal.user_instruction, 0.7)
+        elif priority == "critical":
+            signal.importance = max(signal.importance, 0.95)
+            signal.confidence = max(signal.confidence, 0.9)
+            signal.user_instruction = 1.0
+
+    @staticmethod
+    def _apply_clc_override(decision: CLCDecision, priority: str, force_clc_state: str | None) -> CLCDecision:
+        forced = str(force_clc_state or "").strip().upper()
+        if forced:
+            if forced not in STATE_UPDATE_STRENGTH:
+                raise ValueError(f"Unsupported force_clc_state: {force_clc_state}")
+            return CLCDecision(forced, STATE_UPDATE_STRENGTH[forced], "forced_by_request")
+        if priority in {"high", "critical"} and decision.state == "IGNORE":
+            return CLCDecision("FOCUS", STATE_UPDATE_STRENGTH["FOCUS"], f"priority_{priority}_override")
+        return decision
 
     @staticmethod
     def _normalize_retrieval_weights(weights: dict[str, Any] | None) -> dict[str, float]:

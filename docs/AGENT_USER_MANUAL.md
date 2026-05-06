@@ -128,6 +128,13 @@ Teach durable knowledge:
 /teach The planner agent should propose steps before making large repository changes.
 ```
 
+Priority and CLC controls can be placed at the beginning of `/teach`:
+
+```text
+/teach priority=high The planner agent should never hide evidence ids from reports.
+/teach clc=PROTECT The planner agent must treat explicit upload permission as a protected user policy.
+```
+
 Alias:
 
 ```text
@@ -139,6 +146,8 @@ Correct stale or wrong memory:
 ```text
 /correct The planner agent may upload to GitHub only when the user explicitly asks.
 ```
+
+Corrections default to high priority so they are not lost behind low-signal repetition. A correction is assigned to the domain of the correction text, not blindly to the target memory's domain.
 
 Best workflow for correction:
 
@@ -271,6 +280,20 @@ $body = @{
   agent_id = "planner"
   namespace = "agent:planner"
   source = "manual_seed"
+  priority = "high"
+} | ConvertTo-Json
+Invoke-RestMethod -Uri "http://127.0.0.1:8765/teach" -Method Post -ContentType "application/json" -Body $body
+```
+
+To force a CLC state for critical operator-controlled memories:
+
+```powershell
+$body = @{
+  text = "The planner may push to GitHub only after explicit user instruction."
+  agent_id = "planner"
+  namespace = "agent:planner"
+  source = "manual_policy"
+  force_clc_state = "PROTECT"
 } | ConvertTo-Json
 Invoke-RestMethod -Uri "http://127.0.0.1:8765/teach" -Method Post -ContentType "application/json" -Body $body
 ```
@@ -311,6 +334,31 @@ $body = @{
   top_k = 5
 } | ConvertTo-Json
 Invoke-RestMethod -Uri "http://127.0.0.1:8765/retrieve" -Method Post -ContentType "application/json" -Body $body
+```
+
+Direct ingest has the same nested memory shape as teach while preserving flat compatibility fields:
+
+```powershell
+$body = @{
+  text = "Mercury is the smallest planet."
+  namespace = "agent:planner"
+  source = "manual_ingest"
+} | ConvertTo-Json
+Invoke-RestMethod -Uri "http://127.0.0.1:8765/ingest" -Method Post -ContentType "application/json" -Body $body
+```
+
+Batch ingest returns both `results` and `memories` so clients can inspect the created chunks:
+
+```powershell
+$body = @{
+  texts = @(
+    "Neptune has the strongest winds in the solar system."
+    "Venus is the hottest planet in the solar system."
+  )
+  namespace = "agent:planner"
+  source = "manual_batch"
+} | ConvertTo-Json
+Invoke-RestMethod -Uri "http://127.0.0.1:8765/ingest_batch" -Method Post -ContentType "application/json" -Body $body
 ```
 
 Review memory:
@@ -412,9 +460,12 @@ Ask results include:
 - `answer`: extractive answer synthesized from memory evidence
 - `confidence`: answer confidence
 - `conflict`: whether evidence conflicts
+- `live_conflicts`: query-time conflict details found inside retrieved evidence
 - `evidence`: primary supporting memories
 - `source_context`: additional memories from related sources
 - `stale_context`: superseded or historical context
+
+Evidence objects include `namespace`, `domain_id`, `domain_name`, `source`, scoring fields, and a text preview. This lets an agent audit whether an answer came from its own namespace, shared `global` memory, or another allowed scope.
 
 Retrieval details include:
 
@@ -453,6 +504,7 @@ Use these rules when another agent connects to this memory program.
 - Always set `namespace` for agent-specific memory.
 - Use `global` only for intentionally shared rules.
 - Prefer `/correct` over re-teaching a conflicting fact without relation context.
+- Use `priority=high` for important durable instructions and `clc=PROTECT` or `force_clc_state=PROTECT` only for policies that must be protected.
 - Keep `source` labels meaningful.
 - Do not delete old evidence to hide mistakes; link updates and corrections.
 - Review `/sources` and `/why` before trusting surprising answers.
@@ -475,6 +527,7 @@ CLC is working well when:
 CSD is working well when:
 
 - Direct corrections produce contradiction pressure.
+- Retrieved contradictory factual evidence can raise `conflict=True` at query time.
 - Similar but not identical memories remain retrievable together.
 - Novel examples raise surprise without breaking stable domains.
 - Weak memories with high novelty become visible in maintenance.
@@ -499,6 +552,7 @@ py eval\namespace_isolation_eval.py
 py eval\namespace_geometry_eval.py
 py eval\gcl_domain_health_eval.py
 py eval\maintenance_false_repair_eval.py
+py eval\report_issue_regression.py
 py eval\consolidation_safety_smoke.py
 py eval\chat_smoke.py
 py eval\server_smoke.py

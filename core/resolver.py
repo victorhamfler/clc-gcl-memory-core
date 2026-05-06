@@ -34,11 +34,25 @@ def resolve_answer(query: str, results: list[dict[str, Any]]) -> dict[str, Any]:
     preferred = choose_preferred_evidence(query, results, summary, current, historical, disputed, stale)
     evidence = preferred[: min(3, len(preferred))]
     correction_conflict = has_correction_conflict_evidence(evidence)
+    live_conflicts = detect_live_evidence_conflicts(evidence)
     summary_answer = bool(evidence) and evidence[0].get("memory_state") == "summary"
     summary_only = bool(evidence) and all(item.get("memory_state") == "summary" for item in evidence)
-    conflict = (bool((current or historical) and stale) and not summary_only and not summary_answer) or bool(disputed) or correction_conflict
+    conflict = (
+        (bool((current or historical) and stale) and not summary_only and not summary_answer)
+        or bool(disputed)
+        or correction_conflict
+        or bool(live_conflicts)
+    )
     confidence = estimate_confidence(evidence, conflict)
-    answer = build_extractive_answer(query, evidence, stale, conflict, confidence, correction_conflict=correction_conflict)
+    answer = build_extractive_answer(
+        query,
+        evidence,
+        stale,
+        conflict,
+        confidence,
+        correction_conflict=correction_conflict,
+        live_conflict=bool(live_conflicts),
+    )
 
     return {
         "answer": answer,
@@ -50,6 +64,7 @@ def resolve_answer(query: str, results: list[dict[str, Any]]) -> dict[str, Any]:
         "historical": [compact_evidence(item) for item in historical],
         "stale": [compact_evidence(item) for item in stale],
         "disputed": [compact_evidence(item) for item in disputed],
+        "live_conflicts": live_conflicts,
         "raw_results": results,
     }
 
@@ -129,22 +144,18 @@ def classify_memory_state(item: dict[str, Any]) -> str:
 
 
 def is_relevant_to_query(query: str, item: dict[str, Any]) -> bool:
-    query_terms = {
-        term
-        for term in re.findall(r"[A-Za-z0-9_'-]+", str(query or "").lower())
-        if len(term) > 2 and term not in ANSWER_STOPWORDS
-    }
+    query_terms = normalized_terms(query)
     if not query_terms:
         return True
-    text_terms = {
-        term
-        for term in re.findall(r"[A-Za-z0-9_'-]+", clean_answer_text(item.get("text") or "").lower())
-        if len(term) > 2 and term not in ANSWER_STOPWORDS
-    }
+    text_terms = normalized_terms(clean_answer_text(item.get("text") or ""))
+    domain_terms = normalized_terms(item.get("domain_name") or "")
+    text_terms |= domain_terms
     identity_terms = {"alpha", "beta", "gamma", "delta"}
     required_identity_terms = query_terms & identity_terms
     if required_identity_terms and not required_identity_terms <= text_terms:
         return False
+    if domain_terms and query_terms & domain_terms:
+        return True
     text_match = float(item.get("text_match_score") or 0.0)
     if text_match >= 0.34:
         return True
@@ -186,6 +197,7 @@ def build_extractive_answer(
     conflict: bool,
     confidence: float,
     correction_conflict: bool = False,
+    live_conflict: bool = False,
 ) -> str:
     if not evidence:
         return "I do not have enough memory evidence to answer that yet."
@@ -205,6 +217,8 @@ def build_extractive_answer(
         answer += " Older or stale memories were also found, so the current/corrected evidence should be preferred."
     elif conflict and correction_conflict:
         answer += " This answer is based on corrected memory evidence."
+    elif conflict and live_conflict:
+        answer += " Conflicting evidence was retrieved, so this answer should be reviewed or corrected."
     if confidence < 0.45:
         answer += " Confidence is low because the retrieved evidence is weak."
     return answer.strip()
@@ -312,6 +326,79 @@ def clean_answer_text(text: str) -> str:
     return cleaned
 
 
+def normalized_terms(text: Any) -> set[str]:
+    terms = set()
+    for term in re.findall(r"[A-Za-z0-9_'-]+", str(text or "").lower()):
+        if len(term) <= 2 or term in ANSWER_STOPWORDS:
+            continue
+        terms.add(stem_token(term))
+        if "-" in term:
+            compact = term.replace("-", "")
+            if len(compact) > 2:
+                terms.add(stem_token(compact))
+    return terms
+
+
+def stem_token(term: str) -> str:
+    term = str(term or "").lower().strip()
+    if len(term) > 5 and term.endswith("ies"):
+        return term[:-3] + "y"
+    if len(term) > 5 and term.endswith("ing"):
+        return term[:-3]
+    if len(term) > 4 and term.endswith("es"):
+        return term[:-2]
+    if len(term) > 3 and term.endswith("s"):
+        return term[:-1]
+    return term
+
+
+def detect_live_evidence_conflicts(evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    facts: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for item in evidence:
+        fact = extract_simple_fact(item.get("text") or "")
+        if fact is None:
+            continue
+        facts.setdefault((fact["relation"], fact["object"]), []).append({**fact, "memory_id": item.get("memory_id")})
+    conflicts: list[dict[str, Any]] = []
+    for (_relation, _object), rows in facts.items():
+        positives = [row for row in rows if not row["negated"]]
+        seen_subjects = {row["subject"] for row in positives}
+        if len(seen_subjects) <= 1:
+            continue
+        conflicts.append(
+            {
+                "type": "incompatible_fact_values",
+                "relation": rows[0]["relation"],
+                "object": rows[0]["object"],
+                "subjects": sorted(seen_subjects),
+                "memory_ids": [row["memory_id"] for row in positives if row.get("memory_id")],
+            }
+        )
+    return conflicts
+
+
+def extract_simple_fact(text: str) -> dict[str, Any] | None:
+    cleaned = clean_answer_text(text).strip()
+    if cleaned.lower().startswith("correction:"):
+        cleaned = cleaned.split(":", 1)[1].strip()
+    match = re.search(
+        r"\b(?P<subject>[A-Z][A-Za-z0-9_ -]{1,80}?)\s+is\s+(?P<negated>not\s+)?(?:the\s+)?(?P<relation>capital)\s+of\s+(?P<object>[A-Z][A-Za-z0-9_ -]{1,80})\b",
+        cleaned,
+    )
+    if not match:
+        return None
+    return {
+        "subject": normalize_fact_value(match.group("subject")),
+        "relation": match.group("relation").lower(),
+        "object": normalize_fact_value(match.group("object")),
+        "negated": bool(match.group("negated")),
+    }
+
+
+def normalize_fact_value(value: str) -> str:
+    return " ".join(str(value or "").strip(" .,:;!?").lower().split())
+
+
 ANSWER_STOPWORDS = {
     "about",
     "after",
@@ -365,6 +452,8 @@ def compact_evidence(item: dict[str, Any]) -> dict[str, Any]:
         "rank": item.get("rank"),
         "memory_state": item.get("memory_state"),
         "score": item.get("score"),
+        "namespace": item.get("namespace"),
+        "domain_id": item.get("domain_id"),
         "source": item.get("source"),
         "chunk_index": item.get("chunk_index"),
         "domain_name": item.get("domain_name"),

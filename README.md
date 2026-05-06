@@ -37,6 +37,7 @@ py eval/maintenance_impact_eval.py
 py eval/maintenance_multi_case_eval.py
 py eval/memory_training_run.py --fast-hash
 py eval/memory_training_run_smoke.py
+py eval/report_issue_regression.py
 py eval/retrieval_weight_optimization.py
 py eval/retrieval_weight_optimization_smoke.py
 py eval/resolver_conflict_classification.py

@@ -137,11 +137,16 @@ def main() -> None:
 
         assert health["ok"] is True
         assert first["embedding_dim"] == 768
+        assert first["ok"] is True
+        assert first["memory"]["memory_id"] == first["memory_id"]
+        assert first["memory"]["namespace"] == "global"
         assert batch["stored"] == 2
+        assert len(batch["memories"]) == 2
         assert batch["results"][0]["embedding_backend"] == "wsl_llama_cpp"
         assert retrieved["results"]
         assert asked["ok"] is True
         assert asked["evidence"]
+        assert all(item.get("namespace") for item in asked["evidence"])
         assert asked["answer"]
         assert asked_again["session_id"] == asked["session_id"]
         assert len(history["turns"]) == 4

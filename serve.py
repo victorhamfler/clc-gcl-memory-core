@@ -84,7 +84,14 @@ class MemoryApi:
         text = str(payload.get("text") or "").strip()
         if not text:
             raise ValueError("POST /ingest requires JSON field 'text'")
-        return self.pipeline.ingest(text, namespace=str(payload.get("namespace") or "global").strip() or "global")
+        memory = self.pipeline.ingest(
+            text,
+            source=str(payload.get("source") or "").strip() or None,
+            namespace=str(payload.get("namespace") or "global").strip() or "global",
+            priority=str(payload.get("priority") or "").strip() or None,
+            force_clc_state=str(payload.get("force_clc_state") or payload.get("clc_state") or "").strip() or None,
+        )
+        return {"ok": True, "mode": "ingest", "memory": memory, **memory}
 
     def teach(self, payload: dict[str, Any]) -> dict[str, Any]:
         text = str(payload.get("text") or "").strip()
@@ -101,6 +108,8 @@ class MemoryApi:
             store_session=bool(payload.get("store_session", True)),
             metadata=metadata,
             namespace=str(payload.get("namespace") or "global").strip() or "global",
+            priority=str(payload.get("priority") or "").strip() or None,
+            force_clc_state=str(payload.get("force_clc_state") or payload.get("clc_state") or "").strip() or None,
         )
 
     def correct(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -131,6 +140,8 @@ class MemoryApi:
             relation_type=str(payload.get("relation_type") or "corrects").strip().lower() or "corrects",
             metadata=metadata,
             namespace=str(payload.get("namespace") or "global").strip() or "global",
+            priority=str(payload.get("priority") or "high").strip() or "high",
+            force_clc_state=str(payload.get("force_clc_state") or payload.get("clc_state") or "").strip() or None,
         )
 
     def ingest_batch(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -150,6 +161,8 @@ class MemoryApi:
             source=source,
             limit=payload.get("limit"),
             namespace=str(payload.get("namespace") or "global").strip() or "global",
+            priority=str(payload.get("priority") or "").strip() or None,
+            force_clc_state=str(payload.get("force_clc_state") or payload.get("clc_state") or "").strip() or None,
         )
 
     def retrieve(self, payload: dict[str, Any]) -> dict[str, Any]:

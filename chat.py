@@ -178,14 +178,17 @@ class MemoryChat:
         return "\n".join(lines)
 
     def teach(self, text: str) -> str:
+        controls, cleaned = self._extract_memory_controls(text)
         result = self.pipeline.teach(
-            text,
+            cleaned,
             source=self.source or f"chat:{self.agent_id}",
             session_id=self.session_id,
             agent_id=self.agent_id,
             store_session=True,
             metadata={"client": "chat.py"},
             namespace=self.namespace,
+            priority=controls.get("priority"),
+            force_clc_state=controls.get("force_clc_state"),
         )
         self.session_id = result.get("session_id") or self.session_id
         memory = result["memory"]
@@ -197,10 +200,11 @@ class MemoryChat:
         )
 
     def correct(self, text: str) -> str:
+        controls, cleaned = self._extract_memory_controls(text)
         result = self.pipeline.correct(
-            text,
+            cleaned,
             target_memory_ids=self.last_evidence,
-            target_query=text,
+            target_query=cleaned,
             top_k=self.top_k,
             source=self.source or f"chat:{self.agent_id}:correction",
             session_id=self.session_id,
@@ -208,6 +212,8 @@ class MemoryChat:
             store_session=True,
             metadata={"client": "chat.py"},
             namespace=self.namespace,
+            priority=controls.get("priority") or "high",
+            force_clc_state=controls.get("force_clc_state"),
         )
         self.session_id = result.get("session_id") or self.session_id
         memory = result["correction_memory"]
@@ -215,6 +221,27 @@ class MemoryChat:
         self.last_result = None
         targets = ", ".join(result.get("target_memory_ids") or []) or "none"
         return f"corrected memory: {memory['memory_id']}\ntargets: {targets}"
+
+    @staticmethod
+    def _extract_memory_controls(text: str) -> tuple[dict[str, str], str]:
+        controls: dict[str, str] = {}
+        parts = str(text or "").strip().split()
+        consumed = 0
+        for part in parts:
+            lower = part.lower()
+            if lower.startswith("priority="):
+                controls["priority"] = lower.split("=", 1)[1]
+                consumed += 1
+                continue
+            if lower.startswith("clc=") or lower.startswith("force=") or lower.startswith("force_clc_state="):
+                controls["force_clc_state"] = part.split("=", 1)[1].upper()
+                consumed += 1
+                continue
+            break
+        cleaned = " ".join(parts[consumed:]).strip()
+        if not cleaned:
+            cleaned = str(text or "").strip()
+        return controls, cleaned
 
     def feedback(self, text: str) -> str:
         parts = str(text or "").strip().split()
@@ -531,9 +558,9 @@ class MemoryChat:
             [
                 "commands:",
                 "/ask <question>       ask memory and show evidence",
-                "/teach <text>         store durable knowledge",
+                "/teach <text>         store durable knowledge; optional prefix priority=high or clc=PROTECT",
                 "/remember <text>      alias for /teach",
-                "/correct <text>       store a correction for the last evidence",
+                "/correct <text>       store a correction for the last evidence; optional prefix priority=high or clc=FOCUS",
                 "/feedback <label>     train last evidence; optional target: number, memory id, all",
                 "/sources              show evidence, source context, and superseded context",
                 "/why                  show retrieval scoring details for the last answer",
