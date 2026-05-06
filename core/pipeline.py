@@ -10,7 +10,7 @@ from core.contradiction import store_contradiction_if_needed
 from core.csd import CSDLayer
 from core.encoder import build_encoder
 from core.gcl_memory import GCLMemoryUpdater
-from core.models import CLCDecision, MemoryNode
+from core.models import CLCDecision, MemoryNode, RecallItem
 from core.recall import RecallEngine
 from core.resolver import compact_evidence, resolve_answer
 from core.symbolic import build_signal_packet
@@ -256,11 +256,20 @@ class MemoryPipeline:
         embedding = self.encoder.embed(query)
         self._ensure_embedding_signature(embedding)
         candidate_k = max(int(top_k), 50)
+        if self._needs_broad_lexical_scan(query):
+            candidate_k = max(candidate_k, 200)
         items = self.recall_engine.index.search(
             embedding,
             top_k=candidate_k,
             namespaces=self._namespace_scope(memory_namespace, include_global=include_global),
         )
+        if self._needs_broad_lexical_scan(query):
+            items = self._with_lexical_backfill(
+                items,
+                query,
+                namespaces=self._namespace_scope(memory_namespace, include_global=include_global),
+                limit=max(candidate_k, 200),
+            )
         query_l = str(query or "").lower()
         candidate_ids = [item.memory_id for item in items]
         feedback_by_memory = self.db.feedback_summary_for_memories(candidate_ids)
@@ -962,8 +971,8 @@ class MemoryPipeline:
 
     @staticmethod
     def _text_affinity(query: str, text: str) -> float:
-        query_tokens = {MemoryPipeline._stem_token(token) for token in MemoryPipeline._tokens(query)}
-        text_tokens = {MemoryPipeline._stem_token(token) for token in MemoryPipeline._tokens(text)}
+        query_tokens = MemoryPipeline._expanded_tokens(query)
+        text_tokens = MemoryPipeline._expanded_tokens(text)
         if not query_tokens or not text_tokens:
             return 0.0
         stopwords = {
@@ -981,6 +990,7 @@ class MemoryPipeline:
             "whether",
             "which",
             "with",
+            "who",
         }
         query_terms = {token for token in query_tokens if len(token) > 2 and token not in stopwords}
         if not query_terms:
@@ -1053,8 +1063,6 @@ class MemoryPipeline:
             term in text_l
             for term in (
                 "correction:",
-                "supersedes",
-                "current",
                 "now ",
                 "must not",
                 "only when",
@@ -1137,8 +1145,10 @@ class MemoryPipeline:
                 "all",
                 "what are",
                 "what should",
+                "how does",
                 "general",
                 "overall",
+                "work",
             )
         )
         text_l = str(text or "").lower()
@@ -1366,6 +1376,78 @@ class MemoryPipeline:
         if len(token) > 3 and token.endswith("s"):
             return token[:-1]
         return token
+
+    @staticmethod
+    def _expanded_tokens(text: str) -> set[str]:
+        lower = str(text or "").lower()
+        tokens = {MemoryPipeline._stem_token(token) for token in MemoryPipeline._tokens(lower)}
+        if "who am i" in lower or "what am i" in lower or "my identity" in lower or "my name" in lower:
+            tokens.update({"identity", "name", "user", "primary", "called", "agent", "hermes", "victor"})
+        if tokens & {"contradict", "contradiction", "conflict"} or "facts contradict" in lower:
+            tokens.update({"contradict", "contradiction", "conflict", "protect", "protective", "correction", "stale", "csd"})
+        if tokens & {"consolidation", "consolidate"} or "consolidation work" in lower:
+            tokens.update({"consolidation", "consolidate", "summary", "summarize", "summarizes", "original", "preserve", "source"})
+        if "previous question" in lower or "remember previous" in lower:
+            tokens.update({"session", "history", "turn", "context", "previous", "question", "remember"})
+        if tokens & {"maintain", "maintains"}:
+            tokens.update({"maintain", "maintains"})
+        return tokens
+
+    @staticmethod
+    def _needs_broad_lexical_scan(query: str) -> bool:
+        lower = str(query or "").lower()
+        return any(
+            term in lower
+            for term in (
+                "who am i",
+                "who i am",
+                "what am i",
+                "my identity",
+                "my name",
+                "previous question",
+                "remember previous",
+                "session history",
+                "facts contradict",
+                "contradiction",
+                "consolidation",
+                "consolidate",
+            )
+        )
+
+    def _with_lexical_backfill(
+        self,
+        items: list[RecallItem],
+        query: str,
+        namespaces: list[str] | None = None,
+        limit: int = 200,
+    ) -> list[RecallItem]:
+        seen = {item.memory_id for item in items}
+        additions: list[tuple[float, RecallItem]] = []
+        for row in self.db.list_memory_vectors(include_deprecated=False, namespaces=namespaces):
+            memory_id = str(row.get("id") or "")
+            if not memory_id or memory_id in seen:
+                continue
+            affinity = self._text_affinity(query, str(row.get("text") or ""))
+            if affinity < 0.45:
+                continue
+            additions.append(
+                (
+                    affinity,
+                    RecallItem(
+                        memory_id=memory_id,
+                        domain_id=row.get("domain_id"),
+                        text=str(row.get("text") or ""),
+                        memory_type=str(row.get("memory_type") or "semantic_note"),
+                        score=max(0.25, min(1.0, affinity)),
+                        importance=float(row.get("importance") or 0.0),
+                        stability=float(row.get("stability") or 0.0),
+                        namespace=normalize_namespace(row.get("namespace")),
+                        deprecated=bool(row.get("deprecated")),
+                    ),
+                )
+            )
+        additions.sort(key=lambda item: item[0], reverse=True)
+        return [*items, *(item for _affinity, item in additions[: max(0, int(limit) - len(items))])]
 
     @staticmethod
     def _normalize_priority(priority: str | None) -> str:

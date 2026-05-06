@@ -6,7 +6,8 @@ The program stores text memories as embedding-backed nodes, assigns them to symb
 
 ## Current Baseline
 
-- Embedding backend: WSL `llama_cpp`
+- Embedding backend from Windows: `wsl_llama_cpp`
+- Embedding backend from WSL/Hermes: `llama_cpp`
 - Model: `embeddinggemma-300M-Q8_0.gguf`
 - Vector dimension: `768`
 - Active database: `memory_experiment_180_best.db`
@@ -57,6 +58,8 @@ py eval/agent_corpus_experiment.py
 py chat.py --agent-id agent_alpha
 py serve.py --host 127.0.0.1 --port 8765
 ```
+
+After changing resolver or retrieval code, restart any long-running server before evaluating answers. The report regression covers short natural questions such as `who am i`, `what does G-CL maintain`, CSD contradiction questions, CLC definition questions, and consolidation questions.
 
 ## API Endpoints
 

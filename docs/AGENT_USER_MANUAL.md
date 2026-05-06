@@ -27,7 +27,8 @@ Together they make the memory more than a vector database. The program keeps evi
 The default configuration is in `config.yaml`.
 
 - Database: `memory_experiment_180_best.db`
-- Embedding backend: WSL `llama_cpp`
+- Embedding backend from Windows: `wsl_llama_cpp`
+- Embedding backend from WSL/Hermes: `llama_cpp`
 - Embedding model: `embeddinggemma-300M-Q8_0.gguf`
 - Embedding dimension: `768`
 - Default server URL: `http://127.0.0.1:8765`
@@ -40,6 +41,14 @@ The configured model path is:
 ```
 
 For fast tests, some evals use deterministic hash embeddings instead of the GGUF model.
+
+The Hermes agent-facing deployment keeps its live DB in:
+
+```text
+\\wsl.localhost\Ubuntu\home\victo\.hermes\clc-gcl-memory-core\memory_experiment_180_best.db
+```
+
+After source changes, restart the long-running server before judging behavior. A stale server can retrieve the right raw memories but still answer with old resolver logic.
 
 ## 3. Agent Memory Model
 
@@ -121,6 +130,19 @@ Natural text without a slash also asks memory:
 ```text
 What does the user prefer for agent manuals?
 ```
+
+Short natural questions are supported, including identity, CLC/G-CL mechanism, CSD contradiction, and consolidation questions:
+
+```text
+who am i
+what does G-CL maintain
+what happens when facts contradict
+how does memory consolidation work
+what CLC states exist
+does the system remember previous questions
+```
+
+These query types use stricter intent matching and a broader lexical candidate scan so important short prompts are not swallowed by unrelated high-vector-score technical memories.
 
 Teach durable knowledge:
 
@@ -263,6 +285,12 @@ Start the server:
 
 ```powershell
 py serve.py --host 127.0.0.1 --port 8765
+```
+
+If testing the WSL/Hermes deployment, start the server from the WSL project folder so it uses the WSL `llama_cpp` backend and the Hermes DB:
+
+```powershell
+wsl -e sh -lc "cd /home/victo/.hermes/clc-gcl-memory-core && /home/victo/.openclaw/workspace/module/.venv_mlcpu/bin/python serve.py"
 ```
 
 Health and stats:
@@ -585,6 +613,7 @@ If an answer ignores agent memory:
 - Use `/why` to inspect scoring.
 - Ask with a more specific query.
 - Teach a clearer memory with a source label.
+- Confirm the server was restarted after code changes.
 
 If wrong memories keep appearing:
 
@@ -605,6 +634,22 @@ If namespaces seem mixed:
 - Run `py main.py stats` and inspect `namespaces_detail`.
 - Run `py eval\maintenance_namespace_isolation_eval.py`.
 - Make sure all API calls pass the intended `namespace`.
+
+If a short natural query retrieves unrelated technical chunks:
+
+- Restart the server so it loads the latest resolver.
+- Run `py eval\report_issue_regression.py`.
+- Check that the query has an intent-specific memory in the active namespace or `global`.
+- Use `/teach` or `/correct` with clear wording such as "My name is ..." or "CSD detects contradictions ..." when the memory is missing.
+
+Verified live WSL/Hermes questions after the resolver fixes:
+
+- `who am i` returns the Victor identity memory.
+- `what does G-CL maintain` returns G-CL domain geometry evidence.
+- `what happens when facts contradict` returns CSD contradiction evidence.
+- `how does memory consolidation work` returns consolidation summary evidence.
+- `what CLC states exist` returns CLC state evidence without a false current/stale conflict.
+- `does the system remember previous questions` returns session/history command evidence.
 
 ## 16. Minimal Real-Agent Integration Pattern
 

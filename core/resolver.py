@@ -37,9 +37,13 @@ def resolve_answer(query: str, results: list[dict[str, Any]]) -> dict[str, Any]:
     live_conflicts = detect_live_evidence_conflicts(evidence)
     summary_answer = bool(evidence) and evidence[0].get("memory_state") == "summary"
     summary_only = bool(evidence) and all(item.get("memory_state") == "summary" for item in evidence)
+    evidence_has_current = any(item.get("memory_state") == "current" for item in evidence)
+    evidence_has_stale = any(item.get("memory_state") == "stale" for item in evidence)
+    evidence_has_disputed = any(item.get("memory_state") == "disputed" for item in evidence)
     conflict = (
-        (bool((current or historical) and stale) and not summary_only and not summary_answer)
-        or bool(disputed)
+        (bool(evidence_has_current and (evidence_has_stale or stale)) and not summary_only and not summary_answer)
+        or evidence_has_disputed
+        or (bool(disputed) and not allows_stale_definition_context(query))
         or correction_conflict
         or bool(live_conflicts)
     )
@@ -83,17 +87,31 @@ def choose_preferred_evidence(
     historical = [item for item in historical if is_relevant_to_query(query, item)]
     disputed = [item for item in disputed if is_relevant_to_query(query, item)]
     stale = [item for item in stale if is_relevant_to_query(query, item)]
+    summary = [item for item in summary if is_relevant_to_query(query, item)]
+    historical = sorted(historical, key=lambda item: evidence_preference_score(query, item), reverse=True)
+    stale = sorted(stale, key=lambda item: evidence_preference_score(query, item), reverse=True)
+    disputed = sorted(disputed, key=lambda item: evidence_preference_score(query, item), reverse=True)
+    summary = sorted(summary, key=lambda item: evidence_preference_score(query, item), reverse=True)
     top_score = max(float(item.get("score") or 0.0) for item in results)
     if current:
         relevant_current = [item for item in current if is_relevant_to_query(query, item)]
         current_pool = relevant_current or ([] if (historical or stale or disputed) else current)
         current_score = max((float(item.get("score") or 0.0) for item in current_pool), default=0.0)
         relevance_floor = max(0.18, top_score * 0.90)
-        if current_pool and (current_score >= relevance_floor or not historical):
+        if current_pool and (current_score >= relevance_floor or not (historical or summary)):
             return current_pool
-    if summary and asks_for_multiple(query):
+    if summary and (asks_for_multiple(query) or asks_for_summary_mechanism(query)):
         return summary + historical + current
-    return historical or disputed or stale or current
+    if historical:
+        supplemental_stale = []
+        if allows_stale_definition_context(query):
+            supplemental_stale = [
+                item
+                for item in stale
+                if evidence_preference_score(query, item) >= evidence_preference_score(query, historical[0]) - 0.08
+            ]
+        return sorted(historical + supplemental_stale, key=lambda item: evidence_preference_score(query, item), reverse=True)
+    return disputed or stale or current or summary
 
 
 def classify_memory_state(item: dict[str, Any]) -> str:
@@ -122,11 +140,10 @@ def classify_memory_state(item: dict[str, Any]) -> str:
         term in text
         for term in (
             "correction:",
-            "current",
             "must not",
             "only when",
-            "supersedes",
             "prefer the corrected",
+            "no longer current",
         )
     )
 
@@ -134,7 +151,9 @@ def classify_memory_state(item: dict[str, Any]) -> str:
         return "stale"
     if feedback < -0.2:
         return "disputed"
-    if supersession >= CURRENT_THRESHOLD or relation_supersession > 0.0:
+    if supersession >= CURRENT_THRESHOLD:
+        return "current"
+    if relation_supersession > 0.0 and correction_language:
         return "current"
     if correction_language and not stale_language:
         return "current"
@@ -150,6 +169,10 @@ def is_relevant_to_query(query: str, item: dict[str, Any]) -> bool:
     text_terms = normalized_terms(clean_answer_text(item.get("text") or ""))
     domain_terms = normalized_terms(item.get("domain_name") or "")
     text_terms |= domain_terms
+    if is_identity_query(query) and not has_identity_evidence(text_terms):
+        return False
+    if asks_for_previous_session_query(query) and not has_previous_session_evidence(text_terms):
+        return False
     identity_terms = {"alpha", "beta", "gamma", "delta"}
     required_identity_terms = query_terms & identity_terms
     if required_identity_terms and not required_identity_terms <= text_terms:
@@ -160,7 +183,37 @@ def is_relevant_to_query(query: str, item: dict[str, Any]) -> bool:
     if text_match >= 0.34:
         return True
     overlap = query_terms & text_terms
-    return len(overlap) >= min(2, len(query_terms))
+    if len(overlap) >= max(1, len(query_terms) // 2):
+        return True
+    score = float(item.get("score") or 0.0)
+    cosine = float(item.get("cosine") or 0.0)
+    if score >= 0.30 or cosine >= 0.62:
+        if overlap:
+            return True
+        if is_identity_query(query):
+            return has_identity_evidence(text_terms)
+        if asks_for_previous_session_query(query):
+            return has_previous_session_evidence(text_terms)
+        return asks_for_summary_mechanism(query)
+    return False
+
+
+def evidence_preference_score(query: str, item: dict[str, Any]) -> float:
+    text = str(item.get("text") or "")
+    clean_text = clean_answer_text(text)
+    score = float(item.get("score") or 0.0)
+    score += 0.20 * float(item.get("text_match_score") or 0.0)
+    score += 0.05 * len(normalized_terms(query) & normalized_terms(clean_text))
+    lower = text.lower()
+    if lower.startswith("memory improvement for"):
+        score -= 0.18
+    if "original memory preview:" in lower:
+        score -= 0.06
+    if clean_text and not clean_text.lower().startswith("this memory is a core definition"):
+        score += 0.04
+    if str(item.get("memory_state") or "") == "summary" and asks_for_summary_mechanism(query):
+        score += 0.12
+    return score
 
 
 def has_correction_conflict_evidence(evidence: list[dict[str, Any]]) -> bool:
@@ -254,11 +307,7 @@ def candidate_snippets(query: str, text: str) -> list[tuple[str, float]]:
     cleaned = clean_answer_text(text)
     if not cleaned:
         return []
-    query_terms = {
-        term
-        for term in re.findall(r"[A-Za-z0-9_'-]+", query.lower())
-        if len(term) > 2 and term not in ANSWER_STOPWORDS
-    }
+    query_terms = normalized_terms(query)
     pieces = [
         piece.strip()
         for piece in re.split(r"(?<=[.!?])\s+|\s+-\s+|\s+(?=\d+\.\s+)", cleaned)
@@ -280,11 +329,7 @@ def candidate_snippets(query: str, text: str) -> list[tuple[str, float]]:
         lower = compact.lower()
         if lower.startswith("consolidated summary:") or lower.startswith("this summary preserves") or lower.startswith("key memory points:") or lower.startswith("source memory ids:"):
             continue
-        piece_terms = {
-            term
-            for term in re.findall(r"[A-Za-z0-9_'-]+", lower)
-            if len(term) > 2 and term not in ANSWER_STOPWORDS
-        }
+        piece_terms = normalized_terms(lower)
         hits = len(query_terms & piece_terms)
         coverage = hits / max(1, len(query_terms))
         correction_bonus = 2 if any(term in lower for term in ("correction", "current", "must", "only when")) else 0
@@ -328,6 +373,7 @@ def clean_answer_text(text: str) -> str:
 
 def normalized_terms(text: Any) -> set[str]:
     terms = set()
+    lower_text = str(text or "").lower()
     for term in re.findall(r"[A-Za-z0-9_'-]+", str(text or "").lower()):
         if len(term) <= 2 or term in ANSWER_STOPWORDS:
             continue
@@ -336,7 +382,47 @@ def normalized_terms(text: Any) -> set[str]:
             compact = term.replace("-", "")
             if len(compact) > 2:
                 terms.add(stem_token(compact))
+    terms |= expanded_query_terms(lower_text, terms)
     return terms
+
+
+def expanded_query_terms(lower_text: str, terms: set[str]) -> set[str]:
+    expanded: set[str] = set()
+    if re.search(r"\b(who am i|who i am|what am i|my identity|my name)\b", lower_text):
+        expanded.update({"identity", "name", "user", "primary", "called", "agent", "hermes", "victor"})
+    if terms & {"contradict", "contradiction", "conflict"} or "facts contradict" in lower_text:
+        expanded.update({"contradict", "contradiction", "conflict", "protect", "protective", "correction", "stale", "csd"})
+    if terms & {"consolidation", "consolidate"} or "consolidation work" in lower_text:
+        expanded.update({"consolidation", "consolidate", "summary", "summarize", "summarizes", "original", "preserve", "source"})
+    if "previous question" in lower_text or "remember previous" in lower_text:
+        expanded.update({"session", "history", "turn", "context", "previous", "questions", "remember"})
+    if terms & {"maintain", "maintains"}:
+        expanded.add("maintain")
+        expanded.add("maintains")
+    return expanded
+
+
+def is_identity_query(query: str) -> bool:
+    return bool(re.search(r"\b(who am i|who i am|what am i|my identity|my name)\b", str(query or "").lower()))
+
+
+def has_identity_evidence(text_terms: set[str]) -> bool:
+    return bool(text_terms & {"name", "called", "victor"} or {"primary", "user"} <= text_terms)
+
+
+def asks_for_previous_session_query(query: str) -> bool:
+    lower = str(query or "").lower()
+    return "previous question" in lower or "remember previous" in lower or "session history" in lower
+
+
+def has_previous_session_evidence(text_terms: set[str]) -> bool:
+    return bool(text_terms & {"session", "history", "turn", "context", "previous", "question"})
+
+
+def is_short_natural_query(query: str) -> bool:
+    terms = normalized_terms(query)
+    raw_terms = re.findall(r"[A-Za-z0-9_'-]+", str(query or "").lower())
+    return len(raw_terms) <= 5 and len(terms) <= 8
 
 
 def stem_token(term: str) -> str:
@@ -444,6 +530,40 @@ def asks_for_multiple(query: str) -> bool:
     return any(term in lower for term in ("summarize", "summary", "list", "all ", "main points", "what are")) or (
         "how" in lower and any(term in lower for term in ("test", "workflow", "process", "steps"))
     )
+
+
+def asks_for_summary_mechanism(query: str) -> bool:
+    lower = str(query or "").lower()
+    if "summary" in lower or "summarize" in lower or "overview" in lower:
+        return True
+    return bool(
+        ("consolidation" in lower or "consolidate" in lower)
+        and any(term in lower for term in ("how does", "how do", "work", "workflow", "process", "mechanism"))
+        and not any(term in lower for term in ("preserve original", "source memor", "evidence id"))
+    )
+
+
+def allows_stale_definition_context(query: str) -> bool:
+    lower = str(query or "").lower().strip()
+    if any(
+        term in lower
+        for term in (
+            "current",
+            "policy",
+            "preference",
+            "rule",
+            "style",
+            "should",
+            "must",
+            "allowed",
+            "latest",
+            "correct",
+            "final",
+        )
+    ):
+        return False
+    definition_starts = ("what is ", "what are ", "what does ", "define ", "explain ")
+    return lower.startswith(definition_starts) or "states exist" in lower
 
 
 def compact_evidence(item: dict[str, Any]) -> dict[str, Any]:

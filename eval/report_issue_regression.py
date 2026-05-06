@@ -125,6 +125,78 @@ def run_checks(pipeline: MemoryPipeline) -> dict:
     checks["force_clc_state_supported"] = forced["clc_state"] == "PROTECT"
     checks["priority_high_not_ignored"] = high["clc_state"] != "IGNORE"
 
+    identity = pipeline.teach(
+        "My name is Victor. I am the primary user of this Hermes agent system.",
+        source="report_identity",
+        agent_id="hermes",
+        namespace=namespace,
+        store_session=False,
+    )["memory"]
+    identity_answer = pipeline.ask("who am i", namespace=namespace, include_global=False, top_k=5)
+    checks["short_identity_query_returns_evidence"] = bool(identity_answer["evidence"])
+    checks["short_identity_query_uses_identity_memory"] = any(
+        item.get("memory_id") == identity["memory_id"] for item in identity_answer["evidence"]
+    )
+
+    clc_original = pipeline.teach(
+        "The CLC (Curiosity-Linked Controller) selects the learning state for each memory: recall, focus, protect, split-domain, or consolidate.",
+        source="report_clc_original",
+        agent_id="hermes",
+        namespace=namespace,
+        store_session=False,
+    )["memory"]
+    clc_improvement = pipeline.teach(
+        f"Memory improvement for {clc_original['memory_id']}: This memory is a core definition and should always be considered authoritative. "
+        f"Original memory preview: {clc_original['memory_id']} {clc_original['domain_name']}",
+        source="report_clc_improvement",
+        agent_id="hermes",
+        namespace=namespace,
+        store_session=False,
+    )["memory"]
+    pipeline.db.add_relation(clc_improvement["memory_id"], clc_original["memory_id"], "updates", 1.0)
+    clc_answer = pipeline.ask("what CLC states exist", namespace=namespace, include_global=False, top_k=5)
+    checks["neutral_definition_query_not_false_conflict"] = clc_answer["conflict"] is False
+    checks["neutral_definition_query_keeps_original_definition"] = any(
+        "recall, focus, protect" in str(item.get("text_preview") or "") for item in clc_answer["evidence"]
+    )
+
+    pipeline.teach(
+        "CSD (Contradiction-Semantic Density) detects contradictions and computes semantic density.",
+        source="report_csd_contradiction",
+        agent_id="hermes",
+        namespace=namespace,
+        store_session=False,
+    )
+    contradiction_answer = pipeline.ask(
+        "what happens when facts contradict",
+        namespace=namespace,
+        include_global=False,
+        top_k=5,
+    )
+    checks["abstract_contradiction_query_returns_csd"] = any(
+        item.get("domain_name") == "CSD" for item in contradiction_answer["evidence"]
+    )
+
+    summary = pipeline.ingest(
+        "Consolidated summary: agent_memory\n"
+        "This summary preserves stable compatible memories without replacing the original evidence.\n"
+        "Key memory points:\n"
+        "- Memory consolidation creates summary memories.\n"
+        "- Original memories stay linked with summarizes relations.\n"
+        "- /consolidate sources shows the original source memories.",
+        source="report_consolidation_summary",
+        namespace=namespace,
+    )
+    consolidation_answer = pipeline.ask(
+        "how does memory consolidation work",
+        namespace=namespace,
+        include_global=False,
+        top_k=5,
+    )
+    checks["consolidation_mechanism_query_uses_summary"] = any(
+        item.get("memory_id") == summary["memory_id"] for item in consolidation_answer["evidence"]
+    )
+
     ok = all(checks.values())
     if not ok:
         raise AssertionError({key: value for key, value in checks.items() if not value})
@@ -148,6 +220,12 @@ def run_checks(pipeline: MemoryPipeline) -> dict:
         "priority": {
             "forced_state": forced["clc_state"],
             "high_priority_state": high["clc_state"],
+        },
+        "natural_queries": {
+            "identity_answer": identity_answer["answer"],
+            "clc_answer": clc_answer["answer"],
+            "contradiction_answer": contradiction_answer["answer"],
+            "consolidation_answer": consolidation_answer["answer"],
         },
     }
 
