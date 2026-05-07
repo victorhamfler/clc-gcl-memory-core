@@ -13,6 +13,8 @@ The program stores text memories as embedding-backed nodes, assigns them to symb
 - Active database: `memory_experiment_180_best.db`
 - HTTP API default: `http://127.0.0.1:8765`
 
+The committed config is Windows-first and uses `wsl_llama_cpp` to bridge into WSL. When the same code runs inside WSL/Hermes, it automatically switches that config to native `llama_cpp` with `wsl_model_path`. Existing databases created with the Windows bridge remain compatible as long as the GGUF model name and embedding dimension match.
+
 For the full agent-facing operating guide, see [docs/AGENT_USER_MANUAL.md](docs/AGENT_USER_MANUAL.md).
 
 ## Quick Commands

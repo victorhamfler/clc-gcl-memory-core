@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,35 @@ def init_db(root: Path, db_path: Path) -> None:
         db.close()
 
 
+def running_inside_wsl() -> bool:
+    if os.environ.get("WSL_DISTRO_NAME") or os.environ.get("WSL_INTEROP"):
+        return True
+    try:
+        return "microsoft" in Path("/proc/version").read_text(encoding="utf-8", errors="ignore").lower()
+    except OSError:
+        return False
+
+
+def runtime_embedding_config(config: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Return an embedding config appropriate for the current OS runtime.
+
+    The committed config is Windows-first because Windows needs the
+    `wsl_llama_cpp` bridge to reach the GGUF model inside WSL. When the same
+    project runs inside WSL, the bridge cannot call `wsl`, so use native
+    `llama_cpp` against `wsl_model_path` instead.
+    """
+
+    embedding = dict((config or {}).get("embedding") or {})
+    if not embedding:
+        return None
+    backend = str(embedding.get("backend") or "").strip().lower().replace("-", "_")
+    if running_inside_wsl() and backend in {"wsl_llama_cpp", "wsl_gguf"}:
+        embedding["backend"] = "llama_cpp"
+        if embedding.get("wsl_model_path"):
+            embedding["gguf_path"] = embedding["wsl_model_path"]
+    return embedding
+
+
 def create_pipeline(root: Path, db_path: Path | None = None) -> MemoryPipeline:
     config = load_config(root)
     resolved_db_path = db_path or configured_db_path(root, config)
@@ -35,7 +65,7 @@ def create_pipeline(root: Path, db_path: Path | None = None) -> MemoryPipeline:
         db_path=resolved_db_path,
         embedding_dim=int(config.get("embedding_dim") or 128),
         top_k=int(config.get("top_k") or 8),
-        embedding_config=config.get("embedding"),
+        embedding_config=runtime_embedding_config(config),
         retrieval_weights=config.get("retrieval_weights"),
         clc_thresholds=config.get("thresholds"),
     )

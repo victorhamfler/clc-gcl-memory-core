@@ -1628,8 +1628,7 @@ class MemoryPipeline:
             self.db.set_runtime_state("embedding_signature", descriptor)
             return descriptor
         existing_c = self._canonical_embedding_signature(existing)
-        fields = ("backend", "model_name", "embedding_dim", "model_path")
-        if any(existing_c.get(field) != descriptor.get(field) for field in fields):
+        if not self._embedding_signatures_compatible(existing_c, descriptor):
             raise RuntimeError(
                 "Embedding runtime signature mismatch detected. "
                 f"Existing={existing_c}; current={descriptor}. "
@@ -1652,3 +1651,18 @@ class MemoryPipeline:
             out["model_path"] = None
         out["embedding_dim"] = int(out.get("embedding_dim") or 0)
         return out
+
+    @staticmethod
+    def _embedding_signatures_compatible(existing: dict[str, Any], current: dict[str, Any]) -> bool:
+        if int(existing.get("embedding_dim") or 0) != int(current.get("embedding_dim") or 0):
+            return False
+        if str(existing.get("model_name") or "") != str(current.get("model_name") or ""):
+            return False
+        existing_backend = str(existing.get("backend") or "")
+        current_backend = str(current.get("backend") or "")
+        gguf_backends = {"llama_cpp", "wsl_llama_cpp"}
+        if existing_backend in gguf_backends and current_backend in gguf_backends:
+            return True
+        if existing_backend != current_backend:
+            return False
+        return existing.get("model_path") == current.get("model_path")

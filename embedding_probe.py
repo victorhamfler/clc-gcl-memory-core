@@ -7,6 +7,7 @@ from pathlib import Path
 
 from core.config import load_config
 from core.encoder import build_encoder
+from core.runtime import runtime_embedding_config
 
 
 ROOT = Path(__file__).resolve().parent
@@ -20,7 +21,7 @@ def main() -> None:
     args = parser.parse_args()
 
     config = load_config(ROOT)
-    encoder = build_encoder(config.get("embedding"), default_dim=int(config.get("embedding_dim") or 128))
+    encoder = build_encoder(runtime_embedding_config(config), default_dim=int(config.get("embedding_dim") or 128))
     try:
         text = " ".join(args.text)
         elapsed: list[float] = []

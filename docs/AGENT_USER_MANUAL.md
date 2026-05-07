@@ -42,6 +42,8 @@ The configured model path is:
 
 For fast tests, some evals use deterministic hash embeddings instead of the GGUF model.
 
+The default config is Windows-first and uses `wsl_llama_cpp` to call into WSL. When the server or chat runs inside WSL/Hermes, the runtime automatically switches to native `llama_cpp` using `/home/victo/models/embeddinggemma-300M-Q8_0.gguf`. A DB created with `wsl_llama_cpp` can be reused from WSL as long as the GGUF model name and embedding dimension match.
+
 The Hermes agent-facing deployment keeps its live DB in:
 
 ```text
@@ -626,6 +628,7 @@ py eval\gcl_domain_health_eval.py
 py eval\maintenance_false_repair_eval.py
 py eval\report_issue_regression.py
 py eval\consolidation_safety_smoke.py
+py eval\wsl_backend_compat_eval.py
 py eval\session_memory_eval.py
 py eval\usage_confidence_eval.py
 py eval\chat_smoke.py

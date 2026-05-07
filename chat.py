@@ -8,7 +8,7 @@ from core.config import load_config, resolve_project_path
 from core.consolidation import consolidation_plan, create_consolidation_summaries
 from core.maintenance import improvement_plan, memory_review, record_memory_improvement, weak_memories
 from core.pipeline import MemoryPipeline
-from core.runtime import configured_db_path, init_db, pipeline_stats
+from core.runtime import configured_db_path, init_db, pipeline_stats, runtime_embedding_config
 
 
 ROOT = Path(__file__).resolve().parent
@@ -39,7 +39,7 @@ def build_pipeline(
         embedding_config: dict[str, Any] | None = {"backend": "hash", "dim": int(embedding_dim)}
         dim = int(embedding_dim)
     else:
-        embedding_config = config.get("embedding")
+        embedding_config = runtime_embedding_config(config)
         dim = int(config.get("embedding_dim") or embedding_dim)
     return MemoryPipeline(
         root=root,

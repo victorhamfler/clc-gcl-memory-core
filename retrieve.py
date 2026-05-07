@@ -6,6 +6,7 @@ from pathlib import Path
 
 from core.config import load_config, resolve_project_path
 from core.pipeline import MemoryPipeline
+from core.runtime import runtime_embedding_config
 
 
 ROOT = Path(__file__).resolve().parent
@@ -24,7 +25,7 @@ def main() -> None:
         db_path,
         embedding_dim=int(config.get("embedding_dim") or 128),
         top_k=max(1, args.top_k),
-        embedding_config=config.get("embedding"),
+        embedding_config=runtime_embedding_config(config),
     )
     pipeline.db.init_schema(ROOT / "storage" / "schema.sql")
     try:
