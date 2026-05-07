@@ -47,6 +47,17 @@ class MemoryApi:
     def stats(self) -> dict[str, Any]:
         return pipeline_stats(self.pipeline)
 
+    def memory_usage(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "memory_usage": self.pipeline.db.memory_usage(
+                limit=max(1, int(payload.get("limit") or 20)),
+                namespace=str(payload.get("namespace") or "").strip() or None,
+                include_global=bool(payload.get("include_global", True)),
+                memory_id=str(payload.get("memory_id") or "").strip() or None,
+            ),
+        }
+
     def create_session(self, payload: dict[str, Any]) -> dict[str, Any]:
         metadata = payload.get("metadata")
         if metadata is not None and not isinstance(metadata, dict):
@@ -78,6 +89,20 @@ class MemoryApi:
             "ok": True,
             "session": session,
             "turns": self.pipeline.db.session_history(session_id, limit=limit),
+            "session_memory": self.pipeline.db.list_session_memory(session_id),
+        }
+
+    def session_memory(self, payload: dict[str, Any]) -> dict[str, Any]:
+        session_id = str(payload.get("session_id") or "").strip()
+        if not session_id:
+            raise ValueError("POST /session_memory requires JSON field 'session_id'")
+        session = self.pipeline.db.get_session(session_id)
+        if session is None:
+            raise ValueError(f"unknown session_id: {session_id}")
+        return {
+            "ok": True,
+            "session": session,
+            "session_memory": self.pipeline.db.list_session_memory(session_id, limit=max(1, int(payload.get("limit") or 20))),
         }
 
     def ingest(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -352,6 +377,8 @@ def make_handler(api: MemoryApi):
                     self._send_json(200, api.create_session(payload))
                 elif path == "/session_history":
                     self._send_json(200, api.session_history(payload))
+                elif path == "/session_memory":
+                    self._send_json(200, api.session_memory(payload))
                 elif path == "/feedback":
                     self._send_json(200, api.feedback(payload))
                 elif path == "/consolidation_plan":
@@ -366,6 +393,8 @@ def make_handler(api: MemoryApi):
                     self._send_json(200, api.memory_weak(payload))
                 elif path == "/memory_improve":
                     self._send_json(200, api.memory_improve(payload))
+                elif path == "/memory_usage":
+                    self._send_json(200, api.memory_usage(payload))
                 elif path == "/shutdown":
                     self._send_json(200, {"ok": True, "shutdown": True})
                     threading.Thread(target=self.server.shutdown, daemon=True).start()
@@ -433,6 +462,7 @@ def main() -> None:
                     "/session",
                     "/sessions",
                     "/session_history",
+                    "/session_memory",
                     "/feedback",
                     "/consolidation_plan",
                     "/consolidate",
@@ -440,6 +470,7 @@ def main() -> None:
                     "/memory_review",
                     "/memory_weak",
                     "/memory_improve",
+                    "/memory_usage",
                 ],
             },
             indent=2,

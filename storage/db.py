@@ -86,6 +86,23 @@ class MemoryDB:
             self.conn.execute("ALTER TABLE domains ADD COLUMN namespace TEXT DEFAULT 'global'")
             self.conn.execute("UPDATE domains SET namespace='global' WHERE namespace IS NULL OR namespace=''")
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_domains_namespace_name ON domains(namespace, name)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at)")
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS session_memory (
+                session_id TEXT NOT NULL,
+                key TEXT NOT NULL,
+                value TEXT NOT NULL,
+                metadata TEXT,
+                created_at TEXT,
+                updated_at TEXT,
+                PRIMARY KEY(session_id, key),
+                FOREIGN KEY(session_id) REFERENCES agent_sessions(id)
+            )
+            """
+        )
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_session_memory_session ON session_memory(session_id)")
 
     def upsert_domain(self, domain: DomainState) -> None:
         now = utc_now()
@@ -387,6 +404,78 @@ class MemoryDB:
             return []
         return [str(item) for item in json.loads(rows[0]["evidence_memory_ids"] or "[]") if str(item or "").strip()]
 
+    def upsert_session_memory(
+        self,
+        session_id: str,
+        key: str,
+        value: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if self.get_session(session_id) is None:
+            raise ValueError(f"unknown session_id: {session_id}")
+        normalized_key = str(key or "").strip().lower()
+        cleaned = str(value or "").strip()
+        if not normalized_key:
+            raise ValueError("session memory key is required")
+        if not cleaned:
+            raise ValueError("session memory value is required")
+        now = utc_now()
+        existing = self.conn.execute(
+            "SELECT created_at FROM session_memory WHERE session_id=? AND key=?",
+            (session_id, normalized_key),
+        ).fetchone()
+        created_at = existing["created_at"] if existing is not None else now
+        self.conn.execute(
+            """
+            INSERT INTO session_memory (session_id, key, value, metadata, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(session_id, key) DO UPDATE SET
+                value=excluded.value,
+                metadata=excluded.metadata,
+                updated_at=excluded.updated_at
+            """,
+            (
+                session_id,
+                normalized_key,
+                cleaned,
+                json.dumps(metadata or {}, separators=(",", ":")),
+                created_at,
+                now,
+            ),
+        )
+        self.conn.execute("UPDATE agent_sessions SET updated_at=? WHERE id=?", (now, session_id))
+        self.conn.commit()
+        return {
+            "session_id": session_id,
+            "key": normalized_key,
+            "value": cleaned,
+            "metadata": metadata or {},
+            "created_at": created_at,
+            "updated_at": now,
+        }
+
+    def get_session_memory(self, session_id: str, key: str) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT * FROM session_memory WHERE session_id=? AND key=?",
+            (session_id, str(key or "").strip().lower()),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._session_memory_from_row(row)
+
+    def list_session_memory(self, session_id: str, limit: int = 20) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            """
+            SELECT *
+            FROM session_memory
+            WHERE session_id=?
+            ORDER BY updated_at DESC
+            LIMIT ?
+            """,
+            (session_id, int(limit)),
+        ).fetchall()
+        return [self._session_memory_from_row(row) for row in rows]
+
     def list_sessions(self, agent_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
         if agent_id:
             rows = self.conn.execute(
@@ -558,6 +647,29 @@ class MemoryDB:
                 "avg_rating": 0.0 if row["avg_rating"] is None else float(row["avg_rating"]),
                 "positive": int(row["positive"] or 0),
                 "negative": int(row["negative"] or 0),
+            }
+            for row in rows
+        }
+
+    def usage_summary_for_memories(self, memory_ids: list[str]) -> dict[str, dict[str, Any]]:
+        ids = [str(memory_id) for memory_id in memory_ids if str(memory_id or "").strip()]
+        if not ids:
+            return {}
+        placeholders = ",".join("?" for _ in ids)
+        rows = self.conn.execute(
+            f"""
+            SELECT memory_id, COUNT(*) AS count, MAX(created_at) AS last_recalled
+            FROM events
+            WHERE event_type='retrieval_use'
+              AND memory_id IN ({placeholders})
+            GROUP BY memory_id
+            """,
+            ids,
+        ).fetchall()
+        return {
+            row["memory_id"]: {
+                "count": int(row["count"] or 0),
+                "last_recalled": row["last_recalled"],
             }
             for row in rows
         }
@@ -975,6 +1087,58 @@ class MemoryDB:
         )
         self.conn.commit()
 
+    def record_retrieval_use(
+        self,
+        evidence: list[dict[str, Any]],
+        query: str,
+        answer: str | None = None,
+        confidence: float | None = None,
+        namespace: str | None = None,
+        agent_id: str | None = None,
+        session_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        now = utc_now()
+        seen: set[str] = set()
+        for index, item in enumerate(evidence, start=1):
+            memory_id = str(item.get("memory_id") or "").strip()
+            if not memory_id or memory_id in seen:
+                continue
+            seen.add(memory_id)
+            event_id = new_id("evt")
+            value = float(item.get("score") or 0.0)
+            metadata = {
+                "query": query,
+                "answer_preview": str(answer or "")[:320],
+                "confidence": confidence,
+                "rank": item.get("rank") or index,
+                "memory_state": item.get("memory_state"),
+                "namespace": normalize_namespace(namespace),
+                "agent_id": agent_id,
+                "session_id": session_id,
+                "retrieval_score": item.get("score"),
+                "domain_name": item.get("domain_name"),
+                "source": item.get("source"),
+            }
+            self.conn.execute(
+                """
+                INSERT INTO events (id, memory_id, event_type, value, metadata, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event_id,
+                    memory_id,
+                    "retrieval_use",
+                    value,
+                    json.dumps(metadata, separators=(",", ":")),
+                    now,
+                ),
+            )
+            self.conn.execute("UPDATE memories SET last_recalled=?, updated_at=? WHERE id=?", (now, now, memory_id))
+            rows.append({"id": event_id, "memory_id": memory_id, "rank": metadata["rank"], "score": value, "created_at": now})
+        self.conn.commit()
+        return rows
+
     def get_runtime_state(self, key: str) -> dict[str, Any] | None:
         row = self.conn.execute("SELECT value FROM runtime_state WHERE key=?", (key,)).fetchone()
         if row is None:
@@ -1003,17 +1167,21 @@ class MemoryDB:
         domains = self.conn.execute("SELECT COUNT(*) FROM domains").fetchone()[0]
         contradictions = self.conn.execute("SELECT COUNT(*) FROM contradictions").fetchone()[0]
         feedback = self.conn.execute("SELECT COUNT(*) FROM retrieval_feedback").fetchone()[0]
+        retrieval_uses = self.conn.execute("SELECT COUNT(*) FROM events WHERE event_type='retrieval_use'").fetchone()[0]
         relations = self.conn.execute("SELECT COUNT(*) FROM relations").fetchone()[0]
         sessions = self.conn.execute("SELECT COUNT(*) FROM agent_sessions").fetchone()[0]
         session_turns = self.conn.execute("SELECT COUNT(*) FROM session_turns").fetchone()[0]
+        session_memory = self.conn.execute("SELECT COUNT(*) FROM session_memory").fetchone()[0]
         return {
             "memories": memories,
             "domains": domains,
             "contradictions": contradictions,
             "retrieval_feedback": feedback,
+            "retrieval_uses": retrieval_uses,
             "relations": relations,
             "sessions": sessions,
             "session_turns": session_turns,
+            "session_memory": session_memory,
             "vector_dimensions": self.vector_dimensions(),
             "embedding_signature": self.get_runtime_state("embedding_signature"),
         }
@@ -1030,6 +1198,65 @@ class MemoryDB:
         ).fetchall()
         return [{"namespace": normalize_namespace(row["namespace"]), "count": int(row["count"] or 0)} for row in rows]
 
+    def memory_usage(
+        self,
+        limit: int = 20,
+        namespace: str | None = None,
+        include_global: bool = True,
+        memory_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        clauses = ["e.event_type='retrieval_use'", "m.deprecated=0"]
+        params: list[Any] = []
+        if memory_id:
+            clauses.append("e.memory_id=?")
+            params.append(str(memory_id))
+        normalized = normalize_namespace(namespace)
+        if namespace is not None:
+            namespaces = [normalized]
+            if include_global and normalized != "global":
+                namespaces.insert(0, "global")
+            placeholders = ",".join("?" for _ in namespaces)
+            clauses.append(f"COALESCE(m.namespace, 'global') IN ({placeholders})")
+            params.extend(namespaces)
+        where = " AND ".join(clauses)
+        rows = self.conn.execute(
+            f"""
+            SELECT
+                e.memory_id,
+                COUNT(*) AS use_count,
+                MAX(e.created_at) AS last_recalled,
+                AVG(e.value) AS avg_retrieval_score,
+                m.text,
+                COALESCE(m.namespace, 'global') AS namespace,
+                m.memory_type,
+                d.name AS domain_name,
+                s.source
+            FROM events e
+            JOIN memories m ON m.id=e.memory_id
+            LEFT JOIN domains d ON d.id=m.domain_id
+            LEFT JOIN memory_sources s ON s.memory_id=m.id
+            WHERE {where}
+            GROUP BY e.memory_id
+            ORDER BY use_count DESC, last_recalled DESC
+            LIMIT ?
+            """,
+            [*params, int(limit)],
+        ).fetchall()
+        return [
+            {
+                "memory_id": row["memory_id"],
+                "use_count": int(row["use_count"] or 0),
+                "last_recalled": row["last_recalled"],
+                "avg_retrieval_score": 0.0 if row["avg_retrieval_score"] is None else round(float(row["avg_retrieval_score"]), 6),
+                "namespace": normalize_namespace(row["namespace"]),
+                "domain_name": row["domain_name"],
+                "memory_type": row["memory_type"],
+                "source": row["source"],
+                "text_preview": str(row["text"] or "")[:320],
+            }
+            for row in rows
+        ]
+
     @staticmethod
     def _session_turn_from_row(row: sqlite3.Row) -> dict[str, Any]:
         return {
@@ -1044,6 +1271,17 @@ class MemoryDB:
             "evidence_memory_ids": json.loads(row["evidence_memory_ids"] or "[]"),
             "metadata": json.loads(row["metadata"] or "{}"),
             "created_at": row["created_at"],
+        }
+
+    @staticmethod
+    def _session_memory_from_row(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "session_id": row["session_id"],
+            "key": row["key"],
+            "value": row["value"],
+            "metadata": json.loads(row["metadata"] or "{}"),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
         }
 
     def _domain_from_row(self, row: sqlite3.Row) -> DomainState:

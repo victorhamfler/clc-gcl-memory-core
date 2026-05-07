@@ -96,7 +96,7 @@ class MemoryChat:
         if cleaned in {"/h", "/help"}:
             return self.help_text()
         if cleaned == "/session":
-            return f"session: {self.session_id}\nagent: {self.agent_id}"
+            return self.format_session()
         if cleaned == "/new":
             return self.new_session()
         if cleaned == "/stats":
@@ -544,12 +544,28 @@ class MemoryChat:
             lines.append(f"{role}: {content[:220]}")
         return "\n".join(lines)
 
+    def format_session(self) -> str:
+        lines = [f"session: {self.session_id}", f"agent: {self.agent_id}", f"namespace: {self.namespace}"]
+        memories = self.pipeline.db.list_session_memory(self.session_id)
+        for item in memories:
+            if item.get("key") != "active_topic":
+                continue
+            value = str(item.get("value") or "").replace("\n", " ").strip()
+            metadata = item.get("metadata") or {}
+            evidence = metadata.get("evidence_memory_ids") or []
+            lines.append(f"active: {value[:260]}")
+            lines.append(f"active evidence: {', '.join(evidence) if evidence else 'none'}")
+            break
+        return "\n".join(lines)
+
     def format_stats(self) -> str:
         stats = pipeline_stats(self.pipeline)
         return (
             f"database: {stats['database']}\n"
             f"memories: {stats['memories']} | domains: {stats['domains']} | "
-            f"relations: {stats['relations']} | sessions: {stats['sessions']}"
+            f"relations: {stats['relations']} | sessions: {stats['sessions']} | "
+            f"session memories: {stats.get('session_memory', 0)} | "
+            f"uses: {stats.get('retrieval_uses', 0)}"
         )
 
     @staticmethod

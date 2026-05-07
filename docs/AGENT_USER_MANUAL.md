@@ -63,6 +63,7 @@ Each memory is a text node with:
 - `CSD scores`: novelty, contradiction, surprise, recall
 - `G-CL geometry`: domain drift, curvature, anchor updates
 - `relations`: links such as `corrects`, `updates`, `supersedes`, and `summarizes`
+- `usage_count` and `last_recalled`: traces created when a memory is used as `/ask` evidence
 
 An agent should treat memory as evidence-linked knowledge. Do not overwrite important facts silently. Use corrections and updates so the memory can explain why a newer answer replaced an older one.
 
@@ -115,7 +116,9 @@ py chat.py --agent-id planner --namespace agent:planner --source agent_bootstrap
 py chat.py --agent-id planner --namespace agent:planner --fast-hash
 ```
 
-When chat starts, it creates or continues a session. Session turns help vague follow-up questions inherit recent topic context.
+When chat starts, it creates or continues a session. Session turns and active session memory help vague follow-up questions inherit the current topic and evidence.
+
+The active session memory stores the latest topic, short answer context, and pinned evidence ids. It is updated by `/teach`, `/correct`, and `/ask`, then used when prompts such as `what about that?`, `this`, `it`, or `previous` need the current topic.
 
 ## 6. Core Chat Commands
 
@@ -201,6 +204,8 @@ Session commands:
 /session
 /new
 ```
+
+`/session` shows the active session topic and pinned evidence ids. `/history` shows recent turns.
 
 Exit:
 
@@ -300,6 +305,15 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8765/health"
 Invoke-RestMethod -Uri "http://127.0.0.1:8765/stats"
 ```
 
+Inspect active session memory:
+
+```powershell
+$body = @{
+  session_id = "sess_example"
+} | ConvertTo-Json
+Invoke-RestMethod -Uri "http://127.0.0.1:8765/session_memory" -Method Post -ContentType "application/json" -Body $body
+```
+
 Teach:
 
 ```powershell
@@ -339,6 +353,21 @@ $body = @{
 Invoke-RestMethod -Uri "http://127.0.0.1:8765/ask" -Method Post -ContentType "application/json" -Body $body
 ```
 
+Continue a session with follow-up memory:
+
+```powershell
+$body = @{
+  query = "What about that?"
+  agent_id = "planner"
+  namespace = "agent:planner"
+  session_id = "sess_example"
+  top_k = 5
+} | ConvertTo-Json
+Invoke-RestMethod -Uri "http://127.0.0.1:8765/ask" -Method Post -ContentType "application/json" -Body $body
+```
+
+When a session id is supplied, `/ask` returns `session_context_used`, `session_context`, and `retrieval_query`. The context may include a `session_memory` item for the active topic.
+
 Correct:
 
 ```powershell
@@ -362,6 +391,17 @@ $body = @{
   top_k = 5
 } | ConvertTo-Json
 Invoke-RestMethod -Uri "http://127.0.0.1:8765/retrieve" -Method Post -ContentType "application/json" -Body $body
+```
+
+Inspect retrieval usage:
+
+```powershell
+$body = @{
+  namespace = "agent:planner"
+  include_global = $false
+  limit = 10
+} | ConvertTo-Json
+Invoke-RestMethod -Uri "http://127.0.0.1:8765/memory_usage" -Method Post -ContentType "application/json" -Body $body
 ```
 
 Direct ingest has the same nested memory shape as teach while preserving flat compatibility fields:
@@ -488,6 +528,8 @@ Ask results include:
 - `answer`: extractive answer synthesized from memory evidence
 - `confidence`: answer confidence
 - `conflict`: whether evidence conflicts
+- `usage_events`: retrieval-use events logged for the evidence used by the answer
+- `session_context`: recent turn or active-topic context used for a session follow-up
 - `live_conflicts`: query-time conflict details found inside retrieved evidence
 - `evidence`: primary supporting memories
 - `source_context`: additional memories from related sources
@@ -502,6 +544,8 @@ Retrieval details include:
 - `domain_score`: symbolic/domain affinity
 - `text_score`: lexical signal
 - `feedback_score`: learned usefulness or failure signal
+- `usage_count`: how many times the memory has been used as answer evidence
+- `last_recalled`: most recent retrieval-use timestamp
 - `supersession_score`: current versus historical source signal
 - `summary_relation_score`: summary/source relation signal
 
@@ -582,6 +626,8 @@ py eval\gcl_domain_health_eval.py
 py eval\maintenance_false_repair_eval.py
 py eval\report_issue_regression.py
 py eval\consolidation_safety_smoke.py
+py eval\session_memory_eval.py
+py eval\usage_confidence_eval.py
 py eval\chat_smoke.py
 py eval\server_smoke.py
 ```
@@ -614,6 +660,14 @@ If an answer ignores agent memory:
 - Ask with a more specific query.
 - Teach a clearer memory with a source label.
 - Confirm the server was restarted after code changes.
+
+If a follow-up such as `what about that?` follows the wrong topic:
+
+- Run `/session` and check the active topic.
+- Run `/history` and inspect the most recent turns.
+- Ask the topic explicitly once, then ask the follow-up again.
+- Confirm `session_id` is being reused in API calls.
+- Run `py eval\session_memory_eval.py`.
 
 If wrong memories keep appearing:
 

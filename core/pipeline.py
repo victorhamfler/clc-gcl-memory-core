@@ -273,6 +273,7 @@ class MemoryPipeline:
         query_l = str(query or "").lower()
         candidate_ids = [item.memory_id for item in items]
         feedback_by_memory = self.db.feedback_summary_for_memories(candidate_ids)
+        usage_by_memory = self.db.usage_summary_for_memories(candidate_ids)
         reliability = self.db.feedback_reliability_for_candidates(candidate_ids)
         supersession_relations = self.db.supersession_summary_for_candidates(candidate_ids)
         summary_relations = self.db.summary_relation_summary_for_candidates(candidate_ids)
@@ -291,6 +292,7 @@ class MemoryPipeline:
             source_match = self._source_affinity(query_l, source)
             text_match = self._text_affinity(query_l, item.text)
             feedback = feedback_by_memory.get(item.memory_id, {})
+            usage = usage_by_memory.get(item.memory_id, {})
             feedback_score = self._feedback_score(feedback)
             domain_reliability = self._feedback_score(reliability["domains"].get(item.domain_id, {}))
             source_reliability = self._feedback_score(reliability["sources"].get(source, {}))
@@ -335,6 +337,8 @@ class MemoryPipeline:
                     "stability": round(item.stability, 6),
                     "feedback_score": round(feedback_score, 6),
                     "feedback_count": int(feedback.get("count", 0)),
+                    "usage_count": int(usage.get("count", 0)),
+                    "last_recalled": usage.get("last_recalled"),
                     "text_match_score": round(text_match, 6),
                     "domain_reliability": round(domain_reliability, 6),
                     "source_reliability": round(source_reliability, 6),
@@ -394,6 +398,7 @@ class MemoryPipeline:
             for item in resolved["evidence"]
             if item.get("memory_id")
         ]
+        usage_events: list[dict[str, Any]] = []
         if store_session or session_id:
             title = self._session_title(query)
             session = self.db.ensure_session(session_id=session_id, agent_id=agent_id, title=title)
@@ -441,6 +446,28 @@ class MemoryPipeline:
                     "live_conflict_count": len(resolved.get("live_conflicts", [])),
                 },
             )
+            self._update_session_memory(
+                session["id"],
+                role="ask",
+                text=f"Question: {query}\nAnswer: {resolved['answer']}",
+                evidence_memory_ids=evidence_memory_ids,
+                namespace=memory_namespace,
+                agent_id=session["agent_id"],
+                metadata={
+                    "query": query,
+                    "confidence": resolved["confidence"],
+                    "conflict": resolved["conflict"],
+                },
+            )
+        usage_events = self.db.record_retrieval_use(
+            resolved["evidence"],
+            query=query,
+            answer=resolved["answer"],
+            confidence=resolved["confidence"],
+            namespace=memory_namespace,
+            agent_id=session["agent_id"] if session else agent_id,
+            session_id=session["id"] if session else session_id,
+        )
         if remember:
             durable_text = str(memory_text or "").strip()
             if not durable_text:
@@ -476,6 +503,7 @@ class MemoryPipeline:
             "confidence": resolved["confidence"],
             "conflict": resolved["conflict"],
             "durable_memory": durable_memory,
+            "usage_events": usage_events,
             "evidence": resolved["evidence"],
             "source_context": resolved["source_context"],
             "summary": resolved.get("summary", []),
@@ -539,6 +567,15 @@ class MemoryPipeline:
                 "teach",
                 cleaned,
                 evidence_memory_ids=[memory["memory_id"]],
+                metadata={"source": memory_source, "memory_id": memory["memory_id"], **(metadata or {})},
+            )
+            self._update_session_memory(
+                session["id"],
+                role="teach",
+                text=cleaned,
+                evidence_memory_ids=[memory["memory_id"]],
+                namespace=memory_namespace,
+                agent_id=session["agent_id"],
                 metadata={"source": memory_source, "memory_id": memory["memory_id"], **(metadata or {})},
             )
         self.db.add_event(
@@ -660,6 +697,21 @@ class MemoryPipeline:
                     **(metadata or {}),
                 },
             )
+            self._update_session_memory(
+                session["id"],
+                role="correct",
+                text=correction_text,
+                evidence_memory_ids=[correction_memory["memory_id"], *target_ids],
+                namespace=memory_namespace,
+                agent_id=session["agent_id"],
+                metadata={
+                    "source": memory_source,
+                    "correction_memory_id": correction_memory["memory_id"],
+                    "target_memory_ids": target_ids,
+                    "relation_type": relation_type,
+                    **(metadata or {}),
+                },
+            )
         self.db.add_event(
             correction_memory["memory_id"],
             "correct",
@@ -731,9 +783,29 @@ class MemoryPipeline:
         if not sid or self.db.get_session(sid) is None:
             return []
         turns = self.db.recent_session_turns(sid, limit=limit)
+        active_memory = self.db.get_session_memory(sid, "active_topic")
         query_tokens = self._topic_tokens(query or "")
         vague_followup = self._is_vague_followup(query or "", query_tokens)
         prepared_turns: list[dict[str, Any]] = []
+        if active_memory is not None:
+            active_content = str(active_memory.get("value") or "").strip()
+            active_tokens = self._topic_tokens(active_content)
+            active_overlap = self._token_overlap(query_tokens, active_tokens)
+            active_metadata = active_memory.get("metadata") or {}
+            if vague_followup or active_overlap > 0.0:
+                prepared_turns.append(
+                    {
+                        "turn": {
+                            "role": "session_memory",
+                            "content": active_content,
+                            "evidence_memory_ids": active_metadata.get("evidence_memory_ids") or [],
+                        },
+                        "idx": len(turns),
+                        "raw_content": active_content,
+                        "overlap": active_overlap,
+                        "is_session_memory": True,
+                    }
+                )
         for idx, turn in enumerate(turns):
             raw_content = str(turn.get("content") or turn.get("answer") or "").strip()
             if not raw_content:
@@ -761,6 +833,10 @@ class MemoryPipeline:
             recency = (idx + 1) / total
             evidence_bonus = 0.15 if evidence_ids and role in {"assistant", "teach", "correct"} else 0.0
             role_bonus = 0.06 if role in {"teach", "correct"} else 0.0
+            if prepared.get("is_session_memory"):
+                evidence_bonus = 0.20 if evidence_ids else 0.0
+                role_bonus = 0.12
+                recency = 1.0
             score = overlap + role_bonus + evidence_bonus
             if vague_followup and (overlap > 0.0 or not has_topic_match):
                 score += 0.25 * recency
@@ -795,6 +871,40 @@ class MemoryPipeline:
         if not context_lines:
             return query
         return "Session context:\n" + "\n".join(context_lines) + f"\nCurrent question: {query}"
+
+    def _update_session_memory(
+        self,
+        session_id: str,
+        role: str,
+        text: str,
+        evidence_memory_ids: list[str] | None = None,
+        namespace: str | None = None,
+        agent_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        cleaned = self._short_context_text(str(text or "").strip(), limit=900)
+        if not cleaned:
+            return None
+        evidence_ids = []
+        for memory_id in evidence_memory_ids or []:
+            mid = str(memory_id or "").strip()
+            if mid and mid not in evidence_ids:
+                evidence_ids.append(mid)
+        topic_tokens = sorted(self._topic_tokens(cleaned))[:24]
+        value = f"Active session topic ({role}): {cleaned}"
+        return self.db.upsert_session_memory(
+            session_id,
+            "active_topic",
+            value,
+            metadata={
+                "role": role,
+                "agent_id": agent_id,
+                "namespace": normalize_namespace(namespace),
+                "evidence_memory_ids": evidence_ids,
+                "topic_tokens": topic_tokens,
+                **(metadata or {}),
+            },
+        )
 
     @staticmethod
     def _apply_session_evidence_boost(

@@ -93,6 +93,18 @@ def choose_preferred_evidence(
     disputed = sorted(disputed, key=lambda item: evidence_preference_score(query, item), reverse=True)
     summary = sorted(summary, key=lambda item: evidence_preference_score(query, item), reverse=True)
     top_score = max(float(item.get("score") or 0.0) for item in results)
+    if historical:
+        session_focused = [
+            item
+            for item in historical
+            if float(item.get("session_evidence_score") or 0.0) >= 0.50
+            and is_relevant_to_query(query, item)
+        ]
+        if session_focused:
+            current_score = max((float(item.get("score") or 0.0) for item in current), default=0.0)
+            focused_score = max(float(item.get("score") or 0.0) for item in session_focused)
+            if focused_score >= current_score - 0.02:
+                return sorted(session_focused, key=lambda item: evidence_preference_score(query, item), reverse=True)
     if current:
         relevant_current = [item for item in current if is_relevant_to_query(query, item)]
         current_pool = relevant_current or ([] if (historical or stale or disputed) else current)
@@ -237,9 +249,26 @@ def estimate_confidence(evidence: list[dict[str, Any]], conflict: bool) -> float
     supersession = max(0.0, float(top.get("supersession_score") or 0.0))
     relation = max(0.0, float(top.get("relation_supersession_score") or 0.0))
     summary = max(0.0, float(top.get("summary_relation_score") or 0.0))
-    confidence = 0.35 + min(0.35, score / 2.0) + 0.12 * feedback + 0.10 * supersession + 0.08 * relation + 0.05 * summary
+    text_match = max(0.0, float(top.get("text_match_score") or 0.0))
+    usage_count = max(0, int(top.get("usage_count") or 0))
+    evidence_count = len(evidence)
+    usage_bonus = min(0.08, 0.025 * usage_count)
+    count_bonus = min(0.06, 0.02 * max(0, evidence_count - 1))
+    confidence = (
+        0.28
+        + min(0.34, score / 1.7)
+        + 0.10 * text_match
+        + 0.12 * feedback
+        + 0.10 * supersession
+        + 0.08 * relation
+        + 0.06 * summary
+        + usage_bonus
+        + count_bonus
+    )
     if conflict:
-        confidence -= 0.12
+        confidence -= 0.14
+    if score < 0.35 and text_match < 0.2 and not summary:
+        confidence -= 0.08
     return round(max(0.0, min(1.0, confidence)), 4)
 
 
@@ -579,6 +608,8 @@ def compact_evidence(item: dict[str, Any]) -> dict[str, Any]:
         "domain_name": item.get("domain_name"),
         "memory_type": item.get("memory_type"),
         "feedback_score": item.get("feedback_score"),
+        "usage_count": item.get("usage_count"),
+        "last_recalled": item.get("last_recalled"),
         "supersession_score": item.get("supersession_score"),
         "relation_supersession_score": item.get("relation_supersession_score"),
         "summary_relation_score": item.get("summary_relation_score"),

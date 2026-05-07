@@ -51,7 +51,9 @@ py eval/ask_smoke.py
 py eval/answer_quality_eval.py
 py eval/session_smoke.py
 py eval/session_context_smoke.py
+py eval/session_memory_eval.py
 py eval/session_topic_filter_smoke.py
+py eval/usage_confidence_eval.py
 py eval/teach_correct_smoke.py
 py eval/chat_smoke.py
 py eval/agent_corpus_experiment.py
@@ -74,7 +76,9 @@ After changing resolver or retrieval code, restart any long-running server befor
 - `POST /session`
 - `POST /sessions`
 - `POST /session_history`
+- `POST /session_memory`
 - `POST /feedback`
+- `POST /memory_usage`
 - `POST /consolidation_plan`
 - `POST /consolidate`
 - `POST /consolidation_sources`
@@ -103,7 +107,14 @@ $body = @{ query = "what should I remember next"; agent_id = "agent_alpha"; sess
 Invoke-RestMethod -Uri "http://127.0.0.1:8765/ask" -Method Post -ContentType "application/json" -Body $body
 ```
 
-When `session_id` is supplied, `/ask` uses topic-filtered recent session turns as retrieval context. This lets follow-up questions such as "what about that?" inherit the previous topic and evidence without dragging every recent topic into the retrieval query.
+When `session_id` is supplied, `/ask` uses topic-filtered recent session turns plus a small `active_topic` session memory as retrieval context. This lets follow-up questions such as "what about that?" inherit the current topic and pinned evidence without dragging every recent topic into the retrieval query. The active topic is updated by `/teach`, `/correct`, and `/ask`.
+
+Inspect session memory:
+
+```powershell
+$body = @{ session_id = "sess_example" } | ConvertTo-Json
+Invoke-RestMethod -Uri "http://127.0.0.1:8765/session_memory" -Method Post -ContentType "application/json" -Body $body
+```
 
 Teach or correct memory:
 
@@ -145,6 +156,7 @@ Useful commands inside the loop:
 /memory resolved    list repaired weak memories
 /memory improve     plan or store a clarifying update for a memory
 /history            show recent session turns
+/session            show active session memory
 /new                start a new session
 /quit               exit
 ```
@@ -155,7 +167,7 @@ Manual feedback session:
 py eval/interactive_retrieval_test.py --top-k 3
 ```
 
-Stored feedback is used as a bounded reranking signal. Useful and excellent results receive a small boost, while wrong, stale, wrong-domain, or missing-source results are downranked. Feedback also contributes small source/domain reliability signals that can help fresh memories from trusted sources rank better. Retrieval also includes a supersession signal: when versioned sources such as `agent_memory_v1` and `agent_memory_v2` are both present, current/correction queries prefer the newer corrected source while preserving older memories as historical context. `/ask` responses keep primary evidence focused, then expose extra `source_context` for additional relevant files and `stale_context` for superseded relation-linked memories.
+Stored feedback is used as a bounded reranking signal. Useful and excellent results receive a small boost, while wrong, stale, wrong-domain, or missing-source results are downranked. Feedback also contributes small source/domain reliability signals that can help fresh memories from trusted sources rank better. Retrieval use is logged after `/ask`, updates `last_recalled`, appears in `/stats`, and can be inspected with `POST /memory_usage`. Prior usage contributes a small confidence signal without directly boosting retrieval rank. Retrieval also includes a supersession signal: when versioned sources such as `agent_memory_v1` and `agent_memory_v2` are both present, current/correction queries prefer the newer corrected source while preserving older memories as historical context. `/ask` responses keep primary evidence focused, then expose extra `source_context` for additional relevant files and `stale_context` for superseded relation-linked memories.
 
 Retrieval ranking weights live in `config.yaml` under `retrieval_weights`. The current profile was selected with `py eval/retrieval_weight_optimization.py` and emphasizes source, feedback, supersession, manifest relation, and consolidation-summary signals over raw vector similarity. CLC controller thresholds live under `thresholds`; `py eval/clc_threshold_calibration.py` compares the configured profile against nearby alternatives.
 

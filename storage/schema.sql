@@ -117,6 +117,17 @@ CREATE TABLE IF NOT EXISTS session_turns (
     FOREIGN KEY(session_id) REFERENCES agent_sessions(id)
 );
 
+CREATE TABLE IF NOT EXISTS session_memory (
+    session_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    metadata TEXT,
+    created_at TEXT,
+    updated_at TEXT,
+    PRIMARY KEY(session_id, key),
+    FOREIGN KEY(session_id) REFERENCES agent_sessions(id)
+);
+
 CREATE TABLE IF NOT EXISTS runs (
     id TEXT PRIMARY KEY,
     command TEXT NOT NULL,
@@ -146,6 +157,8 @@ CREATE INDEX IF NOT EXISTS idx_domains_namespace_name ON domains(namespace, name
 CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type);
 CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at);
 CREATE INDEX IF NOT EXISTS idx_events_memory ON events(memory_id);
+CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
+CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
 CREATE INDEX IF NOT EXISTS idx_memory_sources_source ON memory_sources(source);
 CREATE INDEX IF NOT EXISTS idx_retrieval_feedback_memory ON retrieval_feedback(memory_id);
 CREATE INDEX IF NOT EXISTS idx_retrieval_feedback_label ON retrieval_feedback(label);
@@ -154,5 +167,6 @@ CREATE INDEX IF NOT EXISTS idx_agent_sessions_agent ON agent_sessions(agent_id);
 CREATE INDEX IF NOT EXISTS idx_agent_sessions_updated ON agent_sessions(updated_at);
 CREATE INDEX IF NOT EXISTS idx_session_turns_session ON session_turns(session_id);
 CREATE INDEX IF NOT EXISTS idx_session_turns_created ON session_turns(created_at);
+CREATE INDEX IF NOT EXISTS idx_session_memory_session ON session_memory(session_id);
 CREATE INDEX IF NOT EXISTS idx_relations_source ON relations(source_memory_id);
 CREATE INDEX IF NOT EXISTS idx_relations_target ON relations(target_memory_id);
