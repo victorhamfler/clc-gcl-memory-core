@@ -60,6 +60,7 @@ py eval/teach_correct_smoke.py
 py eval/authority_chain_regression.py
 py eval/authority_endpoint_smoke.py
 py eval/chat_smoke.py
+py eval/agent_bug_report_regression.py
 py eval/agent_corpus_experiment.py
 py eval/session_short_topic_switch_eval.py --use-config-embedding
 py eval/correction_target_validation_eval.py
@@ -91,6 +92,8 @@ If local disk space gets tight after repeated benchmark runs, use `py eval/clean
 
 - `GET /health`
 - `GET /stats`
+- `GET /sessions`
+- `GET /memory_usage`
 - `POST /ingest`
 - `POST /ingest_batch`
 - `POST /teach`
@@ -151,7 +154,7 @@ $correct = @{ correction = "The assistant must not push to GitHub automatically.
 Invoke-RestMethod -Uri "http://127.0.0.1:8765/correct" -Method Post -ContentType "application/json" -Body $correct
 ```
 
-When explicit `target_memory_ids` are provided, `/correct` validates that each target exists and is visible in the requested namespace scope before storing the correction. Missing or out-of-scope ids return an error so agents do not accidentally create unlinked correction chains.
+When explicit `target_memory_ids` are provided, `/correct` validates that each target exists and is visible in the requested namespace scope before storing the correction. Missing or out-of-scope ids return an error so agents do not accidentally create unlinked correction chains. When no explicit target, target query, or session evidence is supplied, `/correct` can use the correction text as a fallback target query, but only when there is meaningful subject/topic overlap. Explicit orphan/no-target corrections remain unlinked.
 
 Store retrieval feedback:
 
@@ -196,7 +199,11 @@ py eval/interactive_retrieval_test.py --top-k 3
 
 Stored feedback is used as a bounded reranking signal. Useful and excellent results receive a small boost, while wrong, stale, wrong-domain, or missing-source results are downranked. Feedback also contributes small source/domain reliability signals that can help fresh memories from trusted sources rank better. Retrieval use is logged after `/ask`, updates `last_recalled`, appears in `/stats`, and can be inspected with `POST /memory_usage`. Prior usage contributes a small confidence signal without directly boosting retrieval rank. Retrieval also includes a supersession signal: when versioned sources such as `agent_memory_v1` and `agent_memory_v2` are both present, current/correction queries prefer the newer corrected source while preserving older memories as historical context. `/ask` responses keep primary evidence focused, then expose extra `source_context` for additional relevant files and `stale_context` for superseded relation-linked memories.
 
+For simple factual questions, answer synthesis uses stricter snippet selection so unrelated evidence is not concatenated into a single answer. Extra retrieved material remains inspectable through `source_context`, `stale_context`, and `/why`.
+
 Retrieval ranking weights live in `config.yaml` under `retrieval_weights`. The current profile was selected with `py eval/retrieval_weight_optimization.py` and emphasizes source, feedback, supersession, manifest relation, and consolidation-summary signals over raw vector similarity. CLC controller thresholds live under `thresholds`; `py eval/clc_threshold_calibration.py` compares the configured profile against nearby alternatives. Retrieved evidence now also carries stored CSD contradiction metadata, so `/ask` can surface unresolved correction pressure even when the contradictory memory is not part of the top evidence set. Queries containing exact alphanumeric identifiers such as `TemporalItem027`, ticket ids, or numbered codenames receive a conservative identifier-match boost and broader lexical backfill so nearby IDs do not outrank the exact item.
+
+CSD includes lexical preference conflict checks for common daily-use facts such as `likes tea` versus `hates tea` or `never drinks tea`. These conflicts protect the new memory and store contradiction pressure even when embeddings alone consider the sentences similar.
 
 Consolidation is non-destructive. `/consolidate create` and `POST /consolidate` create a new embedded summary memory and connect it to originals with `summarizes` relations. Original memories remain available as evidence, and `POST /consolidation_sources` or `/consolidate sources <summary-id>` can show the source memories behind a summary.
 

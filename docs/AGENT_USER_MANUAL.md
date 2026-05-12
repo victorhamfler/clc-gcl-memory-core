@@ -182,6 +182,8 @@ Corrections default to high priority so they are not lost behind low-signal repe
 
 Correction responses include `linked` and `warning` fields. If the correction could not be linked to a target memory, the memory is still stored but `linked=false` and the warning says that no target memories were found. Agents should treat unlinked corrections as incomplete training and either provide `target_memory_ids` or run a target query that retrieves the memory being corrected.
 
+When no explicit target ids, target query, or session evidence are supplied, the API can use the correction text itself as a fallback target query. This fallback links only when the candidate has meaningful subject/topic overlap. If the correction is intentionally standalone, use clear orphan/no-target wording and inspect `linked=false`.
+
 Explicit `target_memory_ids` are validated before the correction is stored. If an id does not exist, is deprecated, or is outside the active namespace/global scope, the API raises an error and no correction memory is created. This prevents agents from accidentally training a correction against a missing or wrong-agent target.
 
 Best workflow for correction:
@@ -462,6 +464,13 @@ $body = @{
 Invoke-RestMethod -Uri "http://127.0.0.1:8765/memory_usage" -Method Post -ContentType "application/json" -Body $body
 ```
 
+`/sessions` and `/memory_usage` are also available as GET endpoints for simple read-only checks:
+
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8765/sessions?agent_id=planner"
+Invoke-RestMethod -Uri "http://127.0.0.1:8765/memory_usage?namespace=agent:planner&limit=10"
+```
+
 Direct ingest has the same nested memory shape as teach while preserving flat compatibility fields:
 
 ```powershell
@@ -623,6 +632,8 @@ When stored contradiction pressure is high, `/ask` can set `conflict=true` and a
 
 Identifier-heavy queries receive a conservative exact-match boost and broader lexical backfill. This helps the memory distinguish nearby IDs such as `TemporalItem027` versus `TemporalItem030`, which matters for tickets, task ids, experiment names, codenames, and benchmark-style facts.
 
+For simple factual questions, answer synthesis intentionally stays narrow and avoids concatenating unrelated retrieved memories into one answer. Additional retrieved memories remain visible in evidence/source context and can be inspected with `/sources` or `/why`.
+
 Authority results include:
 
 - `requested_memory_ids`: memory ids inspected directly or found through the query
@@ -683,6 +694,7 @@ CSD is working well when:
 
 - Direct corrections produce contradiction pressure.
 - Structured claim changes are protected, including agent/project name changes, GitHub upload policy changes, cadence or frequency changes, and owner-style claim changes.
+- Preference and consumption conflicts are also checked lexically, such as `likes tea` versus `hates tea` or `never drinks tea`.
 - Retrieved contradictory factual evidence can raise `conflict=True` at query time.
 - Stored CSD contradictions surface in `/ask` evidence through `stored_contradiction_score` and `stored_csd_contradiction`.
 - Similar but not identical memories remain retrievable together.
@@ -719,6 +731,7 @@ py eval\api_hardening_regression.py
 py eval\authority_chain_regression.py
 py eval\authority_endpoint_smoke.py
 py eval\chat_smoke.py
+py eval\agent_bug_report_regression.py
 py eval\server_smoke.py
 py eval\session_short_topic_switch_eval.py --use-config-embedding
 py eval\correction_target_validation_eval.py

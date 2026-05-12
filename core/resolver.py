@@ -368,7 +368,11 @@ def select_answer_snippets(query: str, evidence: list[dict[str, Any]]) -> list[s
     for score, _idx, snippet in scored[1:]:
         if any(snippet == existing or snippet in existing or existing in snippet for existing in out):
             continue
-        if multi or (score >= max(1.0, scored[0][0] * 0.82) and len(out) < 2):
+        if multi or (
+            not is_simple_fact_question(query)
+            and score >= max(1.6, scored[0][0] * 0.92)
+            and len(out) < 2
+        ):
             out.append(snippet)
         if len(out) >= (3 if multi else 2):
             break
@@ -539,6 +543,16 @@ def is_short_natural_query(query: str) -> bool:
     terms = normalized_terms(query)
     raw_terms = re.findall(r"[A-Za-z0-9_'-]+", str(query or "").lower())
     return len(raw_terms) <= 5 and len(terms) <= 8
+
+
+def is_simple_fact_question(query: str) -> bool:
+    lower = str(query or "").lower().strip()
+    if asks_for_multiple(lower):
+        return False
+    return bool(
+        re.search(r"\b(what|who|where|when|which)\b", lower)
+        and not any(term in lower for term in ("list", "summarize", "summary", "all ", "compare", "explain"))
+    )
 
 
 def stem_token(term: str) -> str:

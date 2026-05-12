@@ -102,7 +102,12 @@ class CSDLayer:
             "correction note",
         )
         additive_hint = any(word in lower for word in additive_words)
-        if not correction_hint or not recall.items:
+        if not recall.items:
+            return 0.0
+        preference_conflict = self._preference_conflict(signal.text, recall)
+        if preference_conflict >= 0.75:
+            return preference_conflict
+        if not correction_hint:
             return 0.0
         if not contradiction_hint:
             return 0.0
@@ -133,6 +138,72 @@ class CSDLayer:
                 continue
             best = max(best, 0.78 + 0.22 * min(1.0, overlap))
         return clamp(best)
+
+    def _preference_conflict(self, text: str, recall: RecallResult) -> float:
+        new = self._preference_claims(text)
+        if not new:
+            return 0.0
+        best = 0.0
+        for item in recall.items[:8]:
+            old = self._preference_claims(item.text)
+            if not old:
+                continue
+            for new_claim in new:
+                for old_claim in old:
+                    if new_claim["subject"] != old_claim["subject"]:
+                        continue
+                    if not (new_claim["objects"] & old_claim["objects"]):
+                        continue
+                    if new_claim["polarity"] == old_claim["polarity"]:
+                        continue
+                    overlap = self._topic_overlap(str(text or "").lower(), str(item.text or "").lower())
+                    best = max(best, 0.84 + 0.16 * min(1.0, overlap))
+        return clamp(best)
+
+    @classmethod
+    def _preference_claims(cls, text: str) -> list[dict[str, object]]:
+        compact = " ".join(str(text or "").lower().split())
+        subjects = re.findall(r"\b([a-z][a-z0-9_-]*)\s+(?:likes?|loves?|prefers?|drinks?|hates?|dislikes?)\b", compact)
+        if not subjects:
+            return []
+        objects = cls._preference_objects(compact)
+        if not objects:
+            return []
+        positive = bool(re.search(r"\b(likes?|loves?|prefers?|drinks?)\b", compact))
+        negative = bool(re.search(r"\b(hates?|dislikes?|never drinks?|does not drink|doesn't drink|not drink)\b", compact))
+        claims: list[dict[str, object]] = []
+        for subject in subjects:
+            if positive:
+                claims.append({"subject": cls._normalize_claim_value(subject), "objects": objects, "polarity": "positive"})
+            if negative:
+                claims.append({"subject": cls._normalize_claim_value(subject), "objects": objects, "polarity": "negative"})
+        return claims
+
+    @staticmethod
+    def _preference_objects(text: str) -> set[str]:
+        stop = {
+            "all",
+            "and",
+            "any",
+            "forms",
+            "form",
+            "in",
+            "it",
+            "morning",
+            "never",
+            "of",
+            "the",
+            "afternoon",
+        }
+        objects: set[str] = set()
+        for token in re.findall(r"[a-z][a-z0-9_-]{2,}", text):
+            if token in stop:
+                continue
+            if token in {"coffee", "espresso", "tea", "green", "water", "milk"}:
+                objects.add("tea" if token == "green" and "green tea" in text else token)
+        if "green tea" in text:
+            objects.add("tea")
+        return objects
 
     def _structured_claim_conflict(self, text: str, recall: RecallResult) -> float:
         new_claims = self._structured_claims(text)

@@ -6,7 +6,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from core.chunking import chunk_text
 from core.config import load_config, resolve_project_path
@@ -404,12 +404,17 @@ def make_handler(api: MemoryApi):
         server_version = "CLCGCLMemory/0.1"
 
         def do_GET(self) -> None:
-            path = urlparse(self.path).path
+            parsed = urlparse(self.path)
+            path = parsed.path
             try:
                 if path == "/health":
                     self._send_json(200, api.health())
                 elif path == "/stats":
                     self._send_json(200, api.stats())
+                elif path == "/sessions":
+                    self._send_json(200, api.sessions(self._query_payload(parsed.query)))
+                elif path == "/memory_usage":
+                    self._send_json(200, api.memory_usage(self._query_payload(parsed.query)))
                 else:
                     self._send_json(404, {"error": "unknown endpoint"})
             except Exception as exc:
@@ -477,6 +482,20 @@ def make_handler(api: MemoryApi):
             if not isinstance(obj, dict):
                 raise ValueError("request body must be a JSON object")
             return obj
+
+        @staticmethod
+        def _query_payload(query: str) -> dict[str, Any]:
+            parsed = parse_qs(query, keep_blank_values=False)
+            payload: dict[str, Any] = {}
+            for key, values in parsed.items():
+                if not values:
+                    continue
+                value = values[-1]
+                if value.lower() in {"true", "false"}:
+                    payload[key] = value.lower() == "true"
+                else:
+                    payload[key] = value
+            return payload
 
         def _send_json(self, status: int, payload: dict[str, Any]) -> None:
             body = json.dumps(payload, indent=2).encode("utf-8")

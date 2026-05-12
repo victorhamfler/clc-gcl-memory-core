@@ -754,6 +754,7 @@ class MemoryPipeline:
         target_ids = self._correction_targets(
             explicit_target_ids,
             target_query,
+            cleaned,
             top_k,
             session_id=session_id,
             namespace=memory_namespace,
@@ -880,6 +881,7 @@ class MemoryPipeline:
         self,
         target_memory_ids: list[str],
         target_query: str | None,
+        correction_text: str | None,
         top_k: int,
         session_id: str | None = None,
         namespace: str | None = None,
@@ -892,14 +894,31 @@ class MemoryPipeline:
                     out.append(mid)
         if out:
             return out
-        if query:
-            context = self._session_context(session_id, query=query)
-            retrieval_query = self._session_retrieval_query(query, context)
+        fallback_query = query or str(correction_text or "").strip()
+        if not query and self._explicit_orphan_correction(fallback_query):
+            return out
+        if fallback_query:
+            context = self._session_context(session_id, query=fallback_query)
+            retrieval_query = self._session_retrieval_query(fallback_query, context)
             for item in self.retrieve(retrieval_query, top_k=max(1, int(top_k)), namespace=namespace):
                 mid = str(item.get("memory_id") or "").strip()
+                if not query and not self._correction_target_candidate(fallback_query, item):
+                    continue
                 if mid and mid not in out:
                     out.append(mid)
         return out
+
+    @classmethod
+    def _correction_target_candidate(cls, correction_text: str, item: dict[str, Any]) -> bool:
+        text_match = float(item.get("text_match_score") or 0.0)
+        score = float(item.get("score") or 0.0)
+        overlap = cls._token_overlap(cls._topic_tokens(correction_text), cls._topic_tokens(str(item.get("text") or "")))
+        return overlap >= 0.33 or (overlap >= 0.22 and (text_match >= 0.35 or score >= 0.34))
+
+    @staticmethod
+    def _explicit_orphan_correction(correction_text: str) -> bool:
+        lower = str(correction_text or "").lower()
+        return "orphan" in lower or "no target" in lower or "without target" in lower
 
     @staticmethod
     def _unique_ids(memory_ids: list[str] | tuple[str, ...]) -> list[str]:
