@@ -58,7 +58,7 @@ QUERY_CASES = [
         "stale_terms": [],
         "expected_sources_v1": ["user_profile", "tool_rules"],
         "expected_sources_v2": ["user_preferences_v2", "user_profile", "tool_rules"],
-        "conflict": False,
+        "conflict": True,
     },
     {
         "id": "adaptation_workflow",

@@ -61,6 +61,10 @@ py eval/authority_chain_regression.py
 py eval/authority_endpoint_smoke.py
 py eval/chat_smoke.py
 py eval/agent_corpus_experiment.py
+py eval/session_short_topic_switch_eval.py --use-config-embedding
+py eval/correction_target_validation_eval.py
+py eval/ask_conflict_surface_eval.py
+py eval/long_memory_abilities_eval.py
 py chat.py --agent-id agent_alpha
 py serve.py --host 127.0.0.1 --port 8765
 ```
@@ -112,7 +116,7 @@ $body = @{ query = "what should I remember next"; agent_id = "agent_alpha"; sess
 Invoke-RestMethod -Uri "http://127.0.0.1:8765/ask" -Method Post -ContentType "application/json" -Body $body
 ```
 
-When `session_id` is supplied, `/ask` uses topic-filtered recent session turns plus a small `active_topic` session memory as retrieval context. This lets follow-up questions such as "what about that?" inherit the current topic and pinned evidence without dragging every recent topic into the retrieval query. The active topic is updated by `/teach`, `/correct`, and `/ask`.
+When `session_id` is supplied, `/ask` uses topic-filtered recent session turns plus a small `active_topic` session memory as retrieval context. This lets follow-up questions such as "what about that?" inherit the current topic and pinned evidence without dragging every recent topic into the retrieval query. The active topic is updated by `/teach`, `/correct`, and `/ask`. Short topic-switch questions such as "what is CSD" or "what is G-CL" no longer inherit the previous active topic unless they overlap the active topic or contain a real follow-up marker.
 
 Inspect session memory:
 
@@ -130,6 +134,8 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8765/teach" -Method Post -ContentType "
 $correct = @{ correction = "The assistant must not push to GitHub automatically."; target_query = "GitHub push policy"; agent_id = "agent_alpha" } | ConvertTo-Json
 Invoke-RestMethod -Uri "http://127.0.0.1:8765/correct" -Method Post -ContentType "application/json" -Body $correct
 ```
+
+When explicit `target_memory_ids` are provided, `/correct` validates that each target exists and is visible in the requested namespace scope before storing the correction. Missing or out-of-scope ids return an error so agents do not accidentally create unlinked correction chains.
 
 Store retrieval feedback:
 
@@ -174,7 +180,7 @@ py eval/interactive_retrieval_test.py --top-k 3
 
 Stored feedback is used as a bounded reranking signal. Useful and excellent results receive a small boost, while wrong, stale, wrong-domain, or missing-source results are downranked. Feedback also contributes small source/domain reliability signals that can help fresh memories from trusted sources rank better. Retrieval use is logged after `/ask`, updates `last_recalled`, appears in `/stats`, and can be inspected with `POST /memory_usage`. Prior usage contributes a small confidence signal without directly boosting retrieval rank. Retrieval also includes a supersession signal: when versioned sources such as `agent_memory_v1` and `agent_memory_v2` are both present, current/correction queries prefer the newer corrected source while preserving older memories as historical context. `/ask` responses keep primary evidence focused, then expose extra `source_context` for additional relevant files and `stale_context` for superseded relation-linked memories.
 
-Retrieval ranking weights live in `config.yaml` under `retrieval_weights`. The current profile was selected with `py eval/retrieval_weight_optimization.py` and emphasizes source, feedback, supersession, manifest relation, and consolidation-summary signals over raw vector similarity. CLC controller thresholds live under `thresholds`; `py eval/clc_threshold_calibration.py` compares the configured profile against nearby alternatives.
+Retrieval ranking weights live in `config.yaml` under `retrieval_weights`. The current profile was selected with `py eval/retrieval_weight_optimization.py` and emphasizes source, feedback, supersession, manifest relation, and consolidation-summary signals over raw vector similarity. CLC controller thresholds live under `thresholds`; `py eval/clc_threshold_calibration.py` compares the configured profile against nearby alternatives. Retrieved evidence now also carries stored CSD contradiction metadata, so `/ask` can surface unresolved correction pressure even when the contradictory memory is not part of the top evidence set.
 
 Consolidation is non-destructive. `/consolidate create` and `POST /consolidate` create a new embedded summary memory and connect it to originals with `summarizes` relations. Original memories remain available as evidence, and `POST /consolidation_sources` or `/consolidate sources <summary-id>` can show the source memories behind a summary.
 

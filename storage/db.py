@@ -1161,6 +1161,42 @@ class MemoryDB:
         )
         self.conn.commit()
 
+    def contradiction_summary_for_memories(self, memory_ids: list[str]) -> dict[str, dict[str, Any]]:
+        ids = [str(memory_id).strip() for memory_id in memory_ids if str(memory_id or "").strip()]
+        if not ids:
+            return {}
+        placeholders = ",".join("?" for _ in ids)
+        rows = self.conn.execute(
+            f"""
+            SELECT new_memory_id, old_memory_id, contradiction_score, status
+            FROM contradictions
+            WHERE new_memory_id IN ({placeholders}) OR old_memory_id IN ({placeholders})
+            """,
+            [*ids, *ids],
+        ).fetchall()
+        out: dict[str, dict[str, Any]] = {
+            memory_id: {
+                "contradiction_score": 0.0,
+                "contradiction_memory_ids": [],
+                "contradiction_statuses": [],
+            }
+            for memory_id in ids
+        }
+        for row in rows:
+            new_id_value = str(row["new_memory_id"] or "")
+            old_id_value = str(row["old_memory_id"] or "")
+            score = float(row["contradiction_score"] or 0.0)
+            status = str(row["status"] or "unresolved")
+            for memory_id, other_id in ((new_id_value, old_id_value), (old_id_value, new_id_value)):
+                if memory_id not in out:
+                    continue
+                out[memory_id]["contradiction_score"] = max(out[memory_id]["contradiction_score"], score)
+                if other_id and other_id not in out[memory_id]["contradiction_memory_ids"]:
+                    out[memory_id]["contradiction_memory_ids"].append(other_id)
+                if status and status not in out[memory_id]["contradiction_statuses"]:
+                    out[memory_id]["contradiction_statuses"].append(status)
+        return out
+
     def add_event(self, memory_id: str | None, event_type: str, value: float | None = None, metadata: dict[str, Any] | None = None) -> None:
         self.conn.execute(
             """

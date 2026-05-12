@@ -280,6 +280,7 @@ class MemoryPipeline:
             items = self._with_authoritative_replacements(items, embedding)
         candidate_ids = [item.memory_id for item in items]
         authority_by_memory = self._authority_status_for_candidates(candidate_ids)
+        contradiction_by_memory = self.db.contradiction_summary_for_memories(candidate_ids)
         feedback_by_memory = self.db.feedback_summary_for_memories(candidate_ids)
         usage_by_memory = self.db.usage_summary_for_memories(candidate_ids)
         reliability = self.db.feedback_reliability_for_candidates(candidate_ids)
@@ -310,6 +311,7 @@ class MemoryPipeline:
                 supersession_relations.get(item.memory_id, {}),
             )
             authority_status = authority_by_memory.get(item.memory_id, {})
+            contradiction_status = contradiction_by_memory.get(item.memory_id, {})
             authority_score = float(authority_status.get("authority_score") or 0.0) if authority_intent else 0.0
             relation_supersession_score = max(
                 -1.0,
@@ -365,6 +367,9 @@ class MemoryPipeline:
                     "supersedes_memory_ids": authority_status.get("supersedes_memory_ids", []),
                     "correction_chain_depth": authority_status.get("correction_chain_depth", 0),
                     "authority_relation_types": authority_status.get("relation_types", []),
+                    "stored_contradiction_score": round(float(contradiction_status.get("contradiction_score") or 0.0), 6),
+                    "stored_contradiction_memory_ids": contradiction_status.get("contradiction_memory_ids", []),
+                    "stored_contradiction_statuses": contradiction_status.get("contradiction_statuses", []),
                     "text": item.text,
                 }
             )
@@ -737,8 +742,12 @@ class MemoryPipeline:
         cleaned = str(correction or "").strip()
         if not cleaned:
             raise ValueError("correction text is required")
+        explicit_target_ids = self._unique_ids(target_memory_ids or [])
+        invalid_explicit_ids = self._invalid_target_memory_ids(explicit_target_ids, memory_namespace)
+        if invalid_explicit_ids:
+            raise ValueError(f"Unknown or out-of-scope target_memory_ids: {invalid_explicit_ids}")
         target_ids = self._correction_targets(
-            target_memory_ids or [],
+            explicit_target_ids,
             target_query,
             top_k,
             session_id=session_id,
@@ -870,11 +879,7 @@ class MemoryPipeline:
         session_id: str | None = None,
         namespace: str | None = None,
     ) -> list[str]:
-        out: list[str] = []
-        for memory_id in target_memory_ids:
-            mid = str(memory_id or "").strip()
-            if mid and mid not in out:
-                out.append(mid)
+        out: list[str] = self._unique_ids(target_memory_ids)
         query = str(target_query or "").strip()
         if not out and not query and session_id:
             for mid in self.db.latest_assistant_evidence(session_id):
@@ -890,6 +895,28 @@ class MemoryPipeline:
                 if mid and mid not in out:
                     out.append(mid)
         return out
+
+    @staticmethod
+    def _unique_ids(memory_ids: list[str] | tuple[str, ...]) -> list[str]:
+        out: list[str] = []
+        for memory_id in memory_ids:
+            mid = str(memory_id or "").strip()
+            if mid and mid not in out:
+                out.append(mid)
+        return out
+
+    def _invalid_target_memory_ids(self, memory_ids: list[str], namespace: str | None = None) -> list[str]:
+        ids = self._unique_ids(memory_ids)
+        if not ids:
+            return []
+        allowed_namespaces = set(self._namespace_scope(namespace, include_global=True))
+        rows = self.db.memory_vectors_by_ids(ids, include_deprecated=False)
+        valid_ids = {
+            str(row.get("id") or "")
+            for row in rows
+            if normalize_namespace(row.get("namespace")) in allowed_namespaces
+        }
+        return [memory_id for memory_id in ids if memory_id not in valid_ids]
 
     @staticmethod
     def _namespace_scope(namespace: str | None, include_global: bool = True) -> list[str]:
@@ -911,9 +938,10 @@ class MemoryPipeline:
         turns = self.db.recent_session_turns(sid, limit=limit)
         active_memory = self.db.get_session_memory(sid, "active_topic")
         query_tokens = self._topic_tokens(query or "")
-        vague_followup = self._is_vague_followup(query or "", query_tokens)
         prepared_turns: list[dict[str, Any]] = []
         active_evidence_ids: set[str] = set()
+        active_overlap = 0.0
+        active_topic_available = False
         if active_memory is not None:
             active_content = str(active_memory.get("value") or "").strip()
             active_metadata = active_memory.get("metadata") or {}
@@ -929,6 +957,14 @@ class MemoryPipeline:
             }
             active_tokens = metadata_tokens or self._topic_tokens(active_content)
             active_overlap = self._token_overlap(query_tokens, active_tokens)
+            active_topic_available = bool(active_tokens)
+        vague_followup = self._is_vague_followup(
+            query or "",
+            query_tokens,
+            active_overlap=active_overlap,
+            active_topic_available=active_topic_available,
+        )
+        if active_memory is not None:
             if vague_followup or active_overlap > 0.0:
                 prepared_turns.append(
                     {
@@ -1160,7 +1196,12 @@ class MemoryPipeline:
         return len(matches) / max(1, len(query_tokens))
 
     @staticmethod
-    def _is_vague_followup(query: str, query_tokens: set[str]) -> bool:
+    def _is_vague_followup(
+        query: str,
+        query_tokens: set[str],
+        active_overlap: float = 0.0,
+        active_topic_available: bool = False,
+    ) -> bool:
         compact = f" {str(query or '').lower()} "
         vague_markers = (
             " that ",
@@ -1176,7 +1217,9 @@ class MemoryPipeline:
             " last ",
             " above ",
         )
-        return len(query_tokens) <= 3 or any(marker in compact for marker in vague_markers)
+        if any(marker in compact for marker in vague_markers):
+            return True
+        return active_topic_available and len(query_tokens) <= 3 and active_overlap > 0.0
 
     @staticmethod
     def _short_context_text(text: str, limit: int = 240) -> str:

@@ -122,6 +122,8 @@ When chat starts, it creates or continues a session. Session turns and active se
 
 The active session memory stores the latest topic, short answer context, and pinned evidence ids. It is updated by `/teach`, `/correct`, and `/ask`, then used when prompts such as `what about that?`, `this`, `it`, or `previous` need the current topic.
 
+Short topic-switch questions are handled conservatively. A prompt such as `what is CSD` or `what is G-CL` does not inherit the previous active topic merely because it is short. It uses the active topic only when the words overlap the active topic or the query contains a real follow-up marker such as `that`, `it`, `previous`, or `above`.
+
 ## 6. Core Chat Commands
 
 Ask memory:
@@ -177,6 +179,8 @@ Correct stale or wrong memory:
 Corrections default to high priority so they are not lost behind low-signal repetition. A correction is assigned to the domain of the correction text, not blindly to the target memory's domain.
 
 Correction responses include `linked` and `warning` fields. If the correction could not be linked to a target memory, the memory is still stored but `linked=false` and the warning says that no target memories were found. Agents should treat unlinked corrections as incomplete training and either provide `target_memory_ids` or run a target query that retrieves the memory being corrected.
+
+Explicit `target_memory_ids` are validated before the correction is stored. If an id does not exist, is deprecated, or is outside the active namespace/global scope, the API raises an error and no correction memory is created. This prevents agents from accidentally training a correction against a missing or wrong-agent target.
 
 Best workflow for correction:
 
@@ -374,6 +378,8 @@ When a session id is supplied, `/ask` returns `session_context_used`, `session_c
 
 Session topic filtering is evidence-chain aware. Vague follow-ups such as `what about that?`, `what should I remember about that rule?`, or `what should I remember about that label?` prefer the active topic and turns that share the same pinned evidence ids. Generic wrapper words such as `question`, `answer`, `memory`, `current`, and `remember` are ignored for topic matching so unrelated recent turns do not leak into the follow-up context.
 
+Short non-follow-up topic switches are tested separately with the configured EmbeddingGemma model. After asking about CLC, the follow-up `what is CSD` should answer from CSD evidence and report `session_context_used=false`; after that, `what is G-CL` should answer from G-CL evidence instead of carrying CSD context forward.
+
 Correct:
 
 ```powershell
@@ -386,6 +392,21 @@ $body = @{
 } | ConvertTo-Json
 Invoke-RestMethod -Uri "http://127.0.0.1:8765/correct" -Method Post -ContentType "application/json" -Body $body
 ```
+
+Correct with explicit target ids:
+
+```powershell
+$body = @{
+  correction = "The planner may push to GitHub only after explicit user instruction."
+  target_memory_ids = @("mem_example")
+  agent_id = "planner"
+  namespace = "agent:planner"
+  source = "manual_correction"
+} | ConvertTo-Json
+Invoke-RestMethod -Uri "http://127.0.0.1:8765/correct" -Method Post -ContentType "application/json" -Body $body
+```
+
+If `mem_example` is missing or belongs only to another agent namespace, the request fails before any correction is stored. Use `/authority` or `/retrieve` first when you are not sure which memory id should be corrected.
 
 Retrieve raw evidence:
 
@@ -586,6 +607,11 @@ Retrieval details include:
 - `supersedes_memory_ids`: older memories this one replaces
 - `correction_chain_depth`: distance from this memory to the current authority
 - `summary_relation_score`: summary/source relation signal
+- `stored_contradiction_score`: strongest stored CSD contradiction involving this memory
+- `stored_contradiction_memory_ids`: memories that contradict this evidence according to stored CSD records
+- `stored_contradiction_statuses`: contradiction statuses, usually `unresolved`
+
+When stored contradiction pressure is high, `/ask` can set `conflict=true` and add `stored_csd_contradiction` to the evidence conflict reason. This lets an agent see that an answer is based on current or corrected evidence while still being aware of the older contradictory memory.
 
 Authority results include:
 
@@ -648,6 +674,7 @@ CSD is working well when:
 - Direct corrections produce contradiction pressure.
 - Structured claim changes are protected, including agent/project name changes, GitHub upload policy changes, cadence or frequency changes, and owner-style claim changes.
 - Retrieved contradictory factual evidence can raise `conflict=True` at query time.
+- Stored CSD contradictions surface in `/ask` evidence through `stored_contradiction_score` and `stored_csd_contradiction`.
 - Similar but not identical memories remain retrievable together.
 - Novel examples raise surprise without breaking stable domains.
 - Weak memories with high novelty become visible in maintenance.
@@ -683,6 +710,10 @@ py eval\authority_chain_regression.py
 py eval\authority_endpoint_smoke.py
 py eval\chat_smoke.py
 py eval\server_smoke.py
+py eval\session_short_topic_switch_eval.py --use-config-embedding
+py eval\correction_target_validation_eval.py
+py eval\ask_conflict_surface_eval.py
+py eval\long_memory_abilities_eval.py
 ```
 
 Run broader behavior checks:
@@ -698,6 +729,8 @@ py eval\memory_training_run_smoke.py
 py eval\long_run_drift_eval.py --cycles 10
 py -m compileall core storage eval chat.py main.py serve.py
 ```
+
+`py eval\long_memory_abilities_eval.py` is a local LongMemEval-inspired check, not a full LongMemEval benchmark adapter. It tests useful benchmark ideas that fit the current program: exact information extraction, multi-session recall, temporal/current preference, authority over superseded facts, session decomposition, abstention for unknown sensitive facts, and noisy-memory scale.
 
 ## 15. Troubleshooting
 
@@ -724,6 +757,14 @@ If a follow-up such as `what about that?` follows the wrong topic:
 - Confirm `session_id` is being reused in API calls.
 - Run `py eval\session_memory_eval.py`.
 - Run `py eval\session_topic_switch_regression.py` to verify that rule and label follow-ups stay on their own evidence chains.
+- Run `py eval\session_short_topic_switch_eval.py --use-config-embedding` to verify that short topic switches such as CLC to CSD to G-CL do not inherit stale context.
+
+If `/correct` rejects explicit target ids:
+
+- Check that every `target_memory_ids` value exists.
+- Check that the target is in the active namespace or visible through `global`.
+- Use `/retrieve` or `/authority` to find the correct current target id.
+- Re-submit the correction after replacing missing, deprecated, or out-of-scope ids.
 
 If wrong memories keep appearing:
 
@@ -731,6 +772,12 @@ If wrong memories keep appearing:
 - Use `/correct`.
 - Add `/feedback wrong <number>` to the wrong evidence.
 - Run `/memory review`.
+
+If `/ask` says it does not have enough evidence for a sensitive lookup:
+
+- This is expected for unknown sensitive facts such as passport numbers, passwords, tokens, phone numbers, addresses, or secrets.
+- Teach the exact durable fact only if it is appropriate to store.
+- Ask again after the memory exists with a meaningful source label.
 
 If maintenance shows many weak memories:
 

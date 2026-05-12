@@ -33,6 +33,8 @@ def resolve_answer(query: str, results: list[dict[str, Any]]) -> dict[str, Any]:
 
     preferred = choose_preferred_evidence(query, results, summary, current, historical, disputed, stale)
     evidence = preferred[: min(3, len(preferred))]
+    if evidence_is_too_weak(evidence):
+        evidence = []
     correction_conflict = has_correction_conflict_evidence(evidence)
     live_conflicts = detect_live_evidence_conflicts(evidence)
     summary_answer = bool(evidence) and evidence[0].get("memory_state") == "summary"
@@ -40,11 +42,13 @@ def resolve_answer(query: str, results: list[dict[str, Any]]) -> dict[str, Any]:
     evidence_has_current = any(item.get("memory_state") == "current" for item in evidence)
     evidence_has_stale = any(item.get("memory_state") == "stale" for item in evidence)
     evidence_has_disputed = any(item.get("memory_state") == "disputed" for item in evidence)
+    stored_contradiction_conflict = any(float(item.get("stored_contradiction_score") or 0.0) >= 0.75 for item in evidence)
     conflict = (
         (bool(evidence_has_current and (evidence_has_stale or stale)) and not summary_only and not summary_answer)
         or evidence_has_disputed
         or (bool(disputed) and not allows_stale_definition_context(query))
         or correction_conflict
+        or stored_contradiction_conflict
         or bool(live_conflicts)
     )
     confidence = estimate_confidence(evidence, conflict)
@@ -61,6 +65,7 @@ def resolve_answer(query: str, results: list[dict[str, Any]]) -> dict[str, Any]:
         evidence,
         live_conflicts=live_conflicts,
         correction_conflict=correction_conflict,
+        stored_contradiction_conflict=stored_contradiction_conflict,
         stale_conflict=bool(evidence_has_current and (evidence_has_stale or stale)),
     )
 
@@ -113,7 +118,7 @@ def choose_preferred_evidence(
                 return sorted(session_focused, key=lambda item: evidence_preference_score(query, item), reverse=True)
     if current:
         relevant_current = [item for item in current if is_relevant_to_query(query, item)]
-        current_pool = relevant_current or ([] if (historical or stale or disputed) else current)
+        current_pool = relevant_current or ([] if (historical or stale or disputed or requires_sensitive_evidence(query)) else current)
         current_score = max((float(item.get("score") or 0.0) for item in current_pool), default=0.0)
         relevance_floor = max(0.18, top_score * 0.90)
         if current_pool and (current_score >= relevance_floor or not (historical or summary)):
@@ -129,7 +134,29 @@ def choose_preferred_evidence(
                 if evidence_preference_score(query, item) >= evidence_preference_score(query, historical[0]) - 0.08
             ]
         return sorted(historical + supplemental_stale, key=lambda item: evidence_preference_score(query, item), reverse=True)
+    if requires_sensitive_evidence(query):
+        return []
     return disputed or stale or current or summary
+
+
+def evidence_is_too_weak(evidence: list[dict[str, Any]]) -> bool:
+    if not evidence:
+        return False
+    top_score = max(float(item.get("score") or 0.0) for item in evidence)
+    top_text_match = max(float(item.get("text_match_score") or 0.0) for item in evidence)
+    has_authority_signal = any(
+        float(item.get("supersession_score") or 0.0) > 0.0
+        or float(item.get("relation_supersession_score") or 0.0) > 0.0
+        or float(item.get("stored_contradiction_score") or 0.0) > 0.0
+        for item in evidence
+    )
+    if has_authority_signal:
+        return False
+    return top_score < 0.20 and top_text_match < 0.50
+
+
+def requires_sensitive_evidence(query: str) -> bool:
+    return bool(normalized_terms(query) & SENSITIVE_LOOKUP_TERMS)
 
 
 def classify_memory_state(item: dict[str, Any]) -> str:
@@ -190,6 +217,9 @@ def is_relevant_to_query(query: str, item: dict[str, Any]) -> bool:
     if is_identity_query(query) and not has_identity_evidence(text_terms):
         return False
     if asks_for_previous_session_query(query) and not has_previous_session_evidence(text_terms):
+        return False
+    required_sensitive_terms = query_terms & SENSITIVE_LOOKUP_TERMS
+    if required_sensitive_terms and not required_sensitive_terms <= text_terms:
         return False
     identity_terms = {"alpha", "beta", "gamma", "delta"}
     required_identity_terms = query_terms & identity_terms
@@ -545,6 +575,7 @@ def annotate_evidence_conflicts(
     evidence: list[dict[str, Any]],
     live_conflicts: list[dict[str, Any]],
     correction_conflict: bool,
+    stored_contradiction_conflict: bool,
     stale_conflict: bool,
 ) -> list[dict[str, Any]]:
     if not evidence:
@@ -567,6 +598,9 @@ def annotate_evidence_conflicts(
         if correction_conflict and item.get("memory_state") in {"current", "stale", "disputed"}:
             reasons.append("correction_context_conflict")
             conflict_with.extend([item_id for item_id in all_ids if item_id != memory_id])
+        if stored_contradiction_conflict and float(item.get("stored_contradiction_score") or 0.0) >= 0.75:
+            reasons.append("stored_csd_contradiction")
+            conflict_with.extend([str(item_id) for item_id in item.get("stored_contradiction_memory_ids") or [] if item_id])
         if reasons:
             item["conflict"] = True
             item["conflict_with"] = sorted(set(conflict_with))
@@ -624,6 +658,19 @@ ANSWER_STOPWORDS = {
     "whether",
     "which",
     "with",
+}
+
+
+SENSITIVE_LOOKUP_TERMS = {
+    "address",
+    "email",
+    "license",
+    "passport",
+    "password",
+    "phone",
+    "secret",
+    "ssn",
+    "token",
 }
 
 
@@ -705,6 +752,9 @@ def compact_evidence(item: dict[str, Any]) -> dict[str, Any]:
         "supersedes_memory_ids": item.get("supersedes_memory_ids") or [],
         "correction_chain_depth": item.get("correction_chain_depth", 0),
         "authority_relation_types": item.get("authority_relation_types") or [],
+        "stored_contradiction_score": item.get("stored_contradiction_score", 0.0),
+        "stored_contradiction_memory_ids": item.get("stored_contradiction_memory_ids") or [],
+        "stored_contradiction_statuses": item.get("stored_contradiction_statuses") or [],
         "conflict": bool(item.get("conflict", False)),
         "conflict_with": item.get("conflict_with") or [],
         "conflict_reason": item.get("conflict_reason"),
