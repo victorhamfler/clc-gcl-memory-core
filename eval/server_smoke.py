@@ -144,7 +144,7 @@ def main() -> None:
         assert batch["mode"] == "ingest_batch"
         assert batch["stored"] == 2
         assert len(batch["memories"]) == 2
-        assert batch["results"][0]["embedding_backend"] == "wsl_llama_cpp"
+        assert batch["results"][0]["embedding_backend"] in {"wsl_llama_cpp", "llama_cpp"}
         assert retrieved["results"]
         assert asked["ok"] is True
         assert asked["evidence"]

@@ -30,6 +30,8 @@ def main() -> None:
     assert summaries["after_feedback"]["mean_term_score"] >= 0.8
     assert summaries["after_feedback"]["mean_source_score"] >= 0.6
     assert "after_feedback" in report["training_scores"]
+    assert report["training_scores"]["after_feedback"] >= 0.97
+    assert report["weak_final_cases"] == []
     assert report["recommendations"]
     assert all("id" in item for item in report["weak_final_cases"])
 

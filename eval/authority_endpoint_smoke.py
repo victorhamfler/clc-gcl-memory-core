@@ -1,6 +1,7 @@
 import json
 import sys
 import threading
+import urllib.error
 import urllib.request
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -21,6 +22,13 @@ def post_json(url: str, payload: dict) -> dict:
     )
     with urllib.request.urlopen(req, timeout=60) as resp:
         return json.loads(resp.read().decode("utf-8"))
+
+
+def post_json_error(url: str, payload: dict) -> tuple[int, dict]:
+    try:
+        return 200, post_json(url, payload)
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read().decode("utf-8"))
 
 
 def main() -> None:
@@ -63,6 +71,7 @@ def main() -> None:
             )
             by_id = post_json(f"{base}/authority", {"memory_id": old["memory"]["memory_id"]})
             by_query = post_json(f"{base}/authority", {"query": query, "top_k": 3})
+            missing_status, missing_authority = post_json_error(f"{base}/authority", {"memory_id": "mem_fake_missing"})
             post_json(f"{base}/shutdown", {})
             thread.join(timeout=5)
         finally:
@@ -89,6 +98,8 @@ def main() -> None:
     assert by_query["query_results"][0]["memory_id"] == final_id
     assert by_query_nodes[final_id]["query_rank"] == 1
     assert "only Victor can approve" in by_query_nodes[final_id]["text"]
+    assert missing_status == 400
+    assert "No authority data found" in missing_authority["error"]
 
     print(
         json.dumps(
@@ -99,6 +110,7 @@ def main() -> None:
                 "final_id": final_id,
                 "by_id_authoritative": by_id["authoritative_memory_ids"],
                 "by_query_top": by_query["query_results"][0]["memory_id"],
+                "missing_status": missing_status,
                 "relations": by_id["relations"],
             },
             indent=2,

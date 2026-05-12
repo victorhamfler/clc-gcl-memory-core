@@ -105,6 +105,14 @@ def main() -> None:
                     "session_id": session_id,
                 },
             )
+            orphan = post_json(
+                f"{base}/correct",
+                {
+                    "correction": "Orphan hardening correction with no target should be explicit.",
+                    "agent_id": "api_hardening_agent",
+                    "store_session": False,
+                },
+            )
             after = post_json(
                 f"{base}/ask",
                 {
@@ -139,8 +147,14 @@ def main() -> None:
     assert feedback["feedback"]["label"] == "useful"
     assert corrected["ok"] is True
     assert corrected["target_memory_ids"] == [taught["memory"]["memory_id"]]
+    assert corrected["linked"] is True
+    assert corrected["warning"] is None
     assert corrected["relations"]
     assert corrected["feedback"]
+    assert orphan["ok"] is True
+    assert orphan["linked"] is False
+    assert orphan["target_memory_ids"] == []
+    assert "not linked" in orphan["warning"]
     assert any(item.get("conflict") for item in after["evidence"]) or after["conflict"] is True
     assert stats["session_memory"] >= 1
 

@@ -176,6 +176,8 @@ Correct stale or wrong memory:
 
 Corrections default to high priority so they are not lost behind low-signal repetition. A correction is assigned to the domain of the correction text, not blindly to the target memory's domain.
 
+Correction responses include `linked` and `warning` fields. If the correction could not be linked to a target memory, the memory is still stored but `linked=false` and the warning says that no target memories were found. Agents should treat unlinked corrections as incomplete training and either provide `target_memory_ids` or run a target query that retrieves the memory being corrected.
+
 Best workflow for correction:
 
 1. Ask a question that retrieves the wrong or stale evidence.
@@ -370,6 +372,8 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8765/ask" -Method Post -ContentType "ap
 
 When a session id is supplied, `/ask` returns `session_context_used`, `session_context`, and `retrieval_query`. The context may include a `session_memory` item for the active topic.
 
+Session topic filtering is evidence-chain aware. Vague follow-ups such as `what about that?`, `what should I remember about that rule?`, or `what should I remember about that label?` prefer the active topic and turns that share the same pinned evidence ids. Generic wrapper words such as `question`, `answer`, `memory`, `current`, and `remember` are ignored for topic matching so unrelated recent turns do not leak into the follow-up context.
+
 Correct:
 
 ```powershell
@@ -419,6 +423,8 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8765/authority" -Method Post -ContentTy
 ```
 
 Use `/authority` before adding another correction when you are unsure whether a memory is already superseded. It returns the current authoritative memory ids, the relation graph, and per-node states such as `current`, `superseded`, or `standalone`.
+
+If `/authority` is called with a nonexistent explicit `memory_id`, the API returns an error instead of fabricating an empty authority graph. Query-mode authority inspection still works by retrieving candidate memories first.
 
 Inspect retrieval usage:
 
@@ -640,6 +646,7 @@ CLC is working well when:
 CSD is working well when:
 
 - Direct corrections produce contradiction pressure.
+- Structured claim changes are protected, including agent/project name changes, GitHub upload policy changes, cadence or frequency changes, and owner-style claim changes.
 - Retrieved contradictory factual evidence can raise `conflict=True` at query time.
 - Similar but not identical memories remain retrievable together.
 - Novel examples raise surprise without breaking stable domains.
@@ -669,6 +676,7 @@ py eval\report_issue_regression.py
 py eval\consolidation_safety_smoke.py
 py eval\wsl_backend_compat_eval.py
 py eval\session_memory_eval.py
+py eval\session_topic_switch_regression.py
 py eval\usage_confidence_eval.py
 py eval\api_hardening_regression.py
 py eval\authority_chain_regression.py
@@ -681,10 +689,12 @@ Run broader behavior checks:
 
 ```powershell
 py eval\mechanism_component_eval.py
+py eval\structured_claim_conflict_eval.py
 py eval\answer_quality_eval.py
 py eval\summary_answer_quality_eval.py
 py eval\summary_retrieval_eval.py
 py eval\subtle_contradiction_eval.py
+py eval\memory_training_run_smoke.py
 py eval\long_run_drift_eval.py --cycles 10
 py -m compileall core storage eval chat.py main.py serve.py
 ```
@@ -713,6 +723,7 @@ If a follow-up such as `what about that?` follows the wrong topic:
 - Ask the topic explicitly once, then ask the follow-up again.
 - Confirm `session_id` is being reused in API calls.
 - Run `py eval\session_memory_eval.py`.
+- Run `py eval\session_topic_switch_regression.py` to verify that rule and label follow-ups stay on their own evidence chains.
 
 If wrong memories keep appearing:
 

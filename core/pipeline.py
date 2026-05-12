@@ -404,6 +404,10 @@ class MemoryPipeline:
         graph_ids = list(graph.get("memory_ids") or ids)
         status_by_memory = self._authority_status_for_candidates(graph_ids)
         rows = self.db.memory_vectors_by_ids(graph_ids, include_deprecated=False)
+        found_ids = {str(row.get("id") or "") for row in rows if row.get("id")}
+        missing_ids = [memory_id for memory_id in ids if memory_id not in found_ids]
+        if missing_ids and not query_results:
+            raise ValueError(f"No authority data found for memory_ids: {missing_ids}")
         query_rank_by_id = {
             str(item.get("memory_id")): idx
             for idx, item in enumerate(query_results, start=1)
@@ -844,6 +848,10 @@ class MemoryPipeline:
         return {
             "ok": True,
             "mode": "correct",
+            "linked": bool(linked),
+            "warning": None
+            if linked
+            else "No target memories found. Correction was stored but is not linked to any existing memory.",
             "namespace": memory_namespace,
             "session_id": session["id"] if session else None,
             "agent_id": session["agent_id"] if session else agent_id,
@@ -905,11 +913,22 @@ class MemoryPipeline:
         query_tokens = self._topic_tokens(query or "")
         vague_followup = self._is_vague_followup(query or "", query_tokens)
         prepared_turns: list[dict[str, Any]] = []
+        active_evidence_ids: set[str] = set()
         if active_memory is not None:
             active_content = str(active_memory.get("value") or "").strip()
-            active_tokens = self._topic_tokens(active_content)
-            active_overlap = self._token_overlap(query_tokens, active_tokens)
             active_metadata = active_memory.get("metadata") or {}
+            active_evidence_ids = {
+                str(memory_id).strip()
+                for memory_id in active_metadata.get("evidence_memory_ids") or []
+                if str(memory_id).strip()
+            }
+            metadata_tokens = {
+                str(token).strip().lower()
+                for token in active_metadata.get("topic_tokens") or []
+                if str(token).strip()
+            }
+            active_tokens = metadata_tokens or self._topic_tokens(active_content)
+            active_overlap = self._token_overlap(query_tokens, active_tokens)
             if vague_followup or active_overlap > 0.0:
                 prepared_turns.append(
                     {
@@ -951,13 +970,19 @@ class MemoryPipeline:
             recency = (idx + 1) / total
             evidence_bonus = 0.15 if evidence_ids and role in {"assistant", "teach", "correct"} else 0.0
             role_bonus = 0.06 if role in {"teach", "correct"} else 0.0
+            evidence_matches_active = bool(active_evidence_ids & {str(mid).strip() for mid in evidence_ids if str(mid).strip()})
             if prepared.get("is_session_memory"):
                 evidence_bonus = 0.20 if evidence_ids else 0.0
                 role_bonus = 0.12
                 recency = 1.0
             score = overlap + role_bonus + evidence_bonus
-            if vague_followup and (overlap > 0.0 or not has_topic_match):
+            if vague_followup and overlap > 0.0:
                 score += 0.25 * recency
+            elif vague_followup and not has_topic_match:
+                if active_evidence_ids and not (prepared.get("is_session_memory") or evidence_matches_active):
+                    score = 0.0
+                else:
+                    score += 0.25 * recency
             elif overlap <= 0.0:
                 score = 0.0
             if score <= 0.0:
@@ -1062,6 +1087,7 @@ class MemoryPipeline:
             "am",
             "an",
             "and",
+            "answer",
             "are",
             "as",
             "at",
@@ -1069,6 +1095,7 @@ class MemoryPipeline:
             "by",
             "can",
             "could",
+            "current",
             "do",
             "does",
             "for",
@@ -1079,23 +1106,30 @@ class MemoryPipeline:
             "how",
             "i",
             "in",
+            "indicates",
             "is",
             "it",
             "its",
             "me",
+            "memory",
             "must",
             "of",
             "on",
             "or",
             "our",
+            "question",
+            "remember",
+            "relevant",
             "should",
             "so",
+            "session",
             "that",
             "the",
             "their",
             "there",
             "this",
             "to",
+            "topic",
             "was",
             "we",
             "what",

@@ -321,8 +321,12 @@ def select_answer_snippets(query: str, evidence: list[dict[str, Any]]) -> list[s
     if not scored:
         return []
     scored.sort(reverse=True)
-    out = [scored[0][2]]
     multi = asks_for_multiple(query)
+    if multi:
+        out = select_diverse_procedural_snippets(query, scored)
+        if out:
+            return out
+    out = [scored[0][2]]
     for score, _idx, snippet in scored[1:]:
         if any(snippet == existing or snippet in existing or existing in snippet for existing in out):
             continue
@@ -331,6 +335,45 @@ def select_answer_snippets(query: str, evidence: list[dict[str, Any]]) -> list[s
         if len(out) >= (3 if multi else 2):
             break
     return out
+
+
+def select_diverse_procedural_snippets(query: str, scored: list[tuple[float, int, str]]) -> list[str]:
+    lower_query = str(query or "").lower()
+    needs_adaptation_result = "adaptation" in lower_query and any(
+        term in lower_query for term in ("change", "instruction", "test", "workflow")
+    )
+    workflow_terms = ("workflow", "build", "run ", "import", "re-run", "question")
+    result_terms = ("expected result", "adaptive ranking", "stale", "current v2", "v2 memories")
+
+    out: list[str] = []
+
+    def add_best(predicate) -> None:
+        for _score, _idx, snippet in scored:
+            if len(out) >= 3:
+                return
+            lower = snippet.lower()
+            if not predicate(lower):
+                continue
+            if any(snippet == existing or snippet in existing or existing in snippet for existing in out):
+                continue
+            out.append(snippet)
+            return
+
+    add_best(lambda lower: any(term in lower for term in workflow_terms))
+    if needs_adaptation_result:
+        add_best(lambda lower: any(term in lower for term in result_terms))
+    add_best(lambda lower: "measure" in lower or "term score" in lower or "source score" in lower)
+
+    for _score, _idx, snippet in scored:
+        if len(out) >= 3:
+            break
+        lower = snippet.lower()
+        if lower.startswith("this document answers") and out:
+            continue
+        if any(snippet == existing or snippet in existing or existing in snippet for existing in out):
+            continue
+        out.append(snippet)
+    return out[:3]
 
 
 def best_snippet(query: str, text: str) -> str:

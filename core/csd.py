@@ -108,6 +108,9 @@ class CSDLayer:
             return 0.0
         if additive_hint and not any(word in lower for word in ("must not", "should not", "not always", "no longer", "never")):
             return 0.0
+        structured_conflict = self._structured_claim_conflict(signal.text, recall)
+        if structured_conflict >= 0.75:
+            return structured_conflict
         lexical_conflict = self._lexical_policy_conflict(signal.text, recall)
         if lexical_conflict >= 0.75:
             return lexical_conflict
@@ -130,6 +133,79 @@ class CSDLayer:
                 continue
             best = max(best, 0.78 + 0.22 * min(1.0, overlap))
         return clamp(best)
+
+    def _structured_claim_conflict(self, text: str, recall: RecallResult) -> float:
+        new_claims = self._structured_claims(text)
+        if not new_claims:
+            return 0.0
+        best = 0.0
+        for item in recall.items[:5]:
+            old_claims = self._structured_claims(item.text)
+            if not old_claims:
+                continue
+            for new_claim in new_claims:
+                for old_claim in old_claims:
+                    if new_claim["key"] != old_claim["key"]:
+                        continue
+                    if new_claim["value"] == old_claim["value"]:
+                        continue
+                    overlap = self._topic_overlap(str(text or "").lower(), str(item.text or "").lower())
+                    best = max(best, 0.86 + 0.14 * min(1.0, overlap))
+        return clamp(best)
+
+    @classmethod
+    def _structured_claims(cls, text: str) -> list[dict[str, str]]:
+        lower = str(text or "").lower()
+        claims: list[dict[str, str]] = []
+        compact = " ".join(lower.replace("github", "git hub").split())
+
+        name_match = re.search(
+            r"\b(?:current\s+)?(?P<object>agent|assistant|project)\s+name\s+(?:is|:)\s+(?P<value>[a-z][a-z0-9_-]+)",
+            compact,
+        )
+        if name_match:
+            claims.append(
+                {
+                    "key": f"{name_match.group('object')}_name",
+                    "value": cls._normalize_claim_value(name_match.group("value")),
+                }
+            )
+
+        owner_match = re.search(
+            r"\b(?P<object>[a-z][a-z0-9_-]*(?:\s+[a-z][a-z0-9_-]*){0,4})\s+(?:owner\s+)?(?:belongs\s+to|is\s+owned\s+by|owner\s+is)\s+(?P<value>[a-z][a-z0-9_-]+)",
+            compact,
+        )
+        if owner_match:
+            claims.append(
+                {
+                    "key": f"{cls._normalize_claim_value(owner_match.group('object'))}_owner",
+                    "value": cls._normalize_claim_value(owner_match.group("value")),
+                }
+            )
+
+        cadence_match = re.search(
+            r"\b(?P<object>(?:planning\s+)?summaries|review\s+cadence|release\s+cadence|cadence|schedule)\s+(?:is|are|should\s+be|happen[s]?)\s+(?P<value>daily|weekly|monthly|automatic|automatically|only\s+when\s+requested|only\s+when\s+[a-z ]+asks|no\s+longer\s+automatic)",
+            compact,
+        )
+        if cadence_match:
+            claims.append(
+                {
+                    "key": f"{cls._normalize_claim_value(cadence_match.group('object'))}_cadence",
+                    "value": cls._normalize_claim_value(cadence_match.group("value")),
+                }
+            )
+
+        if any(term in compact for term in ("git hub", "push", "upload")):
+            if any(term in compact for term in ("must not", "should not", "only when", "unless", "explicitly asks", "not push")):
+                claims.append({"key": "github_upload_policy", "value": "restricted"})
+            elif any(term in compact for term in ("may push", "may upload", "automatically", "by default", "always push")):
+                claims.append({"key": "github_upload_policy", "value": "permissive"})
+
+        return claims
+
+    @staticmethod
+    def _normalize_claim_value(value: str) -> str:
+        return "_".join(re.findall(r"[a-z0-9]+", str(value or "").lower()))
 
     @staticmethod
     def _has_opposing_policy_language(new: str, old: str) -> bool:
