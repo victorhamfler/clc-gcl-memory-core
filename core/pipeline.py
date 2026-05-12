@@ -300,6 +300,7 @@ class MemoryPipeline:
             domain_match = self._domain_affinity(query_l, domain_name)
             source_match = self._source_affinity(query_l, source)
             text_match = self._text_affinity(query_l, item.text)
+            identifier_match = self._identifier_affinity(query_l, item.text)
             feedback = feedback_by_memory.get(item.memory_id, {})
             usage = usage_by_memory.get(item.memory_id, {})
             feedback_score = self._feedback_score(feedback)
@@ -330,6 +331,7 @@ class MemoryPipeline:
                 + w["stability"] * item.stability
                 + w["domain"] * domain_match
                 + w["text"] * text_match
+                + 0.18 * identifier_match
                 + w["source"] * source_match
                 + w["feedback"] * feedback_score
                 + w["domain_reliability"] * domain_reliability
@@ -358,6 +360,7 @@ class MemoryPipeline:
                     "usage_count": int(usage.get("count", 0)),
                     "last_recalled": usage.get("last_recalled"),
                     "text_match_score": round(text_match, 6),
+                    "identifier_match_score": round(identifier_match, 6),
                     "domain_reliability": round(domain_reliability, 6),
                     "source_reliability": round(source_reliability, 6),
                     "supersession_score": round(supersession_score, 6),
@@ -1316,6 +1319,19 @@ class MemoryPipeline:
         return min(1.0, hits / max(1, len(query_terms)))
 
     @staticmethod
+    def _identifier_affinity(query: str, text: str) -> float:
+        query_identifiers = {
+            token
+            for token in MemoryPipeline._tokens(query)
+            if any(ch.isalpha() for ch in token) and any(ch.isdigit() for ch in token)
+        }
+        if not query_identifiers:
+            return 0.0
+        text_tokens = MemoryPipeline._tokens(text)
+        hits = len(query_identifiers & text_tokens)
+        return min(1.0, hits / max(1, len(query_identifiers)))
+
+    @staticmethod
     def _source_affinity(query: str, source: str | None) -> float:
         if not source:
             return 0.0
@@ -1713,6 +1729,8 @@ class MemoryPipeline:
     @staticmethod
     def _needs_broad_lexical_scan(query: str) -> bool:
         lower = str(query or "").lower()
+        if any(any(ch.isalpha() for ch in token) and any(ch.isdigit() for ch in token) for token in MemoryPipeline._tokens(lower)):
+            return True
         return any(
             term in lower
             for term in (

@@ -753,6 +753,7 @@ def compact_evidence(item: dict[str, Any]) -> dict[str, Any]:
         "memory_type": item.get("memory_type"),
         "clc_state": item.get("clc_state"),
         "csd_score": item.get("csd_score", 0.0),
+        "identifier_match_score": item.get("identifier_match_score"),
         "session_evidence_score": item.get("session_evidence_score"),
         "session_evidence_boost": item.get("session_evidence_boost"),
         "session_exact_evidence": bool(item.get("session_exact_evidence", False)),

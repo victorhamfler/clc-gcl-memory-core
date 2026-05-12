@@ -66,6 +66,8 @@ py eval/correction_target_validation_eval.py
 py eval/ask_conflict_surface_eval.py
 py eval/live_fact_conflict_variants_eval.py
 py eval/long_memory_abilities_eval.py
+py eval/long_memory_benchmark_eval.py
+py eval/long_memory_benchmark_eval.py --configured-embedding --cases-per-ability 15 --noise-count 120
 py chat.py --agent-id agent_alpha
 py serve.py --host 127.0.0.1 --port 8765
 ```
@@ -181,7 +183,7 @@ py eval/interactive_retrieval_test.py --top-k 3
 
 Stored feedback is used as a bounded reranking signal. Useful and excellent results receive a small boost, while wrong, stale, wrong-domain, or missing-source results are downranked. Feedback also contributes small source/domain reliability signals that can help fresh memories from trusted sources rank better. Retrieval use is logged after `/ask`, updates `last_recalled`, appears in `/stats`, and can be inspected with `POST /memory_usage`. Prior usage contributes a small confidence signal without directly boosting retrieval rank. Retrieval also includes a supersession signal: when versioned sources such as `agent_memory_v1` and `agent_memory_v2` are both present, current/correction queries prefer the newer corrected source while preserving older memories as historical context. `/ask` responses keep primary evidence focused, then expose extra `source_context` for additional relevant files and `stale_context` for superseded relation-linked memories.
 
-Retrieval ranking weights live in `config.yaml` under `retrieval_weights`. The current profile was selected with `py eval/retrieval_weight_optimization.py` and emphasizes source, feedback, supersession, manifest relation, and consolidation-summary signals over raw vector similarity. CLC controller thresholds live under `thresholds`; `py eval/clc_threshold_calibration.py` compares the configured profile against nearby alternatives. Retrieved evidence now also carries stored CSD contradiction metadata, so `/ask` can surface unresolved correction pressure even when the contradictory memory is not part of the top evidence set.
+Retrieval ranking weights live in `config.yaml` under `retrieval_weights`. The current profile was selected with `py eval/retrieval_weight_optimization.py` and emphasizes source, feedback, supersession, manifest relation, and consolidation-summary signals over raw vector similarity. CLC controller thresholds live under `thresholds`; `py eval/clc_threshold_calibration.py` compares the configured profile against nearby alternatives. Retrieved evidence now also carries stored CSD contradiction metadata, so `/ask` can surface unresolved correction pressure even when the contradictory memory is not part of the top evidence set. Queries containing exact alphanumeric identifiers such as `TemporalItem027`, ticket ids, or numbered codenames receive a conservative identifier-match boost and broader lexical backfill so nearby IDs do not outrank the exact item.
 
 Consolidation is non-destructive. `/consolidate create` and `POST /consolidate` create a new embedded summary memory and connect it to originals with `summarizes` relations. Original memories remain available as evidence, and `POST /consolidation_sources` or `/consolidate sources <summary-id>` can show the source memories behind a summary.
 

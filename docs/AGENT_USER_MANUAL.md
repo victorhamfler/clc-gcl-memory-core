@@ -616,9 +616,12 @@ Retrieval details include:
 - `stored_contradiction_statuses`: contradiction statuses, usually `unresolved`
 - `clc_state`: the learning state recorded when the memory was stored
 - `csd_score`: the memory's semantic novelty/surprise score
+- `identifier_match_score`: exact alphanumeric id match signal for identifiers such as ticket numbers, numbered codenames, or benchmark IDs
 - `session_evidence_score`, `session_evidence_boost`, `session_exact_evidence`: session-follow-up ranking signals
 
 When stored contradiction pressure is high, `/ask` can set `conflict=true` and add `stored_csd_contradiction` to the evidence conflict reason. This lets an agent see that an answer is based on current or corrected evidence while still being aware of the older contradictory memory.
+
+Identifier-heavy queries receive a conservative exact-match boost and broader lexical backfill. This helps the memory distinguish nearby IDs such as `TemporalItem027` versus `TemporalItem030`, which matters for tickets, task ids, experiment names, codenames, and benchmark-style facts.
 
 Authority results include:
 
@@ -722,6 +725,8 @@ py eval\correction_target_validation_eval.py
 py eval\ask_conflict_surface_eval.py
 py eval\live_fact_conflict_variants_eval.py
 py eval\long_memory_abilities_eval.py
+py eval\long_memory_benchmark_eval.py
+py eval\long_memory_benchmark_eval.py --configured-embedding --cases-per-ability 15 --noise-count 120
 ```
 
 Run broader behavior checks:
@@ -738,7 +743,9 @@ py eval\long_run_drift_eval.py --cycles 10
 py -m compileall core storage eval chat.py main.py serve.py
 ```
 
-`py eval\long_memory_abilities_eval.py` is a local LongMemEval-inspired check, not a full LongMemEval benchmark adapter. It tests useful benchmark ideas that fit the current program: exact information extraction, multi-session recall, temporal/current preference, authority over superseded facts, session decomposition, abstention for unknown sensitive facts, and noisy-memory scale.
+`py eval\long_memory_abilities_eval.py` is a small local LongMemEval-inspired check, not a full LongMemEval benchmark adapter. It tests useful benchmark ideas that fit the current program: exact information extraction, multi-session recall, temporal/current preference, authority over superseded facts, session decomposition, abstention for unknown sensitive facts, and noisy-memory scale.
+
+`py eval\long_memory_benchmark_eval.py` is the larger synthetic LongMemEval-style pressure test. The default hash run creates 200 questions across five abilities with 300 distractor memories. It evaluates answer accuracy, source accuracy, top-source accuracy, forbidden stale terms, and conflict accuracy. A configured EmbeddingGemma medium run can be started with `--configured-embedding --cases-per-ability 15 --noise-count 120`; the full configured run is intentionally optional because it takes several minutes.
 
 ## 15. Troubleshooting
 
