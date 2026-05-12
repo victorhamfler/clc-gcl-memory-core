@@ -23,6 +23,8 @@ class BruteForceVectorIndex:
                     score=score,
                     importance=row["importance"],
                     stability=row["stability"],
+                    csd_score=row.get("csd_score", 0.0),
+                    clc_state=row.get("clc_state"),
                     namespace=row["namespace"],
                     deprecated=row["deprecated"],
                 )

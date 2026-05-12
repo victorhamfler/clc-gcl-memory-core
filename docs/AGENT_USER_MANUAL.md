@@ -120,9 +120,11 @@ py chat.py --agent-id planner --namespace agent:planner --fast-hash
 
 When chat starts, it creates or continues a session. Session turns and active session memory help vague follow-up questions inherit the current topic and evidence.
 
-The active session memory stores the latest topic, short answer context, and pinned evidence ids. It is updated by `/teach`, `/correct`, and `/ask`, then used when prompts such as `what about that?`, `this`, `it`, or `previous` need the current topic.
+The active session memory stores the latest topic, short answer context, and pinned evidence ids. It is updated by `/teach`, `/correct`, and `/ask`, then used when prompts such as `what about that?`, `this`, `it`, or `previous` need the current topic. When a pronoun follow-up uses the active topic, the active evidence ids get a bounded exact-evidence ranking boost so the answer prefers the specific memory being referenced.
 
 Short topic-switch questions are handled conservatively. A prompt such as `what is CSD` or `what is G-CL` does not inherit the previous active topic merely because it is short. It uses the active topic only when the words overlap the active topic or the query contains a real follow-up marker such as `that`, `it`, `previous`, or `above`.
+
+Chat answers show `session_context: yes` or `session_context: no` beside confidence and conflict, so an agent can quickly tell whether the answer used session context.
 
 ## 6. Core Chat Commands
 
@@ -380,6 +382,8 @@ Session topic filtering is evidence-chain aware. Vague follow-ups such as `what 
 
 Short non-follow-up topic switches are tested separately with the configured EmbeddingGemma model. After asking about CLC, the follow-up `what is CSD` should answer from CSD evidence and report `session_context_used=false`; after that, `what is G-CL` should answer from G-CL evidence instead of carrying CSD context forward.
 
+For pronoun-based follow-ups, evidence rows may include `session_evidence_score`, `session_evidence_boost`, and `session_exact_evidence`. `session_exact_evidence=true` means the memory id came from the active topic's pinned evidence and received the stronger exact-reference boost.
+
 Correct:
 
 ```powershell
@@ -610,6 +614,9 @@ Retrieval details include:
 - `stored_contradiction_score`: strongest stored CSD contradiction involving this memory
 - `stored_contradiction_memory_ids`: memories that contradict this evidence according to stored CSD records
 - `stored_contradiction_statuses`: contradiction statuses, usually `unresolved`
+- `clc_state`: the learning state recorded when the memory was stored
+- `csd_score`: the memory's semantic novelty/surprise score
+- `session_evidence_score`, `session_evidence_boost`, `session_exact_evidence`: session-follow-up ranking signals
 
 When stored contradiction pressure is high, `/ask` can set `conflict=true` and add `stored_csd_contradiction` to the evidence conflict reason. This lets an agent see that an answer is based on current or corrected evidence while still being aware of the older contradictory memory.
 
@@ -713,6 +720,7 @@ py eval\server_smoke.py
 py eval\session_short_topic_switch_eval.py --use-config-embedding
 py eval\correction_target_validation_eval.py
 py eval\ask_conflict_surface_eval.py
+py eval\live_fact_conflict_variants_eval.py
 py eval\long_memory_abilities_eval.py
 ```
 
@@ -758,6 +766,7 @@ If a follow-up such as `what about that?` follows the wrong topic:
 - Run `py eval\session_memory_eval.py`.
 - Run `py eval\session_topic_switch_regression.py` to verify that rule and label follow-ups stay on their own evidence chains.
 - Run `py eval\session_short_topic_switch_eval.py --use-config-embedding` to verify that short topic switches such as CLC to CSD to G-CL do not inherit stale context.
+- Check whether the top evidence has `session_exact_evidence=true` for pronoun follow-ups that should refer to the active topic.
 
 If `/correct` rejects explicit target ids:
 

@@ -64,6 +64,8 @@ class RecallItem:
     score: float
     importance: float
     stability: float
+    csd_score: float = 0.0
+    clc_state: str | None = None
     namespace: str = "global"
     deprecated: bool = False
 

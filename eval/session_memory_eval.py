@@ -80,9 +80,13 @@ def main() -> None:
     active = next(item for item in session_memory if item["key"] == "active_topic")
 
     assert policy_answer["evidence"][0]["memory_id"] == policy["memory"]["memory_id"]
+    assert vague_policy["evidence"][0]["memory_id"] == policy["memory"]["memory_id"]
+    assert vague_policy["evidence"][0].get("session_exact_evidence") is True
     assert policy["memory"]["memory_id"] in policy_ids
     assert "GitHub policy memory" in vague_policy["retrieval_query"]
     assert label_answer["evidence"][0]["memory_id"] == label["memory"]["memory_id"]
+    assert vague_label["evidence"][0]["memory_id"] == label["memory"]["memory_id"]
+    assert vague_label["evidence"][0].get("session_exact_evidence") is True
     assert label["memory"]["memory_id"] in label_ids
     assert "Cerulean Keystone" in vague_label["retrieval_query"]
     assert active["metadata"]["evidence_memory_ids"]

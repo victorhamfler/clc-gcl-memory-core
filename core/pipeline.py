@@ -346,6 +346,8 @@ class MemoryPipeline:
                     "source": source,
                     "chunk_index": source_info["chunk_index"] if source_info else None,
                     "memory_type": item.memory_type,
+                    "clc_state": item.clc_state,
+                    "csd_score": round(float(item.csd_score or 0.0), 6),
                     "namespace": item.namespace,
                     "score": round(score, 6),
                     "cosine": round(item.score, 6),
@@ -1029,6 +1031,8 @@ class MemoryPipeline:
                     "content": self._short_context_text(raw_content),
                     "evidence_memory_ids": evidence_ids,
                     "context_score": round(score, 6),
+                    "active_evidence_match": bool(prepared.get("is_session_memory") or evidence_matches_active),
+                    "vague_followup": vague_followup,
                     "turn_index": idx,
                 }
             )
@@ -1091,12 +1095,16 @@ class MemoryPipeline:
         session_context: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         context_scores: dict[str, float] = {}
+        exact_active_ids: set[str] = set()
         for item in session_context:
             score = float(item.get("context_score") or 0.0)
+            exact_active = bool(item.get("active_evidence_match"))
             for memory_id in item.get("evidence_memory_ids") or []:
                 mid = str(memory_id or "").strip()
                 if mid:
                     context_scores[mid] = max(context_scores.get(mid, 0.0), score)
+                    if exact_active:
+                        exact_active_ids.add(mid)
         if not context_scores:
             return results
         boosted: list[dict[str, Any]] = []
@@ -1104,10 +1112,13 @@ class MemoryPipeline:
             row = dict(item)
             context_score = context_scores.get(str(row.get("memory_id") or ""), 0.0)
             if context_score > 0.0:
-                boost = min(0.35, 0.18 + 0.18 * context_score)
+                memory_id = str(row.get("memory_id") or "")
+                exact_active = memory_id in exact_active_ids
+                boost = min(0.55, 0.28 + 0.35 * context_score) if exact_active else min(0.35, 0.18 + 0.18 * context_score)
                 row["base_score"] = row["score"]
                 row["session_evidence_score"] = round(context_score, 6)
                 row["session_evidence_boost"] = round(boost, 6)
+                row["session_exact_evidence"] = exact_active
                 row["score"] = round(float(row["score"]) + boost, 6)
             boosted.append(row)
         boosted.sort(key=lambda row: row["score"], reverse=True)
@@ -1202,7 +1213,8 @@ class MemoryPipeline:
         active_overlap: float = 0.0,
         active_topic_available: bool = False,
     ) -> bool:
-        compact = f" {str(query or '').lower()} "
+        normalized = re.sub(r"[^\w\s]", " ", str(query or "").lower())
+        compact = f" {normalized} "
         vague_markers = (
             " that ",
             " this ",

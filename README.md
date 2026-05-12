@@ -64,6 +64,7 @@ py eval/agent_corpus_experiment.py
 py eval/session_short_topic_switch_eval.py --use-config-embedding
 py eval/correction_target_validation_eval.py
 py eval/ask_conflict_surface_eval.py
+py eval/live_fact_conflict_variants_eval.py
 py eval/long_memory_abilities_eval.py
 py chat.py --agent-id agent_alpha
 py serve.py --host 127.0.0.1 --port 8765
@@ -116,7 +117,7 @@ $body = @{ query = "what should I remember next"; agent_id = "agent_alpha"; sess
 Invoke-RestMethod -Uri "http://127.0.0.1:8765/ask" -Method Post -ContentType "application/json" -Body $body
 ```
 
-When `session_id` is supplied, `/ask` uses topic-filtered recent session turns plus a small `active_topic` session memory as retrieval context. This lets follow-up questions such as "what about that?" inherit the current topic and pinned evidence without dragging every recent topic into the retrieval query. The active topic is updated by `/teach`, `/correct`, and `/ask`. Short topic-switch questions such as "what is CSD" or "what is G-CL" no longer inherit the previous active topic unless they overlap the active topic or contain a real follow-up marker.
+When `session_id` is supplied, `/ask` uses topic-filtered recent session turns plus a small `active_topic` session memory as retrieval context. This lets follow-up questions such as "what about that?" inherit the current topic and pinned evidence without dragging every recent topic into the retrieval query. Pronoun-based follow-ups apply a bounded exact-evidence boost to the active topic's memory ids and mark those evidence rows with `session_exact_evidence`. The active topic is updated by `/teach`, `/correct`, and `/ask`. Short topic-switch questions such as "what is CSD" or "what is G-CL" no longer inherit the previous active topic unless they overlap the active topic or contain a real follow-up marker.
 
 Inspect session memory:
 

@@ -794,7 +794,8 @@ class MemoryDB:
         rows = self.conn.execute(
             f"""
             SELECT m.id, m.text, m.domain_id, m.memory_type, m.importance,
-                   m.stability, COALESCE(m.namespace, 'global') AS namespace, m.deprecated, v.embedding
+                   m.stability, m.csd_score, m.clc_state,
+                   COALESCE(m.namespace, 'global') AS namespace, m.deprecated, v.embedding
             FROM memories m
             JOIN vectors v ON v.memory_id = m.id
             {where}
@@ -809,6 +810,8 @@ class MemoryDB:
                 "memory_type": row["memory_type"],
                 "importance": float(row["importance"] or 0.0),
                 "stability": float(row["stability"] or 0.0),
+                "csd_score": float(row["csd_score"] or 0.0),
+                "clc_state": row["clc_state"],
                 "namespace": normalize_namespace(row["namespace"]),
                 "deprecated": bool(row["deprecated"]),
                 "embedding": decode_vector(row["embedding"]),
@@ -832,7 +835,8 @@ class MemoryDB:
         rows = self.conn.execute(
             f"""
             SELECT m.id, m.text, m.domain_id, m.memory_type, m.importance,
-                   m.stability, COALESCE(m.namespace, 'global') AS namespace, m.deprecated, v.embedding
+                   m.stability, m.csd_score, m.clc_state,
+                   COALESCE(m.namespace, 'global') AS namespace, m.deprecated, v.embedding
             FROM memories m
             JOIN vectors v ON v.memory_id = m.id
             WHERE {' AND '.join(clauses)}
@@ -847,6 +851,8 @@ class MemoryDB:
                 "memory_type": row["memory_type"],
                 "importance": float(row["importance"] or 0.0),
                 "stability": float(row["stability"] or 0.0),
+                "csd_score": float(row["csd_score"] or 0.0),
+                "clc_state": row["clc_state"],
                 "namespace": normalize_namespace(row["namespace"]),
                 "deprecated": bool(row["deprecated"]),
                 "embedding": decode_vector(row["embedding"]),

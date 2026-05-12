@@ -620,14 +620,25 @@ def extract_simple_fact(text: str) -> dict[str, Any] | None:
         r"\b(?P<subject>[A-Z][A-Za-z0-9_ -]{1,80}?)\s+is\s+(?P<negated>not\s+)?(?:the\s+)?(?P<relation>capital)\s+of\s+(?P<object>[A-Z][A-Za-z0-9_ -]{1,80})\b",
         cleaned,
     )
-    if not match:
-        return None
-    return {
-        "subject": normalize_fact_value(match.group("subject")),
-        "relation": match.group("relation").lower(),
-        "object": normalize_fact_value(match.group("object")),
-        "negated": bool(match.group("negated")),
-    }
+    if match:
+        return {
+            "subject": normalize_fact_value(match.group("subject")),
+            "relation": match.group("relation").lower(),
+            "object": normalize_fact_value(match.group("object")),
+            "negated": bool(match.group("negated")),
+        }
+    reverse_match = re.search(
+        r"\b(?P<object>[A-Z][A-Za-z0-9_ -]{1,80}?)\s+(?P<relation>capital)\s+is\s+(?P<negated>not\s+)?(?P<subject>[A-Z][A-Za-z0-9_ -]{1,80})\b",
+        cleaned,
+    )
+    if reverse_match:
+        return {
+            "subject": normalize_fact_value(reverse_match.group("subject")),
+            "relation": reverse_match.group("relation").lower(),
+            "object": normalize_fact_value(reverse_match.group("object")),
+            "negated": bool(reverse_match.group("negated")),
+        }
+    return None
 
 
 def normalize_fact_value(value: str) -> str:
@@ -740,6 +751,11 @@ def compact_evidence(item: dict[str, Any]) -> dict[str, Any]:
         "chunk_index": item.get("chunk_index"),
         "domain_name": item.get("domain_name"),
         "memory_type": item.get("memory_type"),
+        "clc_state": item.get("clc_state"),
+        "csd_score": item.get("csd_score", 0.0),
+        "session_evidence_score": item.get("session_evidence_score"),
+        "session_evidence_boost": item.get("session_evidence_boost"),
+        "session_exact_evidence": bool(item.get("session_exact_evidence", False)),
         "feedback_score": item.get("feedback_score"),
         "usage_count": item.get("usage_count"),
         "last_recalled": item.get("last_recalled"),

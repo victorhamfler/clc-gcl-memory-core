@@ -141,9 +141,13 @@ class MemoryChat:
             if item.get("memory_id")
         ]
         self.last_result = result
+        session_context_used = bool(result.get("session_context_used"))
         lines = [
             result["answer"],
-            f"confidence: {result['confidence']:.3f} | conflict: {bool(result['conflict'])}",
+            (
+                f"confidence: {result['confidence']:.3f} | conflict: {bool(result['conflict'])} "
+                f"| session_context: {'yes' if session_context_used else 'no'}"
+            ),
         ]
         evidence = result.get("evidence", [])[: self.top_k]
         if evidence:
