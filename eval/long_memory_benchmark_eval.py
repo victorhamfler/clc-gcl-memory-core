@@ -5,6 +5,7 @@ import json
 import sys
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -284,40 +285,94 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def weak_cases(rows: list[dict[str, Any]], limit: int = 12) -> list[dict[str, Any]]:
-    weak = [
-        row
-        for row in rows
-        if not (row["answer_ok"] and row["source_ok"] and row["top_source_ok"] and row["forbidden_ok"] and row["conflict_ok"])
-    ]
+    weak = [row for row in rows if not case_passed(row)]
     return weak[:limit]
 
 
-def run(db_path: Path, cases_per_ability: int, noise_count: int, top_k: int, fast_hash: bool, embedding_dim: int) -> dict[str, Any]:
+def case_passed(row: dict[str, Any]) -> bool:
+    return bool(
+        row["answer_ok"]
+        and row["source_ok"]
+        and row["top_source_ok"]
+        and row["forbidden_ok"]
+        and row["conflict_ok"]
+    )
+
+
+def apply_preset(args: argparse.Namespace) -> None:
+    presets = {
+        "smoke": {"cases_per_ability": 5, "noise_count": 40},
+        "medium": {"cases_per_ability": 20, "noise_count": 150},
+        "full": {"cases_per_ability": 40, "noise_count": 300},
+    }
+    if not args.preset:
+        return
+    for key, value in presets[args.preset].items():
+        if getattr(args, key) is None:
+            setattr(args, key, value)
+
+
+def write_report(payload: dict[str, Any], report_path: Path) -> None:
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def run(
+    db_path: Path,
+    cases_per_ability: int,
+    noise_count: int,
+    top_k: int,
+    fast_hash: bool,
+    embedding_dim: int,
+    weak_case_limit: int,
+    include_rows: bool,
+) -> dict[str, Any]:
     start = time.perf_counter()
+    timings: dict[str, float] = {}
     namespace = "agent:lme_local_benchmark"
+    stage_start = time.perf_counter()
     pipeline = make_pipeline(db_path, fast_hash=fast_hash, embedding_dim=embedding_dim)
+    timings["pipeline_init_sec"] = round(time.perf_counter() - stage_start, 6)
     try:
+        stage_start = time.perf_counter()
         cases = build_benchmark(pipeline, namespace, cases_per_ability, noise_count)
+        timings["seed_sec"] = round(time.perf_counter() - stage_start, 6)
+        stage_start = time.perf_counter()
         rows = [evaluate_case(pipeline, namespace, case, top_k) for case in cases]
+        timings["query_eval_sec"] = round(time.perf_counter() - stage_start, 6)
+        stage_start = time.perf_counter()
         stats = pipeline.db.stats()
+        cache_stats_fn = getattr(pipeline.encoder, "cache_stats", None)
+        embedding_cache = cache_stats_fn() if callable(cache_stats_fn) else None
+        timings["stats_sec"] = round(time.perf_counter() - stage_start, 6)
     finally:
+        stage_start = time.perf_counter()
         pipeline.close()
+        timings["close_sec"] = round(time.perf_counter() - stage_start, 6)
     summary = summarize(rows)
-    return {
+    weak = weak_cases(rows, limit=weak_case_limit)
+    payload = {
         "ok": (
             summary["answer_accuracy"] >= 0.88
             and summary["source_accuracy"] >= 0.85
             and summary["conflict_accuracy"] >= 0.95
         ),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "elapsed_sec": round(time.perf_counter() - start, 6),
+        "timings": timings,
         "embedding_mode": "hash" if fast_hash else "configured",
         "cases_per_ability": cases_per_ability,
         "noise_count": noise_count,
         "top_k": top_k,
         "summary": summary,
-        "weak_cases": weak_cases(rows),
+        "weak_case_count": sum(1 for row in rows if not case_passed(row)),
+        "weak_cases": weak,
         "stats": stats,
+        "embedding_cache": embedding_cache,
     }
+    if include_rows:
+        payload["rows"] = rows
+    return payload
 
 
 def print_text(payload: dict[str, Any]) -> None:
@@ -326,6 +381,18 @@ def print_text(payload: dict[str, Any]) -> None:
     print(f"ok: {payload['ok']}")
     print(f"embedding: {payload['embedding_mode']}")
     print(f"cases: {summary['count']} | noise: {payload['noise_count']} | elapsed_sec: {payload['elapsed_sec']}")
+    timings = payload.get("timings") or {}
+    if timings:
+        print(
+            "timings: "
+            f"init={timings.get('pipeline_init_sec', 0.0):.4f}s "
+            f"seed={timings.get('seed_sec', 0.0):.4f}s "
+            f"query={timings.get('query_eval_sec', 0.0):.4f}s "
+            f"stats={timings.get('stats_sec', 0.0):.4f}s"
+        )
+    if payload.get("embedding_cache"):
+        cache = payload["embedding_cache"]
+        print(f"embedding_cache: entries={cache.get('entries')} hits={cache.get('hits')} path={cache.get('path')}")
     print(
         "overall: "
         f"answer={summary['answer_accuracy']:.4f} "
@@ -351,14 +418,23 @@ def print_text(payload: dict[str, Any]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run a LongMemEval-inspired synthetic benchmark against the memory core.")
     parser.add_argument("--db-path", default=None)
-    parser.add_argument("--cases-per-ability", type=int, default=40)
-    parser.add_argument("--noise-count", type=int, default=300)
+    parser.add_argument("--preset", choices=["smoke", "medium", "full"], default=None)
+    parser.add_argument("--cases-per-ability", type=int, default=None)
+    parser.add_argument("--noise-count", type=int, default=None)
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--fast-hash", action="store_true", default=True)
     parser.add_argument("--configured-embedding", action="store_true", help="Use configured embedding backend instead of fast hash.")
     parser.add_argument("--embedding-dim", type=int, default=128)
+    parser.add_argument("--weak-case-limit", type=int, default=12)
+    parser.add_argument("--include-rows", action="store_true", help="Include every evaluated case in the JSON payload/report.")
+    parser.add_argument("--save-report", default=None, help="Write the JSON payload to this path.")
     parser.add_argument("--format", choices=["text", "json"], default="text")
     args = parser.parse_args()
+    apply_preset(args)
+    if args.cases_per_ability is None:
+        args.cases_per_ability = 40
+    if args.noise_count is None:
+        args.noise_count = 300
 
     fast_hash = not args.configured_embedding
     if args.db_path:
@@ -368,7 +444,16 @@ def main() -> None:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         if db_path.exists():
             db_path.unlink()
-        payload = run(db_path, args.cases_per_ability, args.noise_count, args.top_k, fast_hash, args.embedding_dim)
+        payload = run(
+            db_path,
+            args.cases_per_ability,
+            args.noise_count,
+            args.top_k,
+            fast_hash,
+            args.embedding_dim,
+            args.weak_case_limit,
+            args.include_rows,
+        )
     else:
         with TemporaryDirectory() as tmp:
             payload = run(
@@ -378,11 +463,21 @@ def main() -> None:
                 args.top_k,
                 fast_hash,
                 args.embedding_dim,
+                args.weak_case_limit,
+                args.include_rows,
             )
+    if args.save_report:
+        report_path = Path(args.save_report)
+        if not report_path.is_absolute():
+            report_path = ROOT / report_path
+        payload["saved_report"] = str(report_path)
+        write_report(payload, report_path)
     if args.format == "json":
         print(json.dumps(payload, indent=2))
     else:
         print_text(payload)
+        if args.save_report:
+            print(f"saved_report: {payload['saved_report']}")
     if not payload["ok"]:
         raise SystemExit(1)
 

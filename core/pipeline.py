@@ -1731,6 +1731,8 @@ class MemoryPipeline:
         lower = str(query or "").lower()
         if any(any(ch.isalpha() for ch in token) and any(ch.isdigit() for ch in token) for token in MemoryPipeline._tokens(lower)):
             return True
+        if any(term in lower for term in ("routing tag", "contact code", "private key", "signing key")):
+            return True
         return any(
             term in lower
             for term in (

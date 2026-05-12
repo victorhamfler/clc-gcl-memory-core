@@ -67,12 +67,25 @@ py eval/ask_conflict_surface_eval.py
 py eval/live_fact_conflict_variants_eval.py
 py eval/long_memory_abilities_eval.py
 py eval/long_memory_benchmark_eval.py
+py eval/long_memory_benchmark_eval.py --preset medium --save-report logs/long_memory_benchmark_medium_report.json --include-rows
 py eval/long_memory_benchmark_eval.py --configured-embedding --cases-per-ability 15 --noise-count 120
+py eval/long_memory_messy_eval.py --save-report logs/long_memory_messy_hash_report.json --include-rows
+py eval/long_memory_messy_eval.py --configured-embedding --noise-count 40
+py eval/embedding_cache_smoke.py
+py eval/cleanup_generated_artifacts.py
 py chat.py --agent-id agent_alpha
 py serve.py --host 127.0.0.1 --port 8765
 ```
 
 After changing resolver or retrieval code, restart any long-running server before evaluating answers. The report regression covers short natural questions such as `who am i`, `what does G-CL maintain`, CSD contradiction questions, CLC definition questions, and consolidation questions.
+
+`long_memory_benchmark_eval.py` supports `--preset smoke|medium|full`, timing breakdowns, `--save-report`, `--weak-case-limit`, and `--include-rows` for persistent benchmark artifacts. Saved reports are useful for comparing retrieval changes, configured embedding runtime, and weak cases across versions.
+
+`long_memory_messy_eval.py` is a harder local pressure test inspired by long-memory benchmarks. It checks buried facts in noisy conversation turns, temporal updates, multi-hop association, session topic switching, and abstention for unknown sensitive data.
+
+Configured GGUF embeddings use a persistent SQLite cache at `logs/embedding_cache.sqlite`. Delete that file if you intentionally change embedding model behavior and want a completely cold run.
+
+If local disk space gets tight after repeated benchmark runs, use `py eval/cleanup_generated_artifacts.py`. It removes ignored long-memory benchmark artifacts, the generated embedding cache, the generated memory event log, and Python bytecode caches.
 
 ## API Endpoints
 

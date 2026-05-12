@@ -19,6 +19,7 @@ embedding:
   normalize: true
   max_text_chars: 1000
   sidecar: true
+  cache_path: logs/embedding_cache.sqlite
   allow_hash_fallback: false
 
 thresholds:

@@ -5,9 +5,11 @@ import json
 import os
 import queue
 import re
+import sqlite3
 import subprocess
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +21,96 @@ TOKEN_RE = re.compile(r"[A-Za-z0-9_#./:+-]+")
 
 class EmbeddingRuntimeError(RuntimeError):
     pass
+
+
+class DiskEmbeddingCache:
+    def __init__(self, path: str | os.PathLike[str], namespace: str):
+        self.path = Path(path)
+        self.namespace = str(namespace)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
+        self._conn = sqlite3.connect(self.path, check_same_thread=False)
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS embedding_cache (
+                namespace TEXT NOT NULL,
+                key TEXT NOT NULL,
+                dim INTEGER NOT NULL,
+                vector TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                last_used_at TEXT NOT NULL,
+                hits INTEGER DEFAULT 0,
+                PRIMARY KEY(namespace, key)
+            )
+            """
+        )
+        self._conn.commit()
+
+    def get(self, key: str) -> list[float] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT vector FROM embedding_cache WHERE namespace = ? AND key = ?",
+                (self.namespace, key),
+            ).fetchone()
+            if row is None:
+                return None
+            self._conn.execute(
+                """
+                UPDATE embedding_cache
+                SET last_used_at = ?, hits = COALESCE(hits, 0) + 1
+                WHERE namespace = ? AND key = ?
+                """,
+                (utc_timestamp(), self.namespace, key),
+            )
+            self._conn.commit()
+        return [float(x) for x in json.loads(row[0])]
+
+    def set(self, key: str, vector: list[float]) -> None:
+        now = utc_timestamp()
+        payload = json.dumps([float(x) for x in vector], separators=(",", ":"))
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO embedding_cache(namespace, key, dim, vector, created_at, last_used_at, hits)
+                VALUES (?, ?, ?, ?, ?, ?, 0)
+                ON CONFLICT(namespace, key) DO UPDATE SET
+                    dim = excluded.dim,
+                    vector = excluded.vector,
+                    last_used_at = excluded.last_used_at
+                """,
+                (self.namespace, key, len(vector), payload, now, now),
+            )
+            self._conn.commit()
+
+    def stats(self) -> dict[str, Any]:
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT COUNT(*) AS entries, COALESCE(SUM(hits), 0) AS hits
+                FROM embedding_cache
+                WHERE namespace = ?
+                """,
+                (self.namespace,),
+            ).fetchone()
+        return {
+            "path": str(self.path),
+            "namespace": self.namespace,
+            "entries": int(row[0] or 0),
+            "hits": int(row[1] or 0),
+        }
+
+    def close(self) -> None:
+        with self._lock:
+            self._conn.close()
+
+
+def utc_timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def embedding_cache_key(*parts: Any) -> str:
+    raw = "\n".join(str(part or "") for part in parts)
+    return hashlib.blake2b(raw.encode("utf-8"), digest_size=32).hexdigest()
 
 
 class HashEmbeddingEncoder:
@@ -68,6 +160,7 @@ class LlamaCppEmbeddingEncoder:
         n_threads: int | None = None,
         normalize_embeddings: bool = True,
         max_text_chars: int = 1000,
+        cache_path: str | None = None,
     ):
         self.model_path = str(model_path)
         self.model_name = str(model_name or Path(model_path).name)
@@ -78,16 +171,25 @@ class LlamaCppEmbeddingEncoder:
         self._model = None
         self._lock = threading.Lock()
         self._cache: dict[str, list[float]] = {}
+        self._disk_cache = self._build_disk_cache(cache_path)
         self._embedding_dim: int | None = None
 
     def embed(self, text: str) -> list[float]:
         safe_text = str(text or "")[: self.max_text_chars]
-        key = safe_text[:200]
+        key = self._cache_key(safe_text)
         if key in self._cache:
             return self._cache[key]
+        if self._disk_cache is not None:
+            cached = self._disk_cache.get(key)
+            if cached is not None:
+                self._cache[key] = cached
+                self._embedding_dim = len(cached)
+                return cached
         self._load()
         result = self._embed_with_model([safe_text])[0]
         self._cache[key] = result
+        if self._disk_cache is not None:
+            self._disk_cache.set(key, result)
         self._embedding_dim = len(result)
         return result
 
@@ -104,6 +206,32 @@ class LlamaCppEmbeddingEncoder:
             "embedding_dim": self.embedding_dim,
             "model_path": os.path.abspath(os.path.expanduser(self.model_path)),
         }
+
+    def close(self) -> None:
+        if self._disk_cache is not None:
+            self._disk_cache.close()
+
+    def cache_stats(self) -> dict[str, Any] | None:
+        if self._disk_cache is None:
+            return None
+        return self._disk_cache.stats()
+
+    def _cache_namespace(self) -> str:
+        return embedding_cache_key(
+            "llama_cpp",
+            os.path.abspath(os.path.expanduser(self.model_path)),
+            self.model_name,
+            self.normalize_embeddings,
+            self.max_text_chars,
+        )
+
+    def _cache_key(self, safe_text: str) -> str:
+        return embedding_cache_key(self._cache_namespace(), safe_text)
+
+    def _build_disk_cache(self, cache_path: str | None) -> DiskEmbeddingCache | None:
+        if not cache_path:
+            return None
+        return DiskEmbeddingCache(cache_path, self._cache_namespace())
 
     def _load(self) -> None:
         if self._model is not None:
@@ -188,6 +316,7 @@ class WslLlamaCppEmbeddingEncoder:
         timeout_sec: float = 120.0,
         expected_dim: int | None = 768,
         use_sidecar: bool = True,
+        cache_path: str | None = None,
     ):
         self.model_path = str(model_path)
         self.model_name = str(model_name or Path(model_path).name)
@@ -200,6 +329,7 @@ class WslLlamaCppEmbeddingEncoder:
         self.expected_dim = int(expected_dim) if expected_dim else None
         self.use_sidecar = bool(use_sidecar)
         self._cache: dict[str, list[float]] = {}
+        self._disk_cache = self._build_disk_cache(cache_path)
         self._embedding_dim: int | None = self.expected_dim
         self._sidecar_lock = threading.Lock()
         self._proc: subprocess.Popen[str] | None = None
@@ -208,9 +338,15 @@ class WslLlamaCppEmbeddingEncoder:
 
     def embed(self, text: str) -> list[float]:
         safe_text = str(text or "")[: self.max_text_chars]
-        key = safe_text[:200]
+        key = self._cache_key(safe_text)
         if key in self._cache:
             return self._cache[key]
+        if self._disk_cache is not None:
+            cached = self._disk_cache.get(key)
+            if cached is not None:
+                self._cache[key] = cached
+                self._embedding_dim = len(cached)
+                return cached
         payload = {
             "texts": [safe_text],
         }
@@ -226,6 +362,8 @@ class WslLlamaCppEmbeddingEncoder:
             }
             result = self._run_wsl_embedding(one_shot)[0]
         self._cache[key] = result
+        if self._disk_cache is not None:
+            self._disk_cache.set(key, result)
         self._embedding_dim = len(result)
         return result
 
@@ -246,6 +384,30 @@ class WslLlamaCppEmbeddingEncoder:
     def close(self) -> None:
         with self._sidecar_lock:
             self._stop_sidecar_locked()
+        if self._disk_cache is not None:
+            self._disk_cache.close()
+
+    def cache_stats(self) -> dict[str, Any] | None:
+        if self._disk_cache is None:
+            return None
+        return self._disk_cache.stats()
+
+    def _cache_namespace(self) -> str:
+        return embedding_cache_key(
+            "wsl_llama_cpp",
+            self.model_path,
+            self.model_name,
+            self.normalize_embeddings,
+            self.max_text_chars,
+        )
+
+    def _cache_key(self, safe_text: str) -> str:
+        return embedding_cache_key(self._cache_namespace(), safe_text)
+
+    def _build_disk_cache(self, cache_path: str | None) -> DiskEmbeddingCache | None:
+        if not cache_path:
+            return None
+        return DiskEmbeddingCache(cache_path, self._cache_namespace())
 
     def _run_sidecar_embedding(self, payload: dict[str, Any]) -> list[list[float]]:
         with self._sidecar_lock:
@@ -408,6 +570,7 @@ def build_encoder(config: dict[str, Any] | None = None, default_dim: int = 128):
     n_threads = int(n_threads) if n_threads is not None else None
     normalize_embeddings = bool(cfg.get("normalize", True))
     max_text_chars = int(cfg.get("max_text_chars") or 1000)
+    cache_path = str(cfg.get("cache_path") or "") or None
 
     if backend in ("llama_cpp", "gguf", "llama"):
         return LlamaCppEmbeddingEncoder(
@@ -417,6 +580,7 @@ def build_encoder(config: dict[str, Any] | None = None, default_dim: int = 128):
             n_threads=n_threads,
             normalize_embeddings=normalize_embeddings,
             max_text_chars=max_text_chars,
+            cache_path=cache_path,
         )
     if backend in ("wsl_llama_cpp", "wsl_gguf"):
         return WslLlamaCppEmbeddingEncoder(
@@ -429,6 +593,7 @@ def build_encoder(config: dict[str, Any] | None = None, default_dim: int = 128):
             python_executable=str(cfg.get("wsl_python") or "python3"),
             expected_dim=int(cfg.get("dim") or 768),
             use_sidecar=bool(cfg.get("sidecar", True)),
+            cache_path=cache_path,
         )
     raise ValueError(f"Unsupported embedding backend: {backend}")
 

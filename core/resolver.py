@@ -172,13 +172,17 @@ def classify_memory_state(item: dict[str, Any]) -> str:
     stale_language = any(
         term in text
         for term in (
-            "old ",
             "not final truth",
             "marked stale",
             "stale memory",
             "superseded",
             "no longer current",
             "historical but no longer current",
+        )
+    ) or bool(
+        re.search(
+            r"\bold\s+(policy|memory|fact|rule|preference|profile|deployment|geometry|evidence|version|value)\b",
+            text,
         )
     )
     correction_language = any(
@@ -253,6 +257,10 @@ def evidence_preference_score(query: str, item: dict[str, Any]) -> float:
     score += 0.20 * float(item.get("text_match_score") or 0.0)
     score += 0.05 * len(normalized_terms(query) & normalized_terms(clean_text))
     lower = text.lower()
+    if "does not change" in lower or "doesn't change" in lower:
+        score -= 0.18
+    if re.search(r"\b(is|are|uses|use|equals|=)\b", lower) and not re.search(r"\bdoes not change\b|\bdoesn't change\b", lower):
+        score += 0.08
     if lower.startswith("memory improvement for"):
         score -= 0.18
     if "original memory preview:" in lower:
@@ -675,11 +683,14 @@ ANSWER_STOPWORDS = {
 SENSITIVE_LOOKUP_TERMS = {
     "address",
     "email",
+    "key",
     "license",
     "passport",
     "password",
     "phone",
+    "private",
     "secret",
+    "signing",
     "ssn",
     "token",
 }

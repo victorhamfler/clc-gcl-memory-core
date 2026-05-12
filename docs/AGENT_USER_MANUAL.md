@@ -726,7 +726,12 @@ py eval\ask_conflict_surface_eval.py
 py eval\live_fact_conflict_variants_eval.py
 py eval\long_memory_abilities_eval.py
 py eval\long_memory_benchmark_eval.py
+py eval\long_memory_benchmark_eval.py --preset medium --save-report logs\long_memory_benchmark_medium_report.json --include-rows
 py eval\long_memory_benchmark_eval.py --configured-embedding --cases-per-ability 15 --noise-count 120
+py eval\long_memory_messy_eval.py --save-report logs\long_memory_messy_hash_report.json --include-rows
+py eval\long_memory_messy_eval.py --configured-embedding --noise-count 40
+py eval\embedding_cache_smoke.py
+py eval\cleanup_generated_artifacts.py
 ```
 
 Run broader behavior checks:
@@ -745,7 +750,13 @@ py -m compileall core storage eval chat.py main.py serve.py
 
 `py eval\long_memory_abilities_eval.py` is a small local LongMemEval-inspired check, not a full LongMemEval benchmark adapter. It tests useful benchmark ideas that fit the current program: exact information extraction, multi-session recall, temporal/current preference, authority over superseded facts, session decomposition, abstention for unknown sensitive facts, and noisy-memory scale.
 
-`py eval\long_memory_benchmark_eval.py` is the larger synthetic LongMemEval-style pressure test. The default hash run creates 200 questions across five abilities with 300 distractor memories. It evaluates answer accuracy, source accuracy, top-source accuracy, forbidden stale terms, and conflict accuracy. A configured EmbeddingGemma medium run can be started with `--configured-embedding --cases-per-ability 15 --noise-count 120`; the full configured run is intentionally optional because it takes several minutes.
+`py eval\long_memory_benchmark_eval.py` is the larger synthetic LongMemEval-style pressure test. The default hash run creates 200 questions across five abilities with 300 distractor memories. It evaluates answer accuracy, source accuracy, top-source accuracy, forbidden stale terms, and conflict accuracy. Use `--preset smoke|medium|full` for repeatable run sizes, `--save-report` for a persistent JSON artifact, `--include-rows` to store every evaluated case, and `--weak-case-limit` to control how many failures are included. Reports include timing breakdowns for pipeline initialization, memory seeding, query evaluation, stats, and close time. A configured EmbeddingGemma medium run can be started with `--configured-embedding --cases-per-ability 15 --noise-count 120`; the full configured run is intentionally optional because it takes several minutes.
+
+`py eval\long_memory_messy_eval.py` is the harder LongMemEval-inspired local pressure test. It checks buried facts inside noisy conversation turns, temporal updates with stale context, multi-hop association, session topic switching, and abstention for unknown sensitive data. Use `--include-rows --save-report ...` when comparing weak cases across versions.
+
+Configured GGUF embeddings use a persistent SQLite cache at `logs\embedding_cache.sqlite`. This makes repeated validation runs faster without changing memory answers. Delete that file before a cold performance test, after intentionally changing embedding model behavior, or when switching to a different model.
+
+If local disk space gets tight after repeated benchmark runs, use `py eval\cleanup_generated_artifacts.py`. It removes ignored long-memory benchmark artifacts, the generated embedding cache, the generated memory event log, and Python bytecode caches.
 
 ## 15. Troubleshooting
 

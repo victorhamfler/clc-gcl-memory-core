@@ -56,16 +56,27 @@ def runtime_embedding_config(config: dict[str, Any] | None) -> dict[str, Any] | 
     return embedding
 
 
+def resolve_embedding_cache_path(root: Path, embedding: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not embedding:
+        return embedding
+    out = dict(embedding)
+    cache_path = out.get("cache_path")
+    if cache_path:
+        out["cache_path"] = str(resolve_project_path(root, cache_path, "logs/embedding_cache.sqlite"))
+    return out
+
+
 def create_pipeline(root: Path, db_path: Path | None = None) -> MemoryPipeline:
     config = load_config(root)
     resolved_db_path = db_path or configured_db_path(root, config)
     init_db(root, resolved_db_path)
+    embedding_config = resolve_embedding_cache_path(root, runtime_embedding_config(config))
     return MemoryPipeline(
         root=root,
         db_path=resolved_db_path,
         embedding_dim=int(config.get("embedding_dim") or 128),
         top_k=int(config.get("top_k") or 8),
-        embedding_config=runtime_embedding_config(config),
+        embedding_config=embedding_config,
         retrieval_weights=config.get("retrieval_weights"),
         clc_thresholds=config.get("thresholds"),
     )
