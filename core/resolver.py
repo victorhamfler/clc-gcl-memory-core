@@ -57,12 +57,18 @@ def resolve_answer(query: str, results: list[dict[str, Any]]) -> dict[str, Any]:
         correction_conflict=correction_conflict,
         live_conflict=bool(live_conflicts),
     )
+    annotated_evidence = annotate_evidence_conflicts(
+        evidence,
+        live_conflicts=live_conflicts,
+        correction_conflict=correction_conflict,
+        stale_conflict=bool(evidence_has_current and (evidence_has_stale or stale)),
+    )
 
     return {
         "answer": answer,
         "confidence": confidence,
         "conflict": conflict,
-        "evidence": [compact_evidence(item) for item in evidence],
+        "evidence": [compact_evidence(item) for item in annotated_evidence],
         "summary": [compact_evidence(item) for item in summary],
         "current": [compact_evidence(item) for item in current],
         "historical": [compact_evidence(item) for item in historical],
@@ -492,6 +498,43 @@ def detect_live_evidence_conflicts(evidence: list[dict[str, Any]]) -> list[dict[
     return conflicts
 
 
+def annotate_evidence_conflicts(
+    evidence: list[dict[str, Any]],
+    live_conflicts: list[dict[str, Any]],
+    correction_conflict: bool,
+    stale_conflict: bool,
+) -> list[dict[str, Any]]:
+    if not evidence:
+        return []
+    annotated = [dict(item) for item in evidence]
+    live_conflict_ids: set[str] = set()
+    for conflict in live_conflicts:
+        live_conflict_ids.update(str(memory_id) for memory_id in conflict.get("memory_ids") or [] if memory_id)
+    all_ids = [str(item.get("memory_id")) for item in annotated if item.get("memory_id")]
+    for item in annotated:
+        memory_id = str(item.get("memory_id") or "")
+        reasons: list[str] = []
+        conflict_with: list[str] = []
+        if memory_id in live_conflict_ids:
+            reasons.append("live_fact_conflict")
+            conflict_with.extend([item_id for item_id in live_conflict_ids if item_id != memory_id])
+        if stale_conflict and item.get("memory_state") in {"current", "stale"}:
+            reasons.append("current_stale_conflict")
+            conflict_with.extend([item_id for item_id in all_ids if item_id != memory_id])
+        if correction_conflict and item.get("memory_state") in {"current", "stale", "disputed"}:
+            reasons.append("correction_context_conflict")
+            conflict_with.extend([item_id for item_id in all_ids if item_id != memory_id])
+        if reasons:
+            item["conflict"] = True
+            item["conflict_with"] = sorted(set(conflict_with))
+            item["conflict_reason"] = ", ".join(sorted(set(reasons)))
+        else:
+            item["conflict"] = False
+            item["conflict_with"] = []
+            item["conflict_reason"] = None
+    return annotated
+
+
 def extract_simple_fact(text: str) -> dict[str, Any] | None:
     cleaned = clean_answer_text(text).strip()
     if cleaned.lower().startswith("correction:"):
@@ -613,5 +656,15 @@ def compact_evidence(item: dict[str, Any]) -> dict[str, Any]:
         "supersession_score": item.get("supersession_score"),
         "relation_supersession_score": item.get("relation_supersession_score"),
         "summary_relation_score": item.get("summary_relation_score"),
+        "authority_state": item.get("authority_state"),
+        "authoritative_memory_ids": item.get("authoritative_memory_ids") or [],
+        "superseded_by_memory_ids": item.get("superseded_by_memory_ids") or [],
+        "supersedes_memory_ids": item.get("supersedes_memory_ids") or [],
+        "correction_chain_depth": item.get("correction_chain_depth", 0),
+        "authority_relation_types": item.get("authority_relation_types") or [],
+        "conflict": bool(item.get("conflict", False)),
+        "conflict_with": item.get("conflict_with") or [],
+        "conflict_reason": item.get("conflict_reason"),
+        "text": str(item.get("text") or ""),
         "text_preview": str(item.get("text") or "")[:320],
     }

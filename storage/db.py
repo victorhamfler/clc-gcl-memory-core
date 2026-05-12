@@ -816,6 +816,44 @@ class MemoryDB:
             for row in rows
         ]
 
+    def memory_vectors_by_ids(
+        self,
+        memory_ids: list[str],
+        include_deprecated: bool = False,
+    ) -> list[dict[str, Any]]:
+        ids = [str(memory_id).strip() for memory_id in memory_ids if str(memory_id or "").strip()]
+        if not ids:
+            return []
+        placeholders = ",".join("?" for _ in ids)
+        clauses = [f"m.id IN ({placeholders})"]
+        params: list[Any] = list(ids)
+        if not include_deprecated:
+            clauses.append("m.deprecated=0")
+        rows = self.conn.execute(
+            f"""
+            SELECT m.id, m.text, m.domain_id, m.memory_type, m.importance,
+                   m.stability, COALESCE(m.namespace, 'global') AS namespace, m.deprecated, v.embedding
+            FROM memories m
+            JOIN vectors v ON v.memory_id = m.id
+            WHERE {' AND '.join(clauses)}
+            """,
+            params,
+        ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "text": row["text"],
+                "domain_id": row["domain_id"],
+                "memory_type": row["memory_type"],
+                "importance": float(row["importance"] or 0.0),
+                "stability": float(row["stability"] or 0.0),
+                "namespace": normalize_namespace(row["namespace"]),
+                "deprecated": bool(row["deprecated"]),
+                "embedding": decode_vector(row["embedding"]),
+            }
+            for row in rows
+        ]
+
     def list_domain_vectors(self, domain_id: str, limit: int = 256) -> list[list[float]]:
         rows = self.conn.execute(
             """
@@ -850,6 +888,59 @@ class MemoryDB:
             (new_id("rel"), source, target, relation_type, float(weight), utc_now()),
         )
         self.conn.commit()
+
+    def authority_graph_for_memories(
+        self,
+        memory_ids: list[str],
+        relation_types: tuple[str, ...] = ("supersedes", "corrects", "updates"),
+        max_depth: int = 8,
+    ) -> dict[str, Any]:
+        seeds = {str(memory_id).strip() for memory_id in memory_ids if str(memory_id or "").strip()}
+        types = [str(relation_type).strip() for relation_type in relation_types if str(relation_type or "").strip()]
+        if not seeds or not types:
+            return {"seeds": sorted(seeds), "memory_ids": sorted(seeds), "relations": []}
+        type_placeholders = ",".join("?" for _ in types)
+        seen_nodes = set(seeds)
+        frontier = set(seeds)
+        relations: dict[tuple[str, str, str], dict[str, Any]] = {}
+        for _depth in range(max(1, int(max_depth))):
+            if not frontier:
+                break
+            id_placeholders = ",".join("?" for _ in frontier)
+            rows = self.conn.execute(
+                f"""
+                SELECT r.source_memory_id, r.target_memory_id, r.relation_type, r.weight, r.created_at
+                FROM relations r
+                JOIN memories sm ON sm.id = r.source_memory_id AND sm.deprecated=0
+                JOIN memories tm ON tm.id = r.target_memory_id AND tm.deprecated=0
+                WHERE r.relation_type IN ({type_placeholders})
+                  AND (r.source_memory_id IN ({id_placeholders}) OR r.target_memory_id IN ({id_placeholders}))
+                """,
+                types + list(frontier) + list(frontier),
+            ).fetchall()
+            next_frontier: set[str] = set()
+            for row in rows:
+                source_id = row["source_memory_id"]
+                target_id = row["target_memory_id"]
+                key = (source_id, target_id, row["relation_type"])
+                if key not in relations:
+                    relations[key] = {
+                        "source_memory_id": source_id,
+                        "target_memory_id": target_id,
+                        "relation_type": row["relation_type"],
+                        "weight": float(row["weight"] or 0.0),
+                        "created_at": row["created_at"],
+                    }
+                for memory_id in (source_id, target_id):
+                    if memory_id and memory_id not in seen_nodes:
+                        seen_nodes.add(memory_id)
+                        next_frontier.add(memory_id)
+            frontier = next_frontier
+        return {
+            "seeds": sorted(seeds),
+            "memory_ids": sorted(seen_nodes),
+            "relations": list(relations.values()),
+        }
 
     def supersession_summary_for_candidates(self, memory_ids: list[str]) -> dict[str, dict[str, Any]]:
         ids = [str(memory_id) for memory_id in memory_ids if str(memory_id or "").strip()]

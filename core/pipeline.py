@@ -10,6 +10,7 @@ from core.contradiction import store_contradiction_if_needed
 from core.csd import CSDLayer
 from core.encoder import build_encoder
 from core.gcl_memory import GCLMemoryUpdater
+from core.math_utils import cosine
 from core.models import CLCDecision, MemoryNode, RecallItem
 from core.recall import RecallEngine
 from core.resolver import compact_evidence, resolve_answer
@@ -226,6 +227,8 @@ class MemoryPipeline:
             except Exception as exc:
                 errors.append({"batch_index": idx, "error": str(exc), "text_preview": text[:160]})
         summary = {
+            "ok": True,
+            "mode": "ingest_batch",
             "source": source,
             "namespace": memory_namespace,
             "requested": len(texts),
@@ -233,6 +236,7 @@ class MemoryPipeline:
             "stored": len(results),
             "skipped": len(skipped),
             "errors": len(errors),
+            "partial_errors": bool(errors),
             "results": results,
             "memories": results,
             "skipped_items": skipped,
@@ -271,7 +275,11 @@ class MemoryPipeline:
                 limit=max(candidate_k, 200),
             )
         query_l = str(query or "").lower()
+        authority_intent = self._authority_query_intent(query_l)
+        if authority_intent:
+            items = self._with_authoritative_replacements(items, embedding)
         candidate_ids = [item.memory_id for item in items]
+        authority_by_memory = self._authority_status_for_candidates(candidate_ids)
         feedback_by_memory = self.db.feedback_summary_for_memories(candidate_ids)
         usage_by_memory = self.db.usage_summary_for_memories(candidate_ids)
         reliability = self.db.feedback_reliability_for_candidates(candidate_ids)
@@ -300,6 +308,12 @@ class MemoryPipeline:
             relation_supersession_score = self._relation_supersession_score(
                 query_l,
                 supersession_relations.get(item.memory_id, {}),
+            )
+            authority_status = authority_by_memory.get(item.memory_id, {})
+            authority_score = float(authority_status.get("authority_score") or 0.0) if authority_intent else 0.0
+            relation_supersession_score = max(
+                -1.0,
+                min(1.0, relation_supersession_score + authority_score),
             )
             summary_relation_score = self._summary_relation_score(
                 query_l,
@@ -345,11 +359,115 @@ class MemoryPipeline:
                     "supersession_score": round(supersession_score, 6),
                     "relation_supersession_score": round(relation_supersession_score, 6),
                     "summary_relation_score": round(summary_relation_score, 6),
+                    "authority_state": authority_status.get("authority_state", "unknown"),
+                    "authoritative_memory_ids": authority_status.get("authoritative_memory_ids", []),
+                    "superseded_by_memory_ids": authority_status.get("superseded_by_memory_ids", []),
+                    "supersedes_memory_ids": authority_status.get("supersedes_memory_ids", []),
+                    "correction_chain_depth": authority_status.get("correction_chain_depth", 0),
+                    "authority_relation_types": authority_status.get("relation_types", []),
                     "text": item.text,
                 }
             )
         out.sort(key=lambda row: row["score"], reverse=True)
         return out[:top_k]
+
+    def authority(
+        self,
+        memory_ids: list[str] | None = None,
+        query: str | None = None,
+        top_k: int = 5,
+        namespace: str | None = None,
+        include_global: bool = True,
+    ) -> dict[str, Any]:
+        ids: list[str] = []
+        for memory_id in memory_ids or []:
+            mid = str(memory_id or "").strip()
+            if mid and mid not in ids:
+                ids.append(mid)
+        query_results: list[dict[str, Any]] = []
+        cleaned_query = str(query or "").strip()
+        if cleaned_query:
+            query_results = self.retrieve(
+                cleaned_query,
+                top_k=max(1, int(top_k)),
+                namespace=namespace,
+                include_global=include_global,
+            )
+            for item in query_results:
+                mid = str(item.get("memory_id") or "").strip()
+                if mid and mid not in ids:
+                    ids.append(mid)
+        if not ids:
+            raise ValueError("authority inspection requires 'memory_id', 'memory_ids', or 'query'")
+
+        graph = self.db.authority_graph_for_memories(ids)
+        graph_ids = list(graph.get("memory_ids") or ids)
+        status_by_memory = self._authority_status_for_candidates(graph_ids)
+        rows = self.db.memory_vectors_by_ids(graph_ids, include_deprecated=False)
+        query_rank_by_id = {
+            str(item.get("memory_id")): idx
+            for idx, item in enumerate(query_results, start=1)
+            if item.get("memory_id")
+        }
+        query_score_by_id = {
+            str(item.get("memory_id")): item.get("score")
+            for item in query_results
+            if item.get("memory_id")
+        }
+        nodes = []
+        for row in rows:
+            memory_id = str(row.get("id") or "")
+            domain = self.db.get_domain(row.get("domain_id")) if row.get("domain_id") else None
+            source = self.db.get_memory_source(memory_id)
+            status = status_by_memory.get(memory_id, {})
+            nodes.append(
+                {
+                    "memory_id": memory_id,
+                    "authority_state": status.get("authority_state", "unknown"),
+                    "authoritative_memory_ids": status.get("authoritative_memory_ids", []),
+                    "superseded_by_memory_ids": status.get("superseded_by_memory_ids", []),
+                    "supersedes_memory_ids": status.get("supersedes_memory_ids", []),
+                    "correction_chain_depth": status.get("correction_chain_depth", 0),
+                    "authority_relation_types": status.get("relation_types", []),
+                    "query_rank": query_rank_by_id.get(memory_id),
+                    "query_score": query_score_by_id.get(memory_id),
+                    "domain_id": row.get("domain_id"),
+                    "domain_name": domain.name if domain else None,
+                    "memory_type": row.get("memory_type"),
+                    "namespace": normalize_namespace(row.get("namespace")),
+                    "source": source.get("source") if source else None,
+                    "chunk_index": source.get("chunk_index") if source else None,
+                    "text_preview": str(row.get("text") or "")[:320],
+                    "text": str(row.get("text") or ""),
+                }
+            )
+        nodes.sort(
+            key=lambda item: (
+                item.get("query_rank") is None,
+                item.get("query_rank") or 999999,
+                {"current": 0, "standalone": 1, "superseded": 2}.get(str(item.get("authority_state")), 3),
+                item.get("correction_chain_depth") or 0,
+                item.get("memory_id") or "",
+            )
+        )
+        current_ids = sorted(
+            {
+                authoritative_id
+                for status in status_by_memory.values()
+                for authoritative_id in status.get("authoritative_memory_ids", [])
+                if authoritative_id
+            }
+        )
+        return {
+            "ok": True,
+            "mode": "authority",
+            "query": cleaned_query or None,
+            "requested_memory_ids": ids,
+            "authoritative_memory_ids": current_ids,
+            "nodes": nodes,
+            "relations": graph.get("relations", []),
+            "query_results": query_results,
+        }
 
     def ask(
         self,
@@ -1524,6 +1642,36 @@ class MemoryPipeline:
             )
         )
 
+    @staticmethod
+    def _authority_query_intent(query: str) -> bool:
+        lower = str(query or "").lower()
+        return any(
+            term in lower
+            for term in (
+                "current",
+                "now",
+                "latest",
+                "correct",
+                "correction",
+                "final",
+                "active",
+                "superseded",
+                "outdated",
+                "stale",
+                "policy",
+                "preference",
+                "rule",
+                "should",
+                "must",
+                "allowed",
+                "can i",
+                "can the",
+                "only when",
+                "instead",
+                "change",
+            )
+        )
+
     def _with_lexical_backfill(
         self,
         items: list[RecallItem],
@@ -1558,6 +1706,106 @@ class MemoryPipeline:
             )
         additions.sort(key=lambda item: item[0], reverse=True)
         return [*items, *(item for _affinity, item in additions[: max(0, int(limit) - len(items))])]
+
+    def _with_authoritative_replacements(self, items: list[RecallItem], query_embedding: list[float]) -> list[RecallItem]:
+        seed_ids = [item.memory_id for item in items if item.memory_id]
+        if not seed_ids:
+            return items
+        authority = self._authority_status_for_candidates(seed_ids)
+        authoritative_ids: list[str] = []
+        for item in authority.values():
+            for memory_id in item.get("authoritative_memory_ids") or []:
+                if memory_id not in authoritative_ids:
+                    authoritative_ids.append(memory_id)
+        existing = {item.memory_id for item in items}
+        missing = [memory_id for memory_id in authoritative_ids if memory_id not in existing]
+        if not missing:
+            return items
+        additions: list[RecallItem] = []
+        for row in self.db.memory_vectors_by_ids(missing, include_deprecated=False):
+            additions.append(
+                RecallItem(
+                    memory_id=row["id"],
+                    domain_id=row.get("domain_id"),
+                    text=str(row.get("text") or ""),
+                    memory_type=str(row.get("memory_type") or "semantic_note"),
+                    score=cosine(query_embedding, row["embedding"]),
+                    importance=float(row.get("importance") or 0.0),
+                    stability=float(row.get("stability") or 0.0),
+                    namespace=normalize_namespace(row.get("namespace")),
+                    deprecated=bool(row.get("deprecated")),
+                )
+            )
+        return [*items, *additions]
+
+    def _authority_status_for_candidates(self, memory_ids: list[str]) -> dict[str, dict[str, Any]]:
+        ids = [str(memory_id).strip() for memory_id in memory_ids if str(memory_id or "").strip()]
+        if not ids:
+            return {}
+        graph = self.db.authority_graph_for_memories(ids)
+        incoming: dict[str, list[dict[str, Any]]] = {}
+        outgoing: dict[str, list[dict[str, Any]]] = {}
+        relation_types_by_id: dict[str, set[str]] = {}
+        for relation in graph.get("relations") or []:
+            source_id = str(relation.get("source_memory_id") or "")
+            target_id = str(relation.get("target_memory_id") or "")
+            relation_type = str(relation.get("relation_type") or "")
+            if not source_id or not target_id:
+                continue
+            incoming.setdefault(target_id, []).append(relation)
+            outgoing.setdefault(source_id, []).append(relation)
+            relation_types_by_id.setdefault(source_id, set()).add(relation_type)
+            relation_types_by_id.setdefault(target_id, set()).add(relation_type)
+
+        def latest(memory_id: str, visiting: set[str] | None = None) -> tuple[set[str], int]:
+            visiting = set(visiting or set())
+            if memory_id in visiting:
+                return {memory_id}, 0
+            visiting.add(memory_id)
+            replacers = incoming.get(memory_id) or []
+            if not replacers:
+                return {memory_id}, 0
+            latest_ids: set[str] = set()
+            max_depth = 0
+            for relation in replacers:
+                source_id = str(relation.get("source_memory_id") or "")
+                if not source_id:
+                    continue
+                source_latest, depth = latest(source_id, visiting)
+                latest_ids.update(source_latest)
+                max_depth = max(max_depth, depth + 1)
+            return latest_ids or {memory_id}, max_depth
+
+        out: dict[str, dict[str, Any]] = {}
+        for memory_id in ids:
+            authoritative_ids, depth = latest(memory_id)
+            superseded_by = sorted(item for item in authoritative_ids if item != memory_id)
+            supersedes = sorted(
+                {
+                    str(relation.get("target_memory_id"))
+                    for relation in outgoing.get(memory_id, [])
+                    if relation.get("target_memory_id")
+                }
+            )
+            if superseded_by:
+                state = "superseded"
+                authority_score = -0.75
+            elif supersedes:
+                state = "current"
+                authority_score = 0.45
+            else:
+                state = "standalone"
+                authority_score = 0.0
+            out[memory_id] = {
+                "authority_state": state,
+                "authoritative_memory_ids": sorted(authoritative_ids),
+                "superseded_by_memory_ids": superseded_by,
+                "supersedes_memory_ids": supersedes,
+                "correction_chain_depth": int(depth),
+                "relation_types": sorted(relation_types_by_id.get(memory_id, set())),
+                "authority_score": authority_score,
+            }
+        return out
 
     @staticmethod
     def _normalize_priority(priority: str | None) -> str:

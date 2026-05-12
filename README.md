@@ -57,6 +57,8 @@ py eval/session_memory_eval.py
 py eval/session_topic_filter_smoke.py
 py eval/usage_confidence_eval.py
 py eval/teach_correct_smoke.py
+py eval/authority_chain_regression.py
+py eval/authority_endpoint_smoke.py
 py eval/chat_smoke.py
 py eval/agent_corpus_experiment.py
 py chat.py --agent-id agent_alpha
@@ -74,6 +76,7 @@ After changing resolver or retrieval code, restart any long-running server befor
 - `POST /teach`
 - `POST /correct`
 - `POST /retrieve`
+- `POST /authority`
 - `POST /ask`
 - `POST /session`
 - `POST /sessions`

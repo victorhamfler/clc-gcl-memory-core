@@ -395,6 +395,31 @@ $body = @{
 Invoke-RestMethod -Uri "http://127.0.0.1:8765/retrieve" -Method Post -ContentType "application/json" -Body $body
 ```
 
+Inspect correction/update authority:
+
+```powershell
+$body = @{
+  memory_id = "mem_example"
+  namespace = "agent:planner"
+  include_global = $true
+} | ConvertTo-Json
+Invoke-RestMethod -Uri "http://127.0.0.1:8765/authority" -Method Post -ContentType "application/json" -Body $body
+```
+
+You can also inspect the authority chain for the top memories returned by a query:
+
+```powershell
+$body = @{
+  query = "What is the current GitHub push policy?"
+  namespace = "agent:planner"
+  include_global = $true
+  top_k = 5
+} | ConvertTo-Json
+Invoke-RestMethod -Uri "http://127.0.0.1:8765/authority" -Method Post -ContentType "application/json" -Body $body
+```
+
+Use `/authority` before adding another correction when you are unsure whether a memory is already superseded. It returns the current authoritative memory ids, the relation graph, and per-node states such as `current`, `superseded`, or `standalone`.
+
 Inspect retrieval usage:
 
 ```powershell
@@ -549,7 +574,20 @@ Retrieval details include:
 - `usage_count`: how many times the memory has been used as answer evidence
 - `last_recalled`: most recent retrieval-use timestamp
 - `supersession_score`: current versus historical source signal
+- `authority_state`: whether a memory is `current`, `superseded`, or `standalone`
+- `authoritative_memory_ids`: current memory ids that should be preferred for the chain
+- `superseded_by_memory_ids`: newer memories that replace this one
+- `supersedes_memory_ids`: older memories this one replaces
+- `correction_chain_depth`: distance from this memory to the current authority
 - `summary_relation_score`: summary/source relation signal
+
+Authority results include:
+
+- `requested_memory_ids`: memory ids inspected directly or found through the query
+- `authoritative_memory_ids`: final current ids for the inspected graph
+- `nodes`: memory previews with source, namespace, authority state, chain depth, and full text
+- `relations`: `corrects`, `updates`, and `supersedes` links used to build the graph
+- `query_results`: retrieval results when the request included `query`
 
 Maintenance reasons include:
 
@@ -581,6 +619,7 @@ Use these rules when another agent connects to this memory program.
 - Use `priority=high` for important durable instructions and `clc=PROTECT` or `force_clc_state=PROTECT` only for policies that must be protected.
 - Keep `source` labels meaningful.
 - Do not delete old evidence to hide mistakes; link updates and corrections.
+- Use `/authority` to inspect correction/update chains before trusting or adding another correction to surprising evidence.
 - Review `/sources` and `/why` before trusting surprising answers.
 - Use feedback whenever evidence is clearly useful, stale, wrong, or wrong-domain.
 - Run `/memory review` before consolidation.
@@ -631,6 +670,9 @@ py eval\consolidation_safety_smoke.py
 py eval\wsl_backend_compat_eval.py
 py eval\session_memory_eval.py
 py eval\usage_confidence_eval.py
+py eval\api_hardening_regression.py
+py eval\authority_chain_regression.py
+py eval\authority_endpoint_smoke.py
 py eval\chat_smoke.py
 py eval\server_smoke.py
 ```

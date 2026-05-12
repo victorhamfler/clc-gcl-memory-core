@@ -30,6 +30,18 @@ FEEDBACK_RATINGS = {
 }
 
 
+def label_from_rating(rating: float) -> str:
+    if rating >= 1.5:
+        return "excellent"
+    if rating > 0.0:
+        return "useful"
+    if rating == 0.0:
+        return "neutral"
+    if rating <= -0.75:
+        return "stale"
+    return "negative"
+
+
 class MemoryApi:
     def __init__(self, root: Path, db_path: Path | None = None):
         self.pipeline = create_pipeline(root, db_path=db_path)
@@ -99,8 +111,29 @@ class MemoryApi:
         session = self.pipeline.db.get_session(session_id)
         if session is None:
             raise ValueError(f"unknown session_id: {session_id}")
+        if "key" in payload or "value" in payload:
+            key = str(payload.get("key") or "").strip()
+            value = str(payload.get("value") or "").strip()
+            if not key:
+                raise ValueError("POST /session_memory write requires JSON field 'key'")
+            if not value:
+                raise ValueError("POST /session_memory write requires JSON field 'value'")
+            metadata = payload.get("metadata")
+            if metadata is not None and not isinstance(metadata, dict):
+                raise ValueError("'metadata' must be a JSON object when provided")
+            memory = self.pipeline.db.upsert_session_memory(session_id, key, value, metadata=metadata)
+            return {
+                "ok": True,
+                "mode": "session_memory_write",
+                "session": session,
+                "memory": memory,
+                "session_memory": self.pipeline.db.list_session_memory(
+                    session_id, limit=max(1, int(payload.get("limit") or 20))
+                ),
+            }
         return {
             "ok": True,
+            "mode": "session_memory_read",
             "session": session,
             "session_memory": self.pipeline.db.list_session_memory(session_id, limit=max(1, int(payload.get("limit") or 20))),
         }
@@ -138,23 +171,30 @@ class MemoryApi:
         )
 
     def correct(self, payload: dict[str, Any]) -> dict[str, Any]:
-        correction = str(payload.get("correction") or payload.get("text") or "").strip()
+        correction = str(payload.get("correction") or payload.get("corrected_text") or payload.get("text") or "").strip()
         if not correction:
-            raise ValueError("POST /correct requires JSON field 'correction' or 'text'")
+            raise ValueError("POST /correct requires JSON field 'correction', 'corrected_text', or 'text'")
         target_memory_ids = payload.get("target_memory_ids")
-        if target_memory_ids is None and payload.get("target_memory_id") is not None:
-            target_memory_ids = [payload.get("target_memory_id")]
+        if target_memory_ids is None:
+            target_memory_ids = payload.get("memory_ids")
+        if target_memory_ids is None:
+            for alias in ("target_memory_id", "memory_id"):
+                if payload.get(alias) is not None:
+                    target_memory_ids = [payload.get(alias)]
+                    break
         if target_memory_ids is None:
             target_memory_ids = []
+        if isinstance(target_memory_ids, str):
+            target_memory_ids = [target_memory_ids]
         if not isinstance(target_memory_ids, list):
-            raise ValueError("'target_memory_ids' must be a JSON list when provided")
+            raise ValueError("'target_memory_ids' or 'memory_ids' must be a JSON list when provided")
         metadata = payload.get("metadata")
         if metadata is not None and not isinstance(metadata, dict):
             raise ValueError("'metadata' must be a JSON object when provided")
         return self.pipeline.correct(
             correction,
             target_memory_ids=[str(item) for item in target_memory_ids],
-            target_query=str(payload.get("target_query") or "").strip() or None,
+            target_query=str(payload.get("target_query") or payload.get("query") or "").strip() or None,
             top_k=max(1, int(payload.get("top_k") or 5)),
             source=str(payload.get("source") or "").strip() or None,
             session_id=str(payload.get("session_id") or "").strip() or None,
@@ -204,6 +244,24 @@ class MemoryApi:
             )
         }
 
+    def authority(self, payload: dict[str, Any]) -> dict[str, Any]:
+        raw_ids = payload.get("memory_ids")
+        if raw_ids is None:
+            raw_ids = payload.get("memory_id")
+        if raw_ids is None:
+            memory_ids = []
+        elif isinstance(raw_ids, list):
+            memory_ids = [str(item) for item in raw_ids]
+        else:
+            memory_ids = [str(raw_ids)]
+        return self.pipeline.authority(
+            memory_ids=memory_ids,
+            query=str(payload.get("query") or "").strip() or None,
+            top_k=max(1, int(payload.get("top_k") or 5)),
+            namespace=str(payload.get("namespace") or "global").strip() or "global",
+            include_global=bool(payload.get("include_global", True)),
+        )
+
     def ask(self, payload: dict[str, Any]) -> dict[str, Any]:
         query = str(payload.get("query") or "").strip()
         if not query:
@@ -229,9 +287,11 @@ class MemoryApi:
         label = str(payload.get("label") or "").strip().lower()
         if not memory_id:
             raise ValueError("POST /feedback requires JSON field 'memory_id'")
-        if not label:
-            raise ValueError("POST /feedback requires JSON field 'label'")
         rating = payload.get("rating")
+        if not label and rating is None:
+            raise ValueError("POST /feedback requires JSON field 'label' or numeric 'rating'")
+        if not label:
+            label = label_from_rating(float(rating))
         if rating is None:
             rating = FEEDBACK_RATINGS.get(label, 0.0)
         metadata = payload.get("metadata")
@@ -369,6 +429,8 @@ def make_handler(api: MemoryApi):
                     self._send_json(200, api.correct(payload))
                 elif path == "/retrieve":
                     self._send_json(200, api.retrieve(payload))
+                elif path == "/authority":
+                    self._send_json(200, api.authority(payload))
                 elif path == "/ask":
                     self._send_json(200, api.ask(payload))
                 elif path == "/sessions":
