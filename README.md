@@ -20,6 +20,7 @@ For the full agent-facing operating guide, see [docs/AGENT_USER_MANUAL.md](docs/
 ## Quick Commands
 
 ```powershell
+py main.py config
 py main.py stats
 py retrieve.py --top-k 3 "geometry controller effective dimension curvature regime"
 py eval/query_eval.py
@@ -92,6 +93,7 @@ If local disk space gets tight after repeated benchmark runs, use `py eval/clean
 
 - `GET /health`
 - `GET /stats`
+- `GET /config`
 - `GET /sessions`
 - `GET /memory_usage`
 - `POST /ingest`
@@ -126,6 +128,13 @@ Ask for an extractive answer with cited memory evidence:
 ```powershell
 $body = @{ query = "can the assistant push to GitHub automatically"; top_k = 4 } | ConvertTo-Json
 Invoke-RestMethod -Uri "http://127.0.0.1:8765/ask" -Method Post -ContentType "application/json" -Body $body
+```
+
+Inspect active retrieval and symbolic vocabulary:
+
+```powershell
+py main.py config
+Invoke-RestMethod -Uri "http://127.0.0.1:8765/config"
 ```
 
 Continue a session:
@@ -201,7 +210,7 @@ Stored feedback is used as a bounded reranking signal. Useful and excellent resu
 
 For simple factual questions, answer synthesis uses stricter snippet selection so unrelated evidence is not concatenated into a single answer. Extra retrieved material remains inspectable through `source_context`, `stale_context`, and `/why`.
 
-Retrieval ranking weights live in `config.yaml` under `retrieval_weights`. The current profile was selected with `py eval/retrieval_weight_optimization.py` and emphasizes source, feedback, supersession, manifest relation, and consolidation-summary signals over raw vector similarity. CLC controller thresholds live under `thresholds`; `py eval/clc_threshold_calibration.py` compares the configured profile against nearby alternatives. Retrieved evidence now also carries stored CSD contradiction metadata, so `/ask` can surface unresolved correction pressure even when the contradictory memory is not part of the top evidence set. Queries containing exact alphanumeric identifiers such as `TemporalItem027`, ticket ids, or numbered codenames receive a conservative identifier-match boost and broader lexical backfill so nearby IDs do not outrank the exact item.
+Retrieval ranking weights live in `config.yaml` under `retrieval_weights`. The current profile was selected with `py eval/retrieval_weight_optimization.py` and emphasizes source, feedback, supersession, manifest relation, consolidation-summary, and intent signals over raw vector similarity. CLC controller thresholds live under `thresholds`; `py eval/clc_threshold_calibration.py` compares the configured profile against nearby alternatives. Symbolic domain aliases, memory type keywords, and retrieval intent labels live under `symbolic` and can be inspected with `py main.py config` or `GET /config`. Retrieved evidence now also carries stored CSD contradiction metadata, so `/ask` can surface unresolved correction pressure even when the contradictory memory is not part of the top evidence set. Queries containing exact alphanumeric identifiers such as `TemporalItem027`, ticket ids, or numbered codenames receive a conservative identifier-match boost and broader lexical backfill so nearby IDs do not outrank the exact item.
 
 CSD includes lexical preference conflict checks for common daily-use facts such as `likes tea` versus `hates tea` or `never drinks tea`. These conflicts protect the new memory and store contradiction pressure even when embeddings alone consider the sentences similar.
 

@@ -42,6 +42,7 @@ def main() -> None:
         start = time.perf_counter()
         try:
             health = get_json(f"{base}/health")
+            config = get_json(f"{base}/config")
             first = post_json(
                 f"{base}/ingest",
                 {"text": "The long-running memory API keeps EmbeddingGemma loaded for repeated requests."},
@@ -136,6 +137,10 @@ def main() -> None:
             server.server_close()
 
         assert health["ok"] is True
+        assert config["ok"] is True
+        assert config["retrieval_weights"]["intent"] >= 0.0
+        assert "domain_aliases" in config["symbolic"]
+        assert "intent_labels" in config["symbolic"]
         assert first["embedding_dim"] == 768
         assert first["ok"] is True
         assert first["memory"]["memory_id"] == first["memory_id"]

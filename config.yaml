@@ -47,6 +47,7 @@ retrieval_weights:
   stability: 0.08
   domain: 0.08
   text: 0.12
+  intent: 0.14
   source: 0.18
   feedback: 0.10
   domain_reliability: 0.03
@@ -54,3 +55,11 @@ retrieval_weights:
   supersession: 0.14
   relation_supersession: 0.16
   summary_relation: 0.08
+
+symbolic:
+  domain_aliases: clc=CLC,csd=CSD,g-cl=G-CL,gcl=G-CL,geometry controller=OpenClaw,lcm geometry=OpenClaw,openclaw=OpenClaw,clgk=CLGK,robot=robotics,webots=robotics,lora=model_training,memory=agent_memory
+  preference_keywords: prefer,preference,likes,loves,hates,dislikes,values,wants
+  design_rule_keywords: should,must,design
+  procedure_keywords: how to,steps
+  intent_labels: work=working on|work on|project|building|developing|development;presentation=information presented|presented|presentation|transparency|honesty|source clarity|sources|vague authority|conclusions without source;food_drink=drink|drinks|coffee|espresso|tea|eat|eats|pizza|food;preference=preference|prefer|likes|loves|hates|dislikes|values|wants
+  disabled_domain_aliases: none

@@ -5,7 +5,8 @@ import json
 from pathlib import Path
 
 from core.config import load_config, resolve_project_path
-from core.pipeline import DEFAULT_RETRIEVAL_WEIGHTS
+from core.pipeline import DEFAULT_RETRIEVAL_WEIGHTS, configured_intent_terms
+from core.symbolic import symbolic_vocabulary
 from storage.db import MemoryDB
 
 
@@ -68,11 +69,33 @@ def show_stats() -> dict:
     }
 
 
+def show_config() -> dict:
+    return {
+        "database": str(DB_PATH),
+        "embedding_dim": CONFIG.get("embedding_dim"),
+        "embedding": CONFIG.get("embedding"),
+        "retrieval_weights": configured_retrieval_weights(),
+        "symbolic": {
+            **symbolic_vocabulary(CONFIG.get("symbolic")),
+            "intent_labels": {
+                key: list(values)
+                for key, values in configured_intent_terms(CONFIG.get("symbolic")).items()
+            },
+            "raw_config": CONFIG.get("symbolic") or {},
+        },
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="CLC-CSD-GCL memory core")
-    parser.add_argument("command", choices=["init", "stats"])
+    parser.add_argument("command", choices=["init", "stats", "config"])
     args = parser.parse_args()
-    payload = init_db() if args.command == "init" else show_stats()
+    if args.command == "init":
+        payload = init_db()
+    elif args.command == "config":
+        payload = show_config()
+    else:
+        payload = show_stats()
     print(json.dumps(payload, indent=2))
 
 

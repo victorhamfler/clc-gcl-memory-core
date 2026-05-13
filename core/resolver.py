@@ -144,6 +144,7 @@ def evidence_is_too_weak(evidence: list[dict[str, Any]]) -> bool:
         return False
     top_score = max(float(item.get("score") or 0.0) for item in evidence)
     top_text_match = max(float(item.get("text_match_score") or 0.0) for item in evidence)
+    top_intent_match = max(float(item.get("intent_match_score") or 0.0) for item in evidence)
     has_authority_signal = any(
         float(item.get("supersession_score") or 0.0) > 0.0
         or float(item.get("relation_supersession_score") or 0.0) > 0.0
@@ -151,6 +152,8 @@ def evidence_is_too_weak(evidence: list[dict[str, Any]]) -> bool:
         for item in evidence
     )
     if has_authority_signal:
+        return False
+    if top_intent_match >= 0.80 and top_text_match >= 0.30:
         return False
     return top_score < 0.20 and top_text_match < 0.50
 
@@ -232,7 +235,12 @@ def is_relevant_to_query(query: str, item: dict[str, Any]) -> bool:
     if domain_terms and query_terms & domain_terms:
         return True
     text_match = float(item.get("text_match_score") or 0.0)
+    intent_match = float(item.get("intent_match_score") or 0.0)
+    if intent_match <= -0.40 and text_match < 0.67:
+        return False
     if text_match >= 0.34:
+        return True
+    if intent_match >= 0.65 and normalized_terms(query) & text_terms:
         return True
     overlap = query_terms & text_terms
     if len(overlap) >= max(1, len(query_terms) // 2):
@@ -255,6 +263,7 @@ def evidence_preference_score(query: str, item: dict[str, Any]) -> float:
     clean_text = clean_answer_text(text)
     score = float(item.get("score") or 0.0)
     score += 0.20 * float(item.get("text_match_score") or 0.0)
+    score += 0.12 * float(item.get("intent_match_score") or 0.0)
     score += 0.05 * len(normalized_terms(query) & normalized_terms(clean_text))
     lower = text.lower()
     if "does not change" in lower or "doesn't change" in lower:
@@ -493,8 +502,8 @@ def clean_answer_text(text: str) -> str:
 
 def normalized_terms(text: Any) -> set[str]:
     terms = set()
-    lower_text = str(text or "").lower()
-    for term in re.findall(r"[A-Za-z0-9_'-]+", str(text or "").lower()):
+    lower_text = re.sub(r"\b([A-Za-z0-9_-]+)'s\b", r"\1", str(text or "").lower())
+    for term in re.findall(r"[A-Za-z0-9_-]+", lower_text):
         if len(term) <= 2 or term in ANSWER_STOPWORDS:
             continue
         terms.add(stem_token(term))

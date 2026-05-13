@@ -163,44 +163,77 @@ class CSDLayer:
     @classmethod
     def _preference_claims(cls, text: str) -> list[dict[str, object]]:
         compact = " ".join(str(text or "").lower().split())
-        subjects = re.findall(r"\b([a-z][a-z0-9_-]*)\s+(?:likes?|loves?|prefers?|drinks?|hates?|dislikes?)\b", compact)
-        if not subjects:
-            return []
-        objects = cls._preference_objects(compact)
-        if not objects:
-            return []
-        positive = bool(re.search(r"\b(likes?|loves?|prefers?|drinks?)\b", compact))
-        negative = bool(re.search(r"\b(hates?|dislikes?|never drinks?|does not drink|doesn't drink|not drink)\b", compact))
         claims: list[dict[str, object]] = []
-        for subject in subjects:
-            if positive:
-                claims.append({"subject": cls._normalize_claim_value(subject), "objects": objects, "polarity": "positive"})
-            if negative:
-                claims.append({"subject": cls._normalize_claim_value(subject), "objects": objects, "polarity": "negative"})
+        patterns = (
+            ("positive", r"\b(?P<subject>[a-z][a-z0-9_-]*)\s+(?:likes?|loves?|prefers?|drinks?|eats?|wants?|values?)\s+(?P<object>[^.;,\n]+)"),
+            ("negative", r"\b(?P<subject>[a-z][a-z0-9_-]*)\s+(?:hates?|dislikes?)\s+(?P<object>[^.;,\n]+)"),
+            ("negative", r"\b(?P<subject>[a-z][a-z0-9_-]*)\s+never\s+(?:likes?|drinks?|eats?|wants?)\s+(?P<object>[^.;,\n]+)"),
+            ("negative", r"\b(?P<subject>[a-z][a-z0-9_-]*)\s+(?:does not|doesn't|do not|don't)\s+(?:like|drink|eat|want|prefer)\s+(?P<object>[^.;,\n]+)"),
+        )
+        for polarity, pattern in patterns:
+            for match in re.finditer(pattern, compact):
+                objects = cls._preference_objects(match.group("object"))
+                if not objects:
+                    continue
+                claims.append(
+                    {
+                        "subject": cls._normalize_claim_value(match.group("subject")),
+                        "objects": objects,
+                        "polarity": polarity,
+                    }
+                )
         return claims
 
     @staticmethod
     def _preference_objects(text: str) -> set[str]:
         stop = {
+            "about",
             "all",
             "and",
             "any",
+            "after",
             "forms",
             "form",
+            "for",
+            "from",
+            "her",
+            "his",
             "in",
             "it",
+            "its",
+            "like",
+            "likes",
+            "love",
+            "loves",
             "morning",
             "never",
             "of",
+            "or",
+            "rather",
+            "than",
             "the",
+            "their",
+            "them",
+            "this",
+            "to",
             "afternoon",
+            "with",
         }
         objects: set[str] = set()
-        for token in re.findall(r"[a-z][a-z0-9_-]{2,}", text):
-            if token in stop:
+        tokens = [
+            cls_token
+            for cls_token in re.findall(r"[a-z][a-z0-9_-]{2,}", str(text or "").lower())
+            if cls_token not in stop
+        ]
+        for token in tokens:
+            normalized = "source" if token == "sources" else token
+            if len(normalized) > 3 and normalized.endswith("s") and not normalized.endswith("ss"):
+                normalized = normalized[:-1]
+            objects.add(normalized)
+        for left, right in zip(tokens, tokens[1:]):
+            if left in stop or right in stop:
                 continue
-            if token in {"coffee", "espresso", "tea", "green", "water", "milk"}:
-                objects.add("tea" if token == "green" and "green tea" in text else token)
+            objects.add(f"{left}_{right}")
         if "green tea" in text:
             objects.add("tea")
         return objects

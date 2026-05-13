@@ -31,7 +31,50 @@ DEFAULT_RETRIEVAL_WEIGHTS = {
     "supersession": 0.10,
     "relation_supersession": 0.10,
     "summary_relation": 0.08,
+    "intent": 0.12,
 }
+
+DEFAULT_INTENT_LABELS = {
+    "work": ("working on", "work on", "project", "building", "developing", "development"),
+    "presentation": (
+        "information presented",
+        "presented",
+        "presentation",
+        "transparency",
+        "honesty",
+        "source clarity",
+        "sources",
+        "vague authority",
+        "conclusions without source",
+    ),
+    "food_drink": ("drink", "drinks", "coffee", "espresso", "tea", "eat", "eats", "pizza", "food"),
+    "preference": ("preference", "prefer", "likes", "loves", "hates", "dislikes", "values", "wants"),
+}
+
+
+def configured_intent_terms(symbolic_config: dict[str, Any] | None = None) -> dict[str, tuple[str, ...]]:
+    configured = _parse_intent_labels((symbolic_config or {}).get("intent_labels"))
+    out = dict(DEFAULT_INTENT_LABELS)
+    out.update(configured)
+    return out
+
+
+def _parse_intent_labels(value: Any) -> dict[str, tuple[str, ...]]:
+    if isinstance(value, dict):
+        return {
+            str(label).strip(): tuple(str(term).strip().lower() for term in terms if str(term).strip())
+            for label, terms in value.items()
+            if str(label).strip() and isinstance(terms, (list, tuple, set))
+        }
+    out: dict[str, tuple[str, ...]] = {}
+    for group in str(value or "").split(";"):
+        if "=" not in group:
+            continue
+        label, raw_terms = group.split("=", 1)
+        terms = tuple(term.strip().lower() for term in raw_terms.split("|") if term.strip())
+        if label.strip() and terms:
+            out[label.strip()] = terms
+    return out
 
 
 class MemoryPipeline:
@@ -43,12 +86,14 @@ class MemoryPipeline:
         top_k: int = 8,
         embedding_config: dict[str, Any] | None = None,
         retrieval_weights: dict[str, Any] | None = None,
+        symbolic_config: dict[str, Any] | None = None,
         clc_thresholds: dict[str, Any] | None = None,
     ):
         self.root = root
         self.db = MemoryDB(db_path)
         self.encoder = build_encoder(embedding_config, default_dim=embedding_dim)
         self.retrieval_weights = self._normalize_retrieval_weights(retrieval_weights)
+        self.symbolic_config = dict(symbolic_config or {})
         self.recall_engine = RecallEngine(self.db, top_k=top_k)
         self.csd = CSDLayer(self.db)
         self.controller = CLCController(clc_thresholds)
@@ -78,7 +123,7 @@ class MemoryPipeline:
         memory_priority = self._normalize_priority(priority)
         embedding = self.encoder.embed(text)
         embedding_signature = self._ensure_embedding_signature(embedding)
-        signal = build_signal_packet(analysis_text, embedding)
+        signal = build_signal_packet(analysis_text, embedding, self.symbolic_config)
         self._apply_priority(signal, memory_priority)
         self._apply_source_domain_hint(signal, source)
         recall = self.recall_engine.recall(
@@ -301,6 +346,7 @@ class MemoryPipeline:
             source_match = self._source_affinity(query_l, source)
             text_match = self._text_affinity(query_l, item.text)
             identifier_match = self._identifier_affinity(query_l, item.text)
+            intent_match = self._intent_affinity(query_l, item.text, item.memory_type)
             feedback = feedback_by_memory.get(item.memory_id, {})
             usage = usage_by_memory.get(item.memory_id, {})
             feedback_score = self._feedback_score(feedback)
@@ -314,6 +360,8 @@ class MemoryPipeline:
             authority_status = authority_by_memory.get(item.memory_id, {})
             contradiction_status = contradiction_by_memory.get(item.memory_id, {})
             authority_score = float(authority_status.get("authority_score") or 0.0) if authority_intent else 0.0
+            if authority_score > 0.0 and not self._claim_scope_matches(query_l, item.text):
+                authority_score = min(authority_score, 0.12)
             relation_supersession_score = max(
                 -1.0,
                 min(1.0, relation_supersession_score + authority_score),
@@ -339,6 +387,7 @@ class MemoryPipeline:
                 + w["supersession"] * heuristic_supersession_score
                 + w["relation_supersession"] * relation_supersession_score
                 + w["summary_relation"] * summary_relation_score
+                + w["intent"] * intent_match
             )
             out.append(
                 {
@@ -361,6 +410,7 @@ class MemoryPipeline:
                     "last_recalled": usage.get("last_recalled"),
                     "text_match_score": round(text_match, 6),
                     "identifier_match_score": round(identifier_match, 6),
+                    "intent_match_score": round(intent_match, 6),
                     "domain_reliability": round(domain_reliability, 6),
                     "source_reliability": round(source_reliability, 6),
                     "supersession_score": round(supersession_score, 6),
@@ -902,7 +952,7 @@ class MemoryPipeline:
             retrieval_query = self._session_retrieval_query(fallback_query, context)
             for item in self.retrieve(retrieval_query, top_k=max(1, int(top_k)), namespace=namespace):
                 mid = str(item.get("memory_id") or "").strip()
-                if not query and not self._correction_target_candidate(fallback_query, item):
+                if not self._correction_target_candidate(fallback_query, item):
                     continue
                 if mid and mid not in out:
                     out.append(mid)
@@ -1336,6 +1386,65 @@ class MemoryPipeline:
             return 0.0
         hits = len(query_terms & set(text_tokens))
         return min(1.0, hits / max(1, len(query_terms)))
+
+    def _intent_affinity(self, query: str, text: str, memory_type: str | None = None) -> float:
+        query_l = str(query or "").lower()
+        text_l = str(text or "").lower()
+        query_intents = self._intent_labels(query_l, None)
+        if not query_intents:
+            return 0.0
+        text_intents = self._intent_labels(text_l, memory_type)
+        score = 0.0
+        overlap = query_intents & text_intents
+        if overlap:
+            score += min(1.0, len(overlap) / max(1, len(query_intents)))
+        if MemoryPipeline._query_entity_miss(query_l, text_l):
+            score -= 0.45
+        if "work" in query_intents and text_intents & {"food_drink", "preference"} and "work" not in text_intents:
+            score -= 0.45
+        if "presentation" in query_intents and text_intents & {"food_drink"} and "presentation" not in text_intents:
+            score -= 0.45
+        if "food_drink" in query_intents and text_intents and "food_drink" not in text_intents:
+            score -= 0.25
+        if "preference" in query_intents and "victor" in query_l and "victor" not in text_l:
+            score -= 0.35
+        return max(-1.0, min(1.0, score))
+
+    def _intent_labels(self, text: str, memory_type: str | None = None) -> set[str]:
+        lower = str(text or "").lower()
+        labels: set[str] = set()
+        intent_terms = self._configured_intent_terms()
+        for label, terms in intent_terms.items():
+            if any(term in lower for term in terms):
+                labels.add(label)
+        if memory_type == "preference":
+            labels.add("preference")
+        return labels
+
+    @staticmethod
+    def _query_entity_miss(query: str, text: str) -> bool:
+        query_tokens = MemoryPipeline._tokens(query)
+        text_tokens = set(MemoryPipeline._tokens(text))
+        named_queries = {"victor", "hermes", "agent", "assistant"} & set(query_tokens)
+        if not named_queries:
+            return False
+        return not bool(named_queries & text_tokens)
+
+    def _claim_scope_matches(self, query: str, text: str) -> bool:
+        query_intents = self._intent_labels(query, None)
+        if not query_intents:
+            return True
+        text_intents = self._intent_labels(text, None)
+        if query_intents & text_intents:
+            return True
+        return not MemoryPipeline._query_entity_miss(query, text) and MemoryPipeline._text_affinity(query, text) >= 0.45
+
+    def _configured_intent_terms(self) -> dict[str, tuple[str, ...]]:
+        return configured_intent_terms(self.symbolic_config)
+
+    @staticmethod
+    def _parse_intent_labels(value: Any) -> dict[str, tuple[str, ...]]:
+        return _parse_intent_labels(value)
 
     @staticmethod
     def _identifier_affinity(query: str, text: str) -> float:

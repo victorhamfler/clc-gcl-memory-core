@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import Any
 
 from core.config import load_config, resolve_project_path
-from core.pipeline import MemoryPipeline
+from core.pipeline import MemoryPipeline, configured_intent_terms
+from core.symbolic import symbolic_vocabulary
 from storage.db import MemoryDB
 
 
@@ -78,6 +79,7 @@ def create_pipeline(root: Path, db_path: Path | None = None) -> MemoryPipeline:
         top_k=int(config.get("top_k") or 8),
         embedding_config=embedding_config,
         retrieval_weights=config.get("retrieval_weights"),
+        symbolic_config=config.get("symbolic"),
         clc_thresholds=config.get("thresholds"),
     )
 
@@ -108,4 +110,21 @@ def pipeline_stats(pipeline: MemoryPipeline) -> dict[str, Any]:
         "usage_detail": pipeline.db.memory_usage(limit=10),
         "relations_detail": pipeline.db.relation_counts(),
         "sessions_detail": pipeline.db.list_sessions(limit=10),
+    }
+
+
+def pipeline_config_view(pipeline: MemoryPipeline) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "database": str(pipeline.db.db_path),
+        "embedding": pipeline.encoder.descriptor(),
+        "retrieval_weights": pipeline.retrieval_weights,
+        "symbolic": {
+            **symbolic_vocabulary(pipeline.symbolic_config),
+            "intent_labels": {
+                key: list(values)
+                for key, values in configured_intent_terms(pipeline.symbolic_config).items()
+            },
+            "raw_config": pipeline.symbolic_config,
+        },
     }

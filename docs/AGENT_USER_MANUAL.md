@@ -317,6 +317,15 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8765/health"
 Invoke-RestMethod -Uri "http://127.0.0.1:8765/stats"
 ```
 
+Inspect active retrieval weights and symbolic vocabulary:
+
+```powershell
+py main.py config
+Invoke-RestMethod -Uri "http://127.0.0.1:8765/config"
+```
+
+The config view shows the active `retrieval_weights`, symbolic domain aliases, memory type keywords, and retrieval intent labels. Use it before changing domain creation behavior or diagnosing why a query is treated as work, preference, presentation, food/drink, or another configured intent.
+
 Inspect active session memory:
 
 ```powershell
@@ -714,6 +723,7 @@ Run core health checks:
 
 ```powershell
 py main.py stats
+py main.py config
 py eval\agent_namespace_workflow_smoke.py
 py eval\agent_namespace_workflow_smoke.py --use-config-embedding
 py eval\maintenance_namespace_isolation_eval.py
@@ -732,6 +742,7 @@ py eval\authority_chain_regression.py
 py eval\authority_endpoint_smoke.py
 py eval\chat_smoke.py
 py eval\agent_bug_report_regression.py
+py eval\agent_report_regression_20260513.py
 py eval\server_smoke.py
 py eval\session_short_topic_switch_eval.py --use-config-embedding
 py eval\correction_target_validation_eval.py
@@ -766,6 +777,8 @@ py -m compileall core storage eval chat.py main.py serve.py
 `py eval\long_memory_benchmark_eval.py` is the larger synthetic LongMemEval-style pressure test. The default hash run creates 200 questions across five abilities with 300 distractor memories. It evaluates answer accuracy, source accuracy, top-source accuracy, forbidden stale terms, and conflict accuracy. Use `--preset smoke|medium|full` for repeatable run sizes, `--save-report` for a persistent JSON artifact, `--include-rows` to store every evaluated case, and `--weak-case-limit` to control how many failures are included. Reports include timing breakdowns for pipeline initialization, memory seeding, query evaluation, stats, and close time. A configured EmbeddingGemma medium run can be started with `--configured-embedding --cases-per-ability 15 --noise-count 120`; the full configured run is intentionally optional because it takes several minutes.
 
 `py eval\long_memory_messy_eval.py` is the harder LongMemEval-inspired local pressure test. It checks buried facts inside noisy conversation turns, temporal updates with stale context, multi-hop association, session topic switching, and abstention for unknown sensitive data. Use `--include-rows --save-report ...` when comparing weak cases across versions.
+
+`py eval\agent_report_regression_20260513.py` reproduces the May 13 agent report issues: Victor work queries must not be dominated by drink corrections, information-presentation questions must retrieve transparency/source-honesty memories, broad Victor preference queries must avoid generic agent policy, and generic food preference contradictions such as pizza must trigger CSD protection.
 
 Configured GGUF embeddings use a persistent SQLite cache at `logs\embedding_cache.sqlite`. This makes repeated validation runs faster without changing memory answers. Delete that file before a cold performance test, after intentionally changing embedding model behavior, or when switching to a different model.
 
@@ -808,6 +821,8 @@ If `/correct` rejects explicit target ids:
 
 If wrong memories keep appearing:
 
+- Run `py main.py config` or `GET /config` and inspect `symbolic.domain_aliases`, `symbolic.memory_type_keywords`, and `symbolic.intent_labels`.
+- Add or adjust symbolic aliases in `config.yaml` instead of editing Python when a domain or intent name should be project-specific.
 - Ask a query that retrieves the wrong memory.
 - Use `/correct`.
 - Add `/feedback wrong <number>` to the wrong evidence.

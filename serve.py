@@ -12,7 +12,7 @@ from core.chunking import chunk_text
 from core.config import load_config, resolve_project_path
 from core.consolidation import consolidation_plan, create_consolidation_summaries
 from core.maintenance import improvement_plan, memory_review, record_memory_improvement, weak_memories
-from core.runtime import create_pipeline, pipeline_stats
+from core.runtime import create_pipeline, pipeline_config_view, pipeline_stats
 
 
 ROOT = Path(__file__).resolve().parent
@@ -58,6 +58,9 @@ class MemoryApi:
 
     def stats(self) -> dict[str, Any]:
         return pipeline_stats(self.pipeline)
+
+    def config(self) -> dict[str, Any]:
+        return pipeline_config_view(self.pipeline)
 
     def memory_usage(self, payload: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -411,6 +414,8 @@ def make_handler(api: MemoryApi):
                     self._send_json(200, api.health())
                 elif path == "/stats":
                     self._send_json(200, api.stats())
+                elif path == "/config":
+                    self._send_json(200, api.config())
                 elif path == "/sessions":
                     self._send_json(200, api.sessions(self._query_payload(parsed.query)))
                 elif path == "/memory_usage":
@@ -534,6 +539,7 @@ def main() -> None:
                 "endpoints": [
                     "/health",
                     "/stats",
+                    "/config",
                     "/ingest",
                     "/ingest_batch",
                     "/teach",
