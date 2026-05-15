@@ -11,6 +11,7 @@ from urllib.parse import parse_qs, urlparse
 from core.chunking import chunk_text
 from core.config import load_config, resolve_project_path
 from core.consolidation import consolidation_plan, create_consolidation_summaries
+from core.learning import learn_from_document, learn_from_text
 from core.maintenance import improvement_plan, memory_review, record_memory_improvement, weak_memories
 from core.runtime import create_pipeline, pipeline_config_view, pipeline_stats
 
@@ -44,6 +45,8 @@ def label_from_rating(rating: float) -> str:
 
 class MemoryApi:
     def __init__(self, root: Path, db_path: Path | None = None):
+        self.root = root
+        self.root_config = load_config(root)
         self.pipeline = create_pipeline(root, db_path=db_path)
 
     def close(self) -> None:
@@ -142,22 +145,24 @@ class MemoryApi:
         }
 
     def ingest(self, payload: dict[str, Any]) -> dict[str, Any]:
-        text = str(payload.get("text") or "").strip()
+        text = str(payload.get("text") or payload.get("content") or "").strip()
         if not text:
-            raise ValueError("POST /ingest requires JSON field 'text'")
+            raise ValueError("POST /ingest requires JSON field 'text' or 'content'")
         memory = self.pipeline.ingest(
             text,
             source=str(payload.get("source") or "").strip() or None,
             namespace=str(payload.get("namespace") or "global").strip() or "global",
             priority=str(payload.get("priority") or "").strip() or None,
             force_clc_state=str(payload.get("force_clc_state") or payload.get("clc_state") or "").strip() or None,
+            domain=str(payload.get("domain") or payload.get("domain_name") or "").strip() or None,
+            memory_type=str(payload.get("memory_type") or "").strip() or None,
         )
         return {"ok": True, "mode": "ingest", "memory": memory, **memory}
 
     def teach(self, payload: dict[str, Any]) -> dict[str, Any]:
-        text = str(payload.get("text") or "").strip()
+        text = str(payload.get("text") or payload.get("content") or "").strip()
         if not text:
-            raise ValueError("POST /teach requires JSON field 'text'")
+            raise ValueError("POST /teach requires JSON field 'text' or 'content'")
         metadata = payload.get("metadata")
         if metadata is not None and not isinstance(metadata, dict):
             raise ValueError("'metadata' must be a JSON object when provided")
@@ -171,6 +176,8 @@ class MemoryApi:
             namespace=str(payload.get("namespace") or "global").strip() or "global",
             priority=str(payload.get("priority") or "").strip() or None,
             force_clc_state=str(payload.get("force_clc_state") or payload.get("clc_state") or "").strip() or None,
+            domain=str(payload.get("domain") or payload.get("domain_name") or "").strip() or None,
+            memory_type=str(payload.get("memory_type") or "").strip() or None,
         )
 
     def correct(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -233,10 +240,58 @@ class MemoryApi:
             force_clc_state=str(payload.get("force_clc_state") or payload.get("clc_state") or "").strip() or None,
         )
 
+    def learn(self, payload: dict[str, Any]) -> dict[str, Any]:
+        text = str(payload.get("text") or payload.get("content") or "").strip()
+        if not text:
+            raise ValueError("POST /learn requires JSON field 'text' or 'content'")
+        filters = payload.get("filters") or {}
+        if not isinstance(filters, dict):
+            raise ValueError("'filters' must be a JSON object when provided")
+        filters = self._classification_filters(payload, filters)
+        mock_facts = payload.get("mock_facts")
+        if mock_facts is not None and not isinstance(mock_facts, list):
+            raise ValueError("'mock_facts' must be a JSON list when provided")
+        return learn_from_text(
+            self.pipeline,
+            text,
+            self.root_config.get("llm") if isinstance(self.root_config.get("llm"), dict) else {},
+            namespace=str(payload.get("namespace") or "global").strip() or "global",
+            agent_id=str(payload.get("agent_id") or "default").strip() or "default",
+            session_id=str(payload.get("session_id") or "").strip() or None,
+            source=str(payload.get("source") or "").strip() or None,
+            mode=str(payload.get("mode") or "dry_run").strip() or "dry_run",
+            filters=filters,
+            mock_facts=mock_facts,
+        )
+
+    def learn_document(self, payload: dict[str, Any]) -> dict[str, Any]:
+        content = str(payload.get("content") or payload.get("text") or "").strip()
+        if not content:
+            raise ValueError("POST /learn/document requires JSON field 'content'")
+        filters = payload.get("filters") or {}
+        if not isinstance(filters, dict):
+            raise ValueError("'filters' must be a JSON object when provided")
+        filters = self._classification_filters(payload, filters)
+        return learn_from_document(
+            self.pipeline,
+            title=str(payload.get("title") or "").strip(),
+            content=content,
+            llm_config=self.root_config.get("llm") if isinstance(self.root_config.get("llm"), dict) else {},
+            namespace=str(payload.get("namespace") or "global").strip() or "global",
+            agent_id=str(payload.get("agent_id") or "default").strip() or "default",
+            session_id=str(payload.get("session_id") or "").strip() or None,
+            source=str(payload.get("source") or "").strip() or None,
+            mode=str(payload.get("mode") or "dry_run").strip() or "dry_run",
+            filters=filters,
+            max_words=int(payload.get("max_words") or 350),
+            overlap_words=int(payload.get("overlap_words") or 40),
+            limit=payload.get("limit"),
+        )
+
     def retrieve(self, payload: dict[str, Any]) -> dict[str, Any]:
-        query = str(payload.get("query") or "").strip()
+        query = str(payload.get("query") or payload.get("question") or payload.get("q") or "").strip()
         if not query:
-            raise ValueError("POST /retrieve requires JSON field 'query'")
+            raise ValueError("POST /retrieve requires JSON field 'query', 'question', or 'q'")
         top_k = max(1, int(payload.get("top_k") or 5))
         return {
             "results": self.pipeline.retrieve(
@@ -266,9 +321,9 @@ class MemoryApi:
         )
 
     def ask(self, payload: dict[str, Any]) -> dict[str, Any]:
-        query = str(payload.get("query") or "").strip()
+        query = str(payload.get("query") or payload.get("question") or payload.get("q") or "").strip()
         if not query:
-            raise ValueError("POST /ask requires JSON field 'query'")
+            raise ValueError("POST /ask requires JSON field 'query', 'question', or 'q'")
         top_k = max(1, int(payload.get("top_k") or 5))
         return {
             "ok": True,
@@ -284,6 +339,15 @@ class MemoryApi:
                 include_global=bool(payload.get("include_global", True)),
             ),
         }
+
+    @staticmethod
+    def _classification_filters(payload: dict[str, Any], filters: dict[str, Any]) -> dict[str, Any]:
+        out = dict(filters)
+        for key in ("memory_type", "domain", "domain_name"):
+            value = payload.get(key)
+            if value is not None and str(value).strip():
+                out[key] = str(value).strip()
+        return out
 
     def feedback(self, payload: dict[str, Any]) -> dict[str, Any]:
         memory_id = str(payload.get("memory_id") or "").strip()
@@ -314,6 +378,18 @@ class MemoryApi:
             ),
         }
 
+    def feedback_list(self, payload: dict[str, Any]) -> dict[str, Any]:
+        max_rating = payload.get("max_rating")
+        return {
+            "ok": True,
+            "feedback": self.pipeline.db.recent_feedback(
+                limit=max(1, int(payload.get("limit") or 50)),
+                label=str(payload.get("label") or "").strip().lower() or None,
+                memory_id=str(payload.get("memory_id") or "").strip() or None,
+                max_rating=None if max_rating is None or str(max_rating).strip() == "" else float(max_rating),
+            ),
+        }
+
     def consolidation_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
         return consolidation_plan(
             self.pipeline.db,
@@ -325,6 +401,16 @@ class MemoryApi:
 
     def consolidate(self, payload: dict[str, Any]) -> dict[str, Any]:
         max_groups = payload.get("max_groups", payload.get("groups"))
+        dry_run = bool(payload.get("dry_run") or str(payload.get("mode") or "").strip().lower() in {"dry_run", "plan"})
+        if dry_run:
+            plan = consolidation_plan(
+                self.pipeline.db,
+                min_domain_memories=max(1, int(payload.get("min_domain_memories") or payload.get("min") or 4)),
+                max_candidates_per_domain=max(1, int(payload.get("max_candidates_per_domain") or payload.get("max") or 8)),
+                namespace=str(payload.get("namespace") or "").strip() or None,
+                include_global=bool(payload.get("include_global", False)),
+            )
+            return {**plan, "mode": "dry_run", "dry_run": True, "created": 0}
         return create_consolidation_summaries(
             self.pipeline,
             min_domain_memories=max(1, int(payload.get("min_domain_memories") or payload.get("min") or 4)),
@@ -420,8 +506,10 @@ def make_handler(api: MemoryApi):
                     self._send_json(200, api.sessions(self._query_payload(parsed.query)))
                 elif path == "/memory_usage":
                     self._send_json(200, api.memory_usage(self._query_payload(parsed.query)))
+                elif path == "/feedback":
+                    self._send_json(200, api.feedback_list(self._query_payload(parsed.query)))
                 else:
-                    self._send_json(404, {"error": "unknown endpoint"})
+                    self._send_json(404, self._unknown_endpoint(path))
             except Exception as exc:
                 self._send_json(500, {"error": str(exc)})
 
@@ -437,8 +525,12 @@ def make_handler(api: MemoryApi):
                     self._send_json(200, api.teach(payload))
                 elif path == "/correct":
                     self._send_json(200, api.correct(payload))
-                elif path == "/retrieve":
+                elif path in {"/retrieve", "/query"}:
                     self._send_json(200, api.retrieve(payload))
+                elif path == "/learn":
+                    self._send_json(200, api.learn(payload))
+                elif path == "/learn/document":
+                    self._send_json(200, api.learn_document(payload))
                 elif path == "/authority":
                     self._send_json(200, api.authority(payload))
                 elif path == "/ask":
@@ -471,7 +563,7 @@ def make_handler(api: MemoryApi):
                     self._send_json(200, {"ok": True, "shutdown": True})
                     threading.Thread(target=self.server.shutdown, daemon=True).start()
                 else:
-                    self._send_json(404, {"error": "unknown endpoint"})
+                    self._send_json(404, self._unknown_endpoint(path))
             except ValueError as exc:
                 self._send_json(400, {"error": str(exc)})
             except Exception as exc:
@@ -510,6 +602,15 @@ def make_handler(api: MemoryApi):
             self.end_headers()
             self.wfile.write(body)
 
+        @staticmethod
+        def _unknown_endpoint(path: str) -> dict[str, Any]:
+            suggestions = {
+                "/query": "Use POST /retrieve or POST /query for semantic search.",
+                "/learn_document": "Use POST /learn/document.",
+                "/history": "Use POST /session_history.",
+            }
+            return {"error": "unknown endpoint", "path": path, "suggestion": suggestions.get(path)}
+
     return Handler
 
 
@@ -545,12 +646,16 @@ def main() -> None:
                     "/teach",
                     "/correct",
                     "/retrieve",
+                    "/query",
+                    "/learn",
+                    "/learn/document",
                     "/ask",
                     "/session",
                     "/sessions",
                     "/session_history",
                     "/session_memory",
                     "/feedback",
+                    "GET /feedback",
                     "/consolidation_plan",
                     "/consolidate",
                     "/consolidation_sources",

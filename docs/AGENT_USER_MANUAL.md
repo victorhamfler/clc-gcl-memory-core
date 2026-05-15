@@ -67,7 +67,7 @@ Each memory is a text node with:
 - `relations`: links such as `corrects`, `updates`, `supersedes`, and `summarizes`
 - `usage_count` and `last_recalled`: traces created when a memory is used as `/ask` evidence
 
-An agent should treat memory as evidence-linked knowledge. Do not overwrite important facts silently. Use corrections and updates so the memory can explain why a newer answer replaced an older one.
+An agent should treat memory as evidence-linked knowledge. Do not overwrite important facts silently. Use corrections and updates so the memory can explain why a newer answer replaced or refined an older one.
 
 ## 4. Namespaces
 
@@ -182,6 +182,10 @@ Corrections default to high priority so they are not lost behind low-signal repe
 
 Correction responses include `linked` and `warning` fields. If the correction could not be linked to a target memory, the memory is still stored but `linked=false` and the warning says that no target memories were found. Agents should treat unlinked corrections as incomplete training and either provide `target_memory_ids` or run a target query that retrieves the memory being corrected.
 
+Use `corrects` or `supersedes` when the newer memory changes what should be treated as current truth. Use `updates` for supplemental improvements, clarifications, annotations, or maintenance notes. `updates` does not automatically make the original memory stale, so definition memories can keep answering neutral definition questions while still carrying linked improvement context.
+
+When `/ask` retrieves both current correction evidence and stale older evidence, the visible answer prefers snippets from the current memory. Stale snippets remain available in evidence and `stale_context`, but they should not override the corrected answer unless the user explicitly asks for old, previous, historical, or superseded context.
+
 When no explicit target ids, target query, or session evidence are supplied, the API can use the correction text itself as a fallback target query. This fallback links only when the candidate has meaningful subject/topic overlap. If the correction is intentionally standalone, use clear orphan/no-target wording and inspect `linked=false`.
 
 Explicit `target_memory_ids` are validated before the correction is stored. If an id does not exist, is deprecated, or is outside the active namespace/global scope, the API raises an error and no correction memory is created. This prevents agents from accidentally training a correction against a missing or wrong-agent target.
@@ -271,6 +275,8 @@ Store a clarifying update:
 
 This creates a new memory and links it to the target with an `updates` relation.
 
+An update is supplemental. It should improve or annotate the target without declaring that the target is wrong. If the target is wrong, use `/correct` instead so the relation is `corrects` and the authority chain can prefer the corrected memory.
+
 ## 8. Consolidation Commands
 
 Consolidation compresses stable repeated memories into a summary memory. It is non-destructive: original memories remain in the database, and the summary links back to them with `summarizes` relations.
@@ -295,6 +301,7 @@ Inspect the source memories behind a summary:
 ```
 
 Use consolidation after a namespace has enough stable, repeated, source-linked memories. Avoid consolidation when a domain has unresolved contradictions or protected memories.
+Use `/consolidation_plan` or `/consolidate` with `dry_run=true` to preview candidate groups without writing summary memories. Call `/consolidate` without `dry_run` only after the plan looks safe.
 
 ## 9. HTTP API
 
@@ -374,6 +381,29 @@ $body = @{
 Invoke-RestMethod -Uri "http://127.0.0.1:8765/ask" -Method Post -ContentType "application/json" -Body $body
 ```
 
+Agent-friendly aliases:
+
+- `/query` can be used as an alias for `/retrieve`.
+- `question` or `q` can be used instead of `query` for `/ask`, `/retrieve`, and `/query`.
+- `content` can be used instead of `text` for `/teach`, `/ingest`, and `/learn`.
+- `domain` and `memory_type` can be supplied on `/teach`, `/ingest`, `/learn`, and `/learn/document` when the agent needs to override automatic classification.
+
+Agent-controlled LLM learning:
+
+```powershell
+$body = @{
+  text = "Victor prefers concise status updates with clear test results."
+  agent_id = "planner"
+  namespace = "agent:planner"
+  mode = "dry_run"
+} | ConvertTo-Json
+Invoke-RestMethod -Uri "http://127.0.0.1:8765/learn" -Method Post -ContentType "application/json" -Body $body
+```
+
+`/learn` is disabled by default. Enable it only after configuring the `llm` section in `config.yaml` and setting the API key environment variable. The endpoint is agent-controlled: use it for selected text snippets that contain durable preferences, facts, procedures, or rules. It should not be called automatically on every conversation turn. Use `dry_run` or `extract_only` first; these responses include a warning because no facts are persisted. Use `extract_and_store` when the agent is ready for the memory program to route extracted facts to teach, correct, or skip. The mode values `teach`, `store`, and `store_facts` are accepted as aliases for `extract_and_store`.
+
+For longer notes or transcripts, use `/learn/document` with `content`, `title`, `max_words`, and `overlap_words`. It chunks the document on paragraph and sentence boundaries where possible and applies the same extraction/routing flow to each chunk. Real provider calls are paced with `llm.chunk_delay`, and transient 429/5xx responses are retried with `llm.max_retries` and `llm.retry_backoff`. `llm.fallback_models` can list comma-separated backup models for quota or temporary provider failures. The endpoint returns per-chunk usage, per-chunk model names, and partial chunk errors instead of failing the whole document immediately when `llm.continue_on_error` is true. The default LLM provider settings use `glm-5` at `https://opencode.ai/zen/go/v1`; keep `llm.enabled: false` unless `OPENCODE_GO_API_KEY` is set and the agent is intentionally running a learning pass.
+
 Continue a session with follow-up memory:
 
 ```powershell
@@ -390,6 +420,8 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8765/ask" -Method Post -ContentType "ap
 When a session id is supplied, `/ask` returns `session_context_used`, `session_context`, and `retrieval_query`. The context may include a `session_memory` item for the active topic.
 
 Session topic filtering is evidence-chain aware. Vague follow-ups such as `what about that?`, `what should I remember about that rule?`, or `what should I remember about that label?` prefer the active topic and turns that share the same pinned evidence ids. Generic wrapper words such as `question`, `answer`, `memory`, `current`, and `remember` are ignored for topic matching so unrelated recent turns do not leak into the follow-up context.
+
+New-topic questions use the raw query for retrieval even inside a long session. Session text is blended into the retrieval query only for true vague follow-ups with markers such as `that`, `this`, `it`, `previous`, or `above`.
 
 Short non-follow-up topic switches are tested separately with the configured EmbeddingGemma model. After asking about CLC, the follow-up `what is CSD` should answer from CSD evidence and report `session_context_used=false`; after that, `what is G-CL` should answer from G-CL evidence instead of carrying CSD context forward.
 
@@ -458,7 +490,7 @@ $body = @{
 Invoke-RestMethod -Uri "http://127.0.0.1:8765/authority" -Method Post -ContentType "application/json" -Body $body
 ```
 
-Use `/authority` before adding another correction when you are unsure whether a memory is already superseded. It returns the current authoritative memory ids, the relation graph, and per-node states such as `current`, `superseded`, or `standalone`.
+Use `/authority` before adding another correction when you are unsure whether a memory is already superseded. It returns the current authoritative memory ids, `current_memory_id` when there is exactly one current memory, the relation graph, and per-node states such as `current`, `superseded`, or `standalone`. `corrects` and `supersedes` determine true current/superseded authority; `updates` remains visible in the graph as supplemental context but does not by itself stale the target memory.
 
 If `/authority` is called with a nonexistent explicit `memory_id`, the API returns an error instead of fabricating an empty authority graph. Query-mode authority inspection still works by retrieving candidate memories first.
 
@@ -684,6 +716,7 @@ Use these rules when another agent connects to this memory program.
 - Use `/authority` to inspect correction/update chains before trusting or adding another correction to surprising evidence.
 - Review `/sources` and `/why` before trusting surprising answers.
 - Use feedback whenever evidence is clearly useful, stale, wrong, or wrong-domain.
+- Audit feedback with `GET /feedback?label=wrong&limit=20` or `GET /feedback?max_rating=0&limit=50`.
 - Run `/memory review` before consolidation.
 - Treat summaries as acceleration, not replacement for original evidence.
 - Keep real user preferences current with corrections when they change.
@@ -738,6 +771,7 @@ py eval\session_memory_eval.py
 py eval\session_topic_switch_regression.py
 py eval\usage_confidence_eval.py
 py eval\api_hardening_regression.py
+py eval\llm_learning_smoke.py
 py eval\authority_chain_regression.py
 py eval\authority_endpoint_smoke.py
 py eval\chat_smoke.py

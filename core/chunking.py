@@ -7,6 +7,7 @@ from typing import Any
 
 
 WORD_RE = re.compile(r"\S+")
+SENTENCE_RE = re.compile(r"[^.!?\n]+(?:[.!?]+[\"')\]]*|$)", re.M)
 
 
 def clean_text(text: str) -> str:
@@ -42,28 +43,32 @@ def clean_text(text: str) -> str:
 
 def chunk_text(text: str, max_words: int = 120, overlap_words: int = 20) -> list[str]:
     text = clean_text(text)
+    max_words = max(1, int(max_words))
+    overlap_words = max(0, min(int(overlap_words), max_words - 1 if max_words > 1 else 0))
     paragraphs = [p.strip() for p in re.split(r"\n\s*\n+", text) if p.strip()]
     if not paragraphs and text.strip():
         paragraphs = [text.strip()]
 
     chunks: list[str] = []
-    pending: list[str] = []
+    pending_units: list[str] = []
+    pending_words = 0
     for paragraph in paragraphs:
-        words = WORD_RE.findall(paragraph)
-        if not words:
+        units = _split_sentence_units(paragraph, max_words=max_words)
+        if not units:
             continue
-        if len(words) > max_words:
-            if pending:
-                chunks.append(" ".join(pending).strip())
-                pending = []
-            chunks.extend(_window_words(words, max_words=max_words, overlap_words=overlap_words))
-            continue
-        if pending and len(pending) + len(words) > max_words:
-            chunks.append(" ".join(pending).strip())
-            pending = pending[-overlap_words:] if overlap_words > 0 else []
-        pending.extend(words)
-    if pending:
-        chunks.append(" ".join(pending).strip())
+        for unit in units:
+            unit_words = _word_count(unit)
+            if not unit_words:
+                continue
+            if pending_units and pending_words + unit_words > max_words:
+                chunks.append(" ".join(pending_units).strip())
+                pending_units, pending_words = _overlap_units(pending_units, overlap_words)
+                if pending_words + unit_words > max_words:
+                    pending_units, pending_words = [], 0
+            pending_units.append(unit)
+            pending_words += unit_words
+    if pending_units:
+        chunks.append(" ".join(pending_units).strip())
     return [c for c in chunks if c]
 
 
@@ -87,6 +92,32 @@ def _window_words(words: list[str], max_words: int, overlap_words: int) -> list[
         if start + max_words >= len(words):
             break
     return out
+
+
+def _split_sentence_units(text: str, max_words: int) -> list[str]:
+    raw_units = [match.group(0).strip() for match in SENTENCE_RE.finditer(text) if match.group(0).strip()]
+    if not raw_units:
+        raw_units = [text.strip()] if text.strip() else []
+    out: list[str] = []
+    for unit in raw_units:
+        words = WORD_RE.findall(unit)
+        if len(words) <= max_words:
+            out.append(unit)
+        else:
+            out.extend(_window_words(words, max_words=max_words, overlap_words=0))
+    return out
+
+
+def _overlap_units(units: list[str], overlap_words: int) -> tuple[list[str], int]:
+    if overlap_words <= 0:
+        return [], 0
+    words = WORD_RE.findall(" ".join(units))
+    selected = words[-overlap_words:]
+    return ([" ".join(selected)] if selected else []), len(selected)
+
+
+def _word_count(text: str) -> int:
+    return len(WORD_RE.findall(text))
 
 
 def _load_jsonl(path: Path, max_words: int, overlap_words: int) -> list[str]:

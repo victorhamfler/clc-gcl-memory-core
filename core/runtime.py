@@ -80,6 +80,7 @@ def create_pipeline(root: Path, db_path: Path | None = None) -> MemoryPipeline:
         embedding_config=embedding_config,
         retrieval_weights=config.get("retrieval_weights"),
         symbolic_config=config.get("symbolic"),
+        llm_config=config.get("llm"),
         clc_thresholds=config.get("thresholds"),
     )
 
@@ -127,4 +128,15 @@ def pipeline_config_view(pipeline: MemoryPipeline) -> dict[str, Any]:
             },
             "raw_config": pipeline.symbolic_config,
         },
+        "llm": sanitized_llm_config(pipeline.llm_config),
     }
+
+
+def sanitized_llm_config(config: dict[str, Any] | None) -> dict[str, Any]:
+    cfg = dict(config or {})
+    for secret_key in ("api_key",):
+        if secret_key in cfg and cfg[secret_key]:
+            cfg[secret_key] = "***"
+    if cfg.get("api_key_env"):
+        cfg["api_key_configured"] = True
+    return cfg

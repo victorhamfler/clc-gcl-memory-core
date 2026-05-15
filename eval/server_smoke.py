@@ -43,6 +43,22 @@ def main() -> None:
         try:
             health = get_json(f"{base}/health")
             config = get_json(f"{base}/config")
+            learn_disabled = post_json(
+                f"{base}/learn",
+                {
+                    "text": "Victor prefers concise status reports.",
+                    "agent_id": "server_smoke_agent",
+                    "mode": "dry_run",
+                    "mock_facts": [
+                        {
+                            "fact": "Victor prefers concise status reports.",
+                            "type": "preference",
+                            "confidence": 0.99,
+                            "correction": False,
+                        }
+                    ],
+                },
+            )
             first = post_json(
                 f"{base}/ingest",
                 {"text": "The long-running memory API keeps EmbeddingGemma loaded for repeated requests."},
@@ -58,10 +74,11 @@ def main() -> None:
                 },
             )
             retrieved = post_json(f"{base}/retrieve", {"query": "persistent semantic memory retrieval", "top_k": 2})
+            query_alias = post_json(f"{base}/query", {"question": "persistent semantic memory retrieval", "top_k": 2})
             asked = post_json(
                 f"{base}/ask",
                 {
-                    "query": "How should persistent memory retrieval work?",
+                    "question": "How should persistent memory retrieval work?",
                     "top_k": 2,
                     "agent_id": "server_smoke_agent",
                 },
@@ -80,9 +97,11 @@ def main() -> None:
             taught = post_json(
                 f"{base}/teach",
                 {
-                    "text": "Server smoke teaching memory: the agent should preserve API evidence ids.",
+                    "content": "Server smoke teaching memory: the agent should preserve API evidence ids.",
                     "agent_id": "server_smoke_agent",
                     "session_id": asked["session_id"],
+                    "domain": "api_usability",
+                    "memory_type": "design_rule",
                 },
             )
             corrected = post_json(
@@ -141,6 +160,12 @@ def main() -> None:
         assert config["retrieval_weights"]["intent"] >= 0.0
         assert "domain_aliases" in config["symbolic"]
         assert "intent_labels" in config["symbolic"]
+        assert learn_disabled["ok"] in {True, False}
+        if learn_disabled["ok"]:
+            assert learn_disabled["facts_extracted"] == 1
+            assert learn_disabled.get("warning")
+        else:
+            assert learn_disabled["error"] == "LLM backend disabled"
         assert first["embedding_dim"] == 768
         assert first["ok"] is True
         assert first["memory"]["memory_id"] == first["memory_id"]
@@ -151,6 +176,7 @@ def main() -> None:
         assert len(batch["memories"]) == 2
         assert batch["results"][0]["embedding_backend"] in {"wsl_llama_cpp", "llama_cpp"}
         assert retrieved["results"]
+        assert query_alias["results"]
         assert asked["ok"] is True
         assert asked["evidence"]
         assert asked["evidence"][0]["text"]
@@ -160,6 +186,8 @@ def main() -> None:
         assert len(history["turns"]) == 4
         assert sessions["sessions"][0]["turn_count"] == 4
         assert taught["ok"] is True
+        assert taught["memory"]["domain_name"] == "api_usability"
+        assert taught["memory"]["memory_type"] == "design_rule"
         assert corrected["ok"] is True
         assert corrected["relations"]
         assert corrected["feedback"]

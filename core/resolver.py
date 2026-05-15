@@ -104,6 +104,19 @@ def choose_preferred_evidence(
     disputed = sorted(disputed, key=lambda item: evidence_preference_score(query, item), reverse=True)
     summary = sorted(summary, key=lambda item: evidence_preference_score(query, item), reverse=True)
     top_score = max(float(item.get("score") or 0.0) for item in results)
+    if summary and (asks_for_multiple(query) or asks_for_summary_mechanism(query)):
+        return summary + historical + current
+    if current and stale:
+        stale_ids = {str(item.get("memory_id") or "") for item in stale if item.get("memory_id")}
+        correcting_current = [
+            item
+            for item in current
+            if stale_ids & {str(memory_id) for memory_id in item.get("supersedes_memory_ids") or []}
+        ]
+        if correcting_current:
+            if allows_stale_definition_context(query):
+                return sorted(correcting_current + stale, key=lambda item: evidence_preference_score(query, item), reverse=True)
+            return sorted(correcting_current, key=lambda item: evidence_preference_score(query, item), reverse=True)
     if historical:
         session_focused = [
             item
@@ -123,8 +136,6 @@ def choose_preferred_evidence(
         relevance_floor = max(0.18, top_score * 0.90)
         if current_pool and (current_score >= relevance_floor or not (historical or summary)):
             return current_pool
-    if summary and (asks_for_multiple(query) or asks_for_summary_mechanism(query)):
-        return summary + historical + current
     if historical:
         supplemental_stale = []
         if allows_stale_definition_context(query):
@@ -134,6 +145,8 @@ def choose_preferred_evidence(
                 if evidence_preference_score(query, item) >= evidence_preference_score(query, historical[0]) - 0.08
             ]
         return sorted(historical + supplemental_stale, key=lambda item: evidence_preference_score(query, item), reverse=True)
+    if stale and allows_stale_definition_context(query):
+        return stale
     if requires_sensitive_evidence(query):
         return []
     return disputed or stale or current or summary
@@ -168,9 +181,14 @@ def classify_memory_state(item: dict[str, Any]) -> str:
     summary_relation = float(item.get("summary_relation_score") or 0.0)
     feedback = float(item.get("feedback_score") or 0.0)
     text = str(item.get("text") or "").lower()
+    authority_state = str(item.get("authority_state") or "").strip().lower()
 
     if text.startswith("consolidated summary:") or (summary_relation > 0.0 and "source memory ids:" in text):
         return "summary"
+    if authority_state == "current":
+        return "current"
+    if authority_state == "superseded" or item.get("superseded_by_memory_ids"):
+        return "stale"
 
     stale_language = any(
         term in text
@@ -265,6 +283,11 @@ def evidence_preference_score(query: str, item: dict[str, Any]) -> float:
     score += 0.20 * float(item.get("text_match_score") or 0.0)
     score += 0.12 * float(item.get("intent_match_score") or 0.0)
     score += 0.05 * len(normalized_terms(query) & normalized_terms(clean_text))
+    authority_state = str(item.get("authority_state") or "").strip().lower()
+    if authority_state == "current":
+        score += 0.35
+    elif authority_state == "superseded" or item.get("superseded_by_memory_ids"):
+        score -= 0.55
     lower = text.lower()
     if "does not change" in lower or "doesn't change" in lower:
         score -= 0.18
@@ -360,11 +383,24 @@ def build_extractive_answer(
 
 
 def select_answer_snippets(query: str, evidence: list[dict[str, Any]]) -> list[str]:
-    scored: list[tuple[float, int, str]] = []
+    scored: list[tuple[float, int, int, str]] = []
+    has_current = any(str(item.get("memory_state") or "") == "current" for item in evidence)
+    has_stale = any(str(item.get("memory_state") or "") == "stale" for item in evidence)
+    require_current = has_current and has_stale and not asks_for_stale_history(query)
     for evidence_idx, item in enumerate(evidence[:3]):
+        state = str(item.get("memory_state") or "")
+        state_bonus = 0.0
+        if state == "current":
+            state_bonus = 3.0
+        elif state == "summary":
+            state_bonus = 1.2
+        elif state == "historical":
+            state_bonus = 0.4
+        elif state == "stale" and not asks_for_stale_history(query):
+            state_bonus = -2.2
         for snippet, score in candidate_snippets(query, item.get("text") or ""):
             if snippet:
-                scored.append((score, -evidence_idx, snippet))
+                scored.append((score + state_bonus, -evidence_idx, 1 if state == "current" else 0, snippet))
     if not scored:
         return []
     scored.sort(reverse=True)
@@ -373,8 +409,12 @@ def select_answer_snippets(query: str, evidence: list[dict[str, Any]]) -> list[s
         out = select_diverse_procedural_snippets(query, scored)
         if out:
             return out
-    out = [scored[0][2]]
-    for score, _idx, snippet in scored[1:]:
+    if require_current:
+        current_scored = [item for item in scored if item[2] == 1]
+        if current_scored:
+            scored = [current_scored[0], *[item for item in scored if item is not current_scored[0]]]
+    out = [scored[0][3]]
+    for score, _idx, _is_current, snippet in scored[1:]:
         if any(snippet == existing or snippet in existing or existing in snippet for existing in out):
             continue
         if multi or (
@@ -388,7 +428,7 @@ def select_answer_snippets(query: str, evidence: list[dict[str, Any]]) -> list[s
     return out
 
 
-def select_diverse_procedural_snippets(query: str, scored: list[tuple[float, int, str]]) -> list[str]:
+def select_diverse_procedural_snippets(query: str, scored: list[tuple[float, int, int, str]]) -> list[str]:
     lower_query = str(query or "").lower()
     needs_adaptation_result = "adaptation" in lower_query and any(
         term in lower_query for term in ("change", "instruction", "test", "workflow")
@@ -399,7 +439,7 @@ def select_diverse_procedural_snippets(query: str, scored: list[tuple[float, int
     out: list[str] = []
 
     def add_best(predicate) -> None:
-        for _score, _idx, snippet in scored:
+        for _score, _idx, _is_current, snippet in scored:
             if len(out) >= 3:
                 return
             lower = snippet.lower()
@@ -415,7 +455,7 @@ def select_diverse_procedural_snippets(query: str, scored: list[tuple[float, int
         add_best(lambda lower: any(term in lower for term in result_terms))
     add_best(lambda lower: "measure" in lower or "term score" in lower or "source score" in lower)
 
-    for _score, _idx, snippet in scored:
+    for _score, _idx, _is_current, snippet in scored:
         if len(out) >= 3:
             break
         lower = snippet.lower()
@@ -694,6 +734,10 @@ ANSWER_STOPWORDS = {
     "the",
     "this",
     "use",
+    "agent",
+    "assistant",
+    "hermes",
+    "victor",
     "what",
     "when",
     "where",
@@ -771,6 +815,25 @@ def allows_stale_definition_context(query: str) -> bool:
         return False
     definition_starts = ("what is ", "what are ", "what does ", "define ", "explain ")
     return lower.startswith(definition_starts) or "states exist" in lower
+
+
+def asks_for_stale_history(query: str) -> bool:
+    lower = str(query or "").lower()
+    return any(
+        term in lower
+        for term in (
+            "old",
+            "older",
+            "stale",
+            "superseded",
+            "previous",
+            "before",
+            "history",
+            "historical",
+            "used to",
+            "formerly",
+        )
+    )
 
 
 def compact_evidence(item: dict[str, Any]) -> dict[str, Any]:

@@ -63,3 +63,24 @@ symbolic:
   procedure_keywords: how to,steps
   intent_labels: work=working on|work on|project|building|developing|development;presentation=information presented|presented|presentation|transparency|honesty|source clarity|sources|vague authority|conclusions without source;food_drink=drink|drinks|coffee|espresso|tea|eat|eats|pizza|food;preference=preference|prefer|likes|loves|hates|dislikes|values|wants
   disabled_domain_aliases: none
+
+llm:
+  enabled: false
+  provider: custom
+  model: glm-5
+  fallback_models: none
+  api_key_env: OPENCODE_GO_API_KEY
+  base_url: https://opencode.ai/zen/go/v1
+  temperature: 0.1
+  max_tokens: 2048
+  timeout: 30
+  user_agent: CLC-GCL-Memory/1.0
+  max_retries: 2
+  retry_backoff: 1.5
+  chunk_delay: 1.5
+  continue_on_error: true
+  max_facts_per_call: 5
+  min_fact_length: 15
+  duplicate_threshold: 0.85
+  correction_threshold: 0.60
+  min_confidence: 0.70

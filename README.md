@@ -101,6 +101,9 @@ If local disk space gets tight after repeated benchmark runs, use `py eval/clean
 - `POST /teach`
 - `POST /correct`
 - `POST /retrieve`
+- `POST /query` (alias for `/retrieve`)
+- `POST /learn`
+- `POST /learn/document`
 - `POST /authority`
 - `POST /ask`
 - `POST /session`
@@ -108,6 +111,7 @@ If local disk space gets tight after repeated benchmark runs, use `py eval/clean
 - `POST /session_history`
 - `POST /session_memory`
 - `POST /feedback`
+- `GET /feedback`
 - `POST /memory_usage`
 - `POST /consolidation_plan`
 - `POST /consolidate`
@@ -123,6 +127,8 @@ $body = @{ query = "what can the geometry controller contribute to the AI memory
 Invoke-RestMethod -Uri "http://127.0.0.1:8765/retrieve" -Method Post -ContentType "application/json" -Body $body
 ```
 
+Agent-friendly aliases are supported for common guesses: `/query` is accepted as `/retrieve`, `question` or `q` can be used wherever a retrieval `query` is expected, and `content` can be used instead of `text` for `/teach`, `/ingest`, and `/learn`.
+
 Ask for an extractive answer with cited memory evidence:
 
 ```powershell
@@ -137,6 +143,8 @@ py main.py config
 Invoke-RestMethod -Uri "http://127.0.0.1:8765/config"
 ```
 
+Agent-controlled LLM learning is available through `POST /learn`, but it is disabled by default in `config.yaml`. Agents should call it only when a selected text snippet contains durable facts worth extracting. The implementation supports `dry_run`, `extract_only`, and `extract_and_store`; `teach`, `store`, and `store_facts` are accepted as aliases for `extract_and_store`. Dry-run and extract-only responses include a warning that no facts were persisted. The learner routes extracted facts to `teach`, `correct`, or `skip` after similarity checks, and callers can pass `memory_type` or `domain` hints when they need to override LLM/symbolic classification. `POST /learn/document` chunks longer content on paragraph and sentence boundaries where possible, then runs the same learning flow per chunk. Real document learning uses `llm.chunk_delay` between chunks and `llm.max_retries`/`llm.retry_backoff` for transient 429/5xx provider failures. `llm.fallback_models` can list comma-separated backup model names, and `/learn` responses include `llm_model`/`llm_models_by_chunk` so agents can see which model was used. Keep `llm.enabled: false` until an OpenAI-compatible provider and API key environment variable are configured. The default provider settings use `glm-5` at `https://opencode.ai/zen/go/v1`; set `OPENCODE_GO_API_KEY` before enabling real calls.
+
 Continue a session:
 
 ```powershell
@@ -145,6 +153,8 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8765/ask" -Method Post -ContentType "ap
 ```
 
 When `session_id` is supplied, `/ask` uses topic-filtered recent session turns plus a small `active_topic` session memory as retrieval context. This lets follow-up questions such as "what about that?" inherit the current topic and pinned evidence without dragging every recent topic into the retrieval query. Pronoun-based follow-ups apply a bounded exact-evidence boost to the active topic's memory ids and mark those evidence rows with `session_exact_evidence`. The active topic is updated by `/teach`, `/correct`, and `/ask`. Short topic-switch questions such as "what is CSD" or "what is G-CL" no longer inherit the previous active topic unless they overlap the active topic or contain a real follow-up marker.
+
+Normal new-topic questions use the raw query for retrieval even when a session has prior context. Session context is blended into the retrieval query only for true vague follow-ups such as "what about that?" or "what should I remember about that label?".
 
 Inspect session memory:
 
@@ -206,7 +216,9 @@ Manual feedback session:
 py eval/interactive_retrieval_test.py --top-k 3
 ```
 
-Stored feedback is used as a bounded reranking signal. Useful and excellent results receive a small boost, while wrong, stale, wrong-domain, or missing-source results are downranked. Feedback also contributes small source/domain reliability signals that can help fresh memories from trusted sources rank better. Retrieval use is logged after `/ask`, updates `last_recalled`, appears in `/stats`, and can be inspected with `POST /memory_usage`. Prior usage contributes a small confidence signal without directly boosting retrieval rank. Retrieval also includes a supersession signal: when versioned sources such as `agent_memory_v1` and `agent_memory_v2` are both present, current/correction queries prefer the newer corrected source while preserving older memories as historical context. `/ask` responses keep primary evidence focused, then expose extra `source_context` for additional relevant files and `stale_context` for superseded relation-linked memories.
+Stored feedback is used as a bounded reranking signal. Useful and excellent results receive a small boost, while wrong, stale, wrong-domain, or missing-source results are downranked. Feedback also contributes small source/domain reliability signals that can help fresh memories from trusted sources rank better. Retrieval use is logged after `/ask`, updates `last_recalled`, appears in `/stats`, and can be inspected with `POST /memory_usage`. Prior usage contributes a small confidence signal without directly boosting retrieval rank. Retrieval also includes a supersession signal: when versioned sources such as `agent_memory_v1` and `agent_memory_v2` are both present, current/correction queries prefer the newer corrected source while preserving older memories as historical context. `/ask` responses keep primary evidence focused, prefer snippets from current/corrected evidence when stale evidence is also present, then expose extra `source_context` for additional relevant files and `stale_context` for superseded relation-linked memories.
+
+Feedback can be audited with `GET /feedback?label=wrong&limit=20` or `GET /feedback?max_rating=0&limit=50`.
 
 For simple factual questions, answer synthesis uses stricter snippet selection so unrelated evidence is not concatenated into a single answer. Extra retrieved material remains inspectable through `source_context`, `stale_context`, and `/why`.
 
@@ -215,6 +227,8 @@ Retrieval ranking weights live in `config.yaml` under `retrieval_weights`. The c
 CSD includes lexical preference conflict checks for common daily-use facts such as `likes tea` versus `hates tea` or `never drinks tea`. These conflicts protect the new memory and store contradiction pressure even when embeddings alone consider the sentences similar.
 
 Consolidation is non-destructive. `/consolidate create` and `POST /consolidate` create a new embedded summary memory and connect it to originals with `summarizes` relations. Original memories remain available as evidence, and `POST /consolidation_sources` or `/consolidate sources <summary-id>` can show the source memories behind a summary.
+
+Relation semantics are intentionally conservative: `corrects` and `supersedes` create true authority chains where older target memories can be treated as superseded or stale for current answers. `updates` links supplemental improvements to an original memory without automatically replacing the original definition or making it stale. Use `corrects` or `supersedes` for changed truth; use `updates` for clarifications, annotations, and maintenance improvements.
 
 The synthetic agent corpus uses `test_corpora/agent_memory_manifest.json` to make this explicit. The manifest declares source-level `supersedes`, `corrects`, and `updates` relations; the experiment expands those into memory-to-memory relation rows that retrieval can use directly.
 

@@ -33,6 +33,7 @@ DEFAULT_RETRIEVAL_WEIGHTS = {
     "summary_relation": 0.08,
     "intent": 0.12,
 }
+VALID_MEMORY_TYPES = {"preference", "design_rule", "procedure", "semantic_note", "error_memory"}
 
 DEFAULT_INTENT_LABELS = {
     "work": ("working on", "work on", "project", "building", "developing", "development"),
@@ -87,6 +88,7 @@ class MemoryPipeline:
         embedding_config: dict[str, Any] | None = None,
         retrieval_weights: dict[str, Any] | None = None,
         symbolic_config: dict[str, Any] | None = None,
+        llm_config: dict[str, Any] | None = None,
         clc_thresholds: dict[str, Any] | None = None,
     ):
         self.root = root
@@ -94,6 +96,7 @@ class MemoryPipeline:
         self.encoder = build_encoder(embedding_config, default_dim=embedding_dim)
         self.retrieval_weights = self._normalize_retrieval_weights(retrieval_weights)
         self.symbolic_config = dict(symbolic_config or {})
+        self.llm_config = dict(llm_config or {})
         self.recall_engine = RecallEngine(self.db, top_k=top_k)
         self.csd = CSDLayer(self.db)
         self.controller = CLCController(clc_thresholds)
@@ -116,6 +119,8 @@ class MemoryPipeline:
         force_clc_state: str | None = None,
         domain_text: str | None = None,
         prefer_symbolic_domain: bool = False,
+        domain: str | None = None,
+        memory_type: str | None = None,
     ) -> dict[str, Any]:
         memory_namespace = normalize_namespace(namespace)
         cleaned = str(text or "").strip()
@@ -124,6 +129,7 @@ class MemoryPipeline:
         embedding = self.encoder.embed(text)
         embedding_signature = self._ensure_embedding_signature(embedding)
         signal = build_signal_packet(analysis_text, embedding, self.symbolic_config)
+        self._apply_explicit_classification(signal, domain=domain, memory_type=memory_type)
         self._apply_priority(signal, memory_priority)
         self._apply_source_domain_hint(signal, source)
         recall = self.recall_engine.recall(
@@ -185,6 +191,8 @@ class MemoryPipeline:
                 "priority": memory_priority,
                 "force_clc_state": force_clc_state,
                 "domain_text_used": analysis_text != cleaned,
+                "explicit_domain": domain,
+                "explicit_memory_type": memory_type,
             },
         )
         result = {
@@ -245,6 +253,8 @@ class MemoryPipeline:
         namespace: str | None = None,
         priority: str | None = None,
         force_clc_state: str | None = None,
+        domain: str | None = None,
+        memory_type: str | None = None,
     ) -> dict[str, Any]:
         memory_namespace = normalize_namespace(namespace)
         cleaned = [str(text or "").strip() for text in texts if str(text or "").strip()]
@@ -528,6 +538,7 @@ class MemoryPipeline:
             "query": cleaned_query or None,
             "requested_memory_ids": ids,
             "authoritative_memory_ids": current_ids,
+            "current_memory_id": current_ids[0] if len(current_ids) == 1 else None,
             "nodes": nodes,
             "relations": graph.get("relations", []),
             "query_results": query_results,
@@ -709,6 +720,8 @@ class MemoryPipeline:
         namespace: str | None = None,
         priority: str | None = None,
         force_clc_state: str | None = None,
+        domain: str | None = None,
+        memory_type: str | None = None,
     ) -> dict[str, Any]:
         memory_namespace = normalize_namespace(namespace)
         cleaned = str(text or "").strip()
@@ -723,6 +736,8 @@ class MemoryPipeline:
             namespace=memory_namespace,
             priority=priority,
             force_clc_state=force_clc_state,
+            domain=domain,
+            memory_type=memory_type,
         )
         self.db.set_memory_source(
             memory["memory_id"],
@@ -734,6 +749,8 @@ class MemoryPipeline:
                 "namespace": memory_namespace,
                 "priority": memory.get("priority"),
                 "force_clc_state": force_clc_state,
+                "explicit_domain": domain,
+                "explicit_memory_type": memory_type,
                 **(metadata or {}),
             },
         )
@@ -792,6 +809,8 @@ class MemoryPipeline:
         namespace: str | None = None,
         priority: str | None = "high",
         force_clc_state: str | None = None,
+        domain: str | None = None,
+        memory_type: str | None = None,
     ) -> dict[str, Any]:
         memory_namespace = normalize_namespace(namespace)
         cleaned = str(correction or "").strip()
@@ -821,6 +840,8 @@ class MemoryPipeline:
             force_clc_state=force_clc_state,
             domain_text=cleaned,
             prefer_symbolic_domain=True,
+            domain=domain,
+            memory_type=memory_type,
         )
         self.db.set_memory_source(
             correction_memory["memory_id"],
@@ -834,6 +855,8 @@ class MemoryPipeline:
                 "namespace": memory_namespace,
                 "priority": correction_memory.get("priority"),
                 "force_clc_state": force_clc_state,
+                "explicit_domain": domain,
+                "explicit_memory_type": memory_type,
                 **(metadata or {}),
             },
         )
@@ -1118,6 +1141,8 @@ class MemoryPipeline:
     def _session_retrieval_query(query: str, session_context: list[dict[str, Any]]) -> str:
         if not session_context:
             return query
+        if not any(bool(item.get("vague_followup")) for item in session_context):
+            return query
         context_lines = [
             f"{item['role']}: {item['content']}"
             for item in session_context[-6:]
@@ -1169,6 +1194,8 @@ class MemoryPipeline:
         context_scores: dict[str, float] = {}
         exact_active_ids: set[str] = set()
         for item in session_context:
+            if not bool(item.get("vague_followup")):
+                continue
             score = float(item.get("context_score") or 0.0)
             exact_active = bool(item.get("active_evidence_match"))
             for memory_id in item.get("evidence_memory_ids") or []:
@@ -1186,7 +1213,7 @@ class MemoryPipeline:
             if context_score > 0.0:
                 memory_id = str(row.get("memory_id") or "")
                 exact_active = memory_id in exact_active_ids
-                boost = min(0.55, 0.28 + 0.35 * context_score) if exact_active else min(0.35, 0.18 + 0.18 * context_score)
+                boost = min(0.22, 0.10 + 0.18 * context_score) if exact_active else min(0.08, 0.04 + 0.08 * context_score)
                 row["base_score"] = row["score"]
                 row["session_evidence_score"] = round(context_score, 6)
                 row["session_evidence_boost"] = round(boost, 6)
@@ -1261,6 +1288,10 @@ class MemoryPipeline:
             "would",
             "you",
             "your",
+            "victor",
+            "hermes",
+            "agent",
+            "assistant",
         }
         tokens = {
             token
@@ -1303,7 +1334,7 @@ class MemoryPipeline:
         )
         if any(marker in compact for marker in vague_markers):
             return True
-        return active_topic_available and len(query_tokens) <= 3 and active_overlap > 0.0
+        return False
 
     @staticmethod
     def _short_context_text(text: str, limit: int = 240) -> str:
@@ -1336,6 +1367,17 @@ class MemoryPipeline:
         elif hint and signal.domains and signal.domains[0] != hint:
             signal.domains.remove(hint)
             signal.domains.insert(0, hint)
+
+    @staticmethod
+    def _apply_explicit_classification(signal, domain: str | None = None, memory_type: str | None = None) -> None:
+        explicit_domain = str(domain or "").strip()
+        if explicit_domain:
+            signal.domains = [explicit_domain, *[item for item in signal.domains if item != explicit_domain]]
+        explicit_type = str(memory_type or "").strip()
+        if explicit_type:
+            if explicit_type not in VALID_MEMORY_TYPES:
+                raise ValueError(f"unsupported memory_type override: {explicit_type}")
+            signal.memory_type = explicit_type
 
     @staticmethod
     def _domain_affinity(query: str, domain_name: str | None) -> float:
@@ -1999,7 +2041,11 @@ class MemoryPipeline:
             if memory_id in visiting:
                 return {memory_id}, 0
             visiting.add(memory_id)
-            replacers = incoming.get(memory_id) or []
+            replacers = [
+                relation
+                for relation in incoming.get(memory_id) or []
+                if str(relation.get("relation_type") or "") in {"supersedes", "corrects"}
+            ]
             if not replacers:
                 return {memory_id}, 0
             latest_ids: set[str] = set()
@@ -2022,6 +2068,7 @@ class MemoryPipeline:
                     str(relation.get("target_memory_id"))
                     for relation in outgoing.get(memory_id, [])
                     if relation.get("target_memory_id")
+                    and str(relation.get("relation_type") or "") in {"supersedes", "corrects"}
                 }
             )
             if superseded_by:

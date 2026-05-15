@@ -599,15 +599,38 @@ class MemoryDB:
             for row in rows
         ]
 
-    def recent_feedback(self, limit: int = 20) -> list[dict[str, Any]]:
+    def recent_feedback(
+        self,
+        limit: int = 20,
+        label: str | None = None,
+        memory_id: str | None = None,
+        max_rating: float | None = None,
+    ) -> list[dict[str, Any]]:
+        clauses = []
+        params: list[Any] = []
+        if label:
+            clauses.append("f.label=?")
+            params.append(str(label).strip().lower())
+        if memory_id:
+            clauses.append("f.memory_id=?")
+            params.append(str(memory_id).strip())
+        if max_rating is not None:
+            clauses.append("f.rating<=?")
+            params.append(float(max_rating))
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(int(limit))
         rows = self.conn.execute(
-            """
-            SELECT id, query, memory_id, label, rating, rank, retrieval_score, notes, metadata, created_at
-            FROM retrieval_feedback
-            ORDER BY created_at DESC
+            f"""
+            SELECT f.id, f.query, f.memory_id, f.label, f.rating, f.rank,
+                   f.retrieval_score, f.notes, f.metadata, f.created_at,
+                   m.text AS memory_text, m.memory_type, m.namespace
+            FROM retrieval_feedback f
+            LEFT JOIN memories m ON m.id=f.memory_id
+            {where}
+            ORDER BY f.created_at DESC
             LIMIT ?
             """,
-            (int(limit),),
+            tuple(params),
         ).fetchall()
         return [
             {
@@ -621,6 +644,9 @@ class MemoryDB:
                 "notes": row["notes"],
                 "metadata": json.loads(row["metadata"] or "{}"),
                 "created_at": row["created_at"],
+                "memory_type": row["memory_type"],
+                "namespace": normalize_namespace(row["namespace"]),
+                "text_preview": str(row["memory_text"] or "")[:240],
             }
             for row in rows
         ]
@@ -957,7 +983,7 @@ class MemoryDB:
             f"""
             SELECT source_memory_id, target_memory_id, relation_type, weight
             FROM relations
-            WHERE relation_type IN ('supersedes', 'corrects', 'updates')
+            WHERE relation_type IN ('supersedes', 'corrects')
               AND (source_memory_id IN ({placeholders}) OR target_memory_id IN ({placeholders}))
             """,
             ids + ids,
