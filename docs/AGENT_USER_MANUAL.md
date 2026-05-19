@@ -388,6 +388,29 @@ Agent-friendly aliases:
 - `content` can be used instead of `text` for `/teach`, `/ingest`, and `/learn`.
 - `domain` and `memory_type` can be supplied on `/teach`, `/ingest`, `/learn`, and `/learn/document` when the agent needs to override automatic classification.
 
+Migration-safe batch ingestion:
+
+```powershell
+$body = @{
+  items = @(
+    @{
+      text = "Hermes memory: Redwood Lantern belongs to Hermes."
+      namespace = "agent:hermes"
+      source = "migration/hermes.md"
+      memory_type = "semantic_note"
+    },
+    @{
+      text = "Global memory: Blue Harbor is shared."
+      namespace = "global"
+      source = "migration/global.md"
+    }
+  )
+} | ConvertTo-Json -Depth 6
+Invoke-RestMethod -Uri "http://127.0.0.1:8765/ingest_batch" -Method Post -ContentType "application/json" -Body $body
+```
+
+When `items` or `memories` are used, each item can preserve its own `namespace`, `source`, `memory_type`, `domain`, `priority`, `metadata`, and `chunk_index`. Namespace fallback is item namespace, then batch namespace, then `global`. Use this format for migrations and exports; plain `texts` applies one namespace to the whole batch.
+
 Agent-controlled LLM learning:
 
 ```powershell
@@ -403,6 +426,18 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8765/learn" -Method Post -ContentType "
 `/learn` is disabled by default. Enable it only after configuring the `llm` section in `config.yaml` and setting the API key environment variable. The endpoint is agent-controlled: use it for selected text snippets that contain durable preferences, facts, procedures, or rules. It should not be called automatically on every conversation turn. Use `dry_run` or `extract_only` first; these responses include a warning because no facts are persisted. Use `extract_and_store` when the agent is ready for the memory program to route extracted facts to teach, correct, or skip. The mode values `teach`, `store`, and `store_facts` are accepted as aliases for `extract_and_store`.
 
 For longer notes or transcripts, use `/learn/document` with `content`, `title`, `max_words`, and `overlap_words`. It chunks the document on paragraph and sentence boundaries where possible and applies the same extraction/routing flow to each chunk. Real provider calls are paced with `llm.chunk_delay`, and transient 429/5xx responses are retried with `llm.max_retries` and `llm.retry_backoff`. `llm.fallback_models` can list comma-separated backup models for quota or temporary provider failures. The endpoint returns per-chunk usage, per-chunk model names, and partial chunk errors instead of failing the whole document immediately when `llm.continue_on_error` is true. The default LLM provider settings use `glm-5` at `https://opencode.ai/zen/go/v1`; keep `llm.enabled: false` unless `OPENCODE_GO_API_KEY` is set and the agent is intentionally running a learning pass.
+
+LLM memory-operation planning:
+
+```powershell
+$body = @{
+  instruction = "Victor no longer drinks coffee; he switched to green tea."
+  namespace = "global"
+} | ConvertTo-Json
+Invoke-RestMethod -Uri "http://127.0.0.1:8765/agent_plan" -Method Post -ContentType "application/json" -Body $body
+```
+
+`/agent_plan` asks the configured LLM to propose safe memory API actions, such as `/retrieve` followed by `/correct`, but it does not execute them. The response always requires confirmation. The outer agent should inspect the plan, discard unsafe actions, and execute only the chosen steps. This keeps Victor's preferred agent-controlled invocation model while letting qwen help construct correct payloads.
 
 Continue a session with follow-up memory:
 
@@ -493,6 +528,18 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8765/authority" -Method Post -ContentTy
 Use `/authority` before adding another correction when you are unsure whether a memory is already superseded. It returns the current authoritative memory ids, `current_memory_id` when there is exactly one current memory, the relation graph, and per-node states such as `current`, `superseded`, or `standalone`. `corrects` and `supersedes` determine true current/superseded authority; `updates` remains visible in the graph as supplemental context but does not by itself stale the target memory.
 
 If `/authority` is called with a nonexistent explicit `memory_id`, the API returns an error instead of fabricating an empty authority graph. Query-mode authority inspection still works by retrieving candidate memories first.
+
+Migration validation:
+
+```powershell
+$body = @{
+  query = "What is the private label?"
+  namespace = "global"
+} | ConvertTo-Json
+Invoke-RestMethod -Uri "http://127.0.0.1:8765/migration_validate" -Method Post -ContentType "application/json" -Body $body
+```
+
+Use `/migration_validate` after importing or renaming a database. It reports namespace counts, vector dimensions, embedding signature, and optional smoke-query result ids. If `/ask` or `/retrieve` returns no evidence in the searched namespace while other namespaces contain memories, the API includes `namespace_warning`; treat that as a sign that the query namespace or migration namespace needs review.
 
 Inspect retrieval usage:
 
@@ -772,6 +819,8 @@ py eval\session_topic_switch_regression.py
 py eval\usage_confidence_eval.py
 py eval\api_hardening_regression.py
 py eval\llm_learning_smoke.py
+py eval\agent_plan_regression.py
+py eval\migration_namespace_regression.py
 py eval\authority_chain_regression.py
 py eval\authority_endpoint_smoke.py
 py eval\chat_smoke.py

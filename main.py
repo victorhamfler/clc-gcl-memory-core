@@ -7,6 +7,7 @@ from pathlib import Path
 from core.config import load_config, resolve_project_path
 from core.pipeline import DEFAULT_RETRIEVAL_WEIGHTS, configured_intent_terms
 from core.runtime import sanitized_llm_config
+from core.selector_runtime import selector_config_view
 from core.symbolic import symbolic_vocabulary
 from storage.db import MemoryDB
 
@@ -85,6 +86,7 @@ def show_config() -> dict:
             "raw_config": CONFIG.get("symbolic") or {},
         },
         "llm": sanitized_llm_config(CONFIG.get("llm") if isinstance(CONFIG.get("llm"), dict) else {}),
+        "selector": selector_config_view(ROOT, CONFIG),
     }
 
 

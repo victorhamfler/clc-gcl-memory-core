@@ -8,12 +8,14 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from core.agent_planner import plan_memory_actions
 from core.chunking import chunk_text
 from core.config import load_config, resolve_project_path
 from core.consolidation import consolidation_plan, create_consolidation_summaries
 from core.learning import learn_from_document, learn_from_text
 from core.maintenance import improvement_plan, memory_review, record_memory_improvement, weak_memories
 from core.runtime import create_pipeline, pipeline_config_view, pipeline_stats
+from core.selector_runtime import build_policy_selector, selector_config_view, selector_features_for_condition
 
 
 ROOT = Path(__file__).resolve().parent
@@ -63,7 +65,44 @@ class MemoryApi:
         return pipeline_stats(self.pipeline)
 
     def config(self) -> dict[str, Any]:
-        return pipeline_config_view(self.pipeline)
+        return {**pipeline_config_view(self.pipeline), "selector": selector_config_view(self.root, self.root_config)}
+
+    def selector_decide(self, payload: dict[str, Any]) -> dict[str, Any]:
+        selector = build_policy_selector(self.root, self.root_config)
+        condition_name = str(payload.get("condition_name") or "").strip()
+        if condition_name:
+            features = selector_features_for_condition(condition_name)
+            feature_updates = {
+                key: payload[key]
+                for key in (
+                    "budget_units",
+                    "cycles",
+                    "hard",
+                    "long_stream",
+                    "csd_ratio",
+                    "probe_drop",
+                    "label_cost",
+                    "budget_pressure",
+                    "recent_return_mean",
+                    "memory_bad_rate",
+                )
+                if key in payload
+            }
+            if feature_updates:
+                features = type(features)(**{**features.__dict__, **feature_updates})
+        else:
+            features = dict(payload.get("features") or payload)
+        decision = selector.select(features)
+        return {
+            "ok": True,
+            "selector": selector_config_view(self.root, self.root_config),
+            "decision": {
+                "policy": decision.policy,
+                "action": decision.action,
+                "reason": decision.reason,
+                "confidence": decision.confidence,
+            },
+        }
 
     def memory_usage(self, payload: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -217,9 +256,16 @@ class MemoryApi:
             namespace=str(payload.get("namespace") or "global").strip() or "global",
             priority=str(payload.get("priority") or "high").strip() or "high",
             force_clc_state=str(payload.get("force_clc_state") or payload.get("clc_state") or "").strip() or None,
+            domain=str(payload.get("domain") or payload.get("domain_name") or "").strip() or None,
+            memory_type=str(payload.get("memory_type") or "").strip() or None,
         )
 
     def ingest_batch(self, payload: dict[str, Any]) -> dict[str, Any]:
+        structured_items = payload.get("items")
+        if structured_items is None:
+            structured_items = payload.get("memories")
+        if structured_items is not None:
+            return self._ingest_batch_items(payload, structured_items)
         raw_texts = payload.get("texts")
         source = str(payload.get("source") or "").strip() or None
         if raw_texts is None and payload.get("text") is not None:
@@ -229,7 +275,9 @@ class MemoryApi:
                 overlap_words=int(payload.get("overlap_words") or 20),
             )
         if not isinstance(raw_texts, list):
-            raise ValueError("POST /ingest_batch requires JSON field 'texts' or chunkable 'text'")
+            raise ValueError("POST /ingest_batch requires JSON field 'texts', 'items', 'memories', or chunkable 'text'")
+        if raw_texts and all(isinstance(item, dict) for item in raw_texts):
+            return self._ingest_batch_items(payload, raw_texts)
         texts = [str(item or "") for item in raw_texts]
         return self.pipeline.ingest_batch(
             texts,
@@ -239,6 +287,88 @@ class MemoryApi:
             priority=str(payload.get("priority") or "").strip() or None,
             force_clc_state=str(payload.get("force_clc_state") or payload.get("clc_state") or "").strip() or None,
         )
+
+    def _ingest_batch_items(self, payload: dict[str, Any], raw_items: Any) -> dict[str, Any]:
+        if not isinstance(raw_items, list):
+            raise ValueError("'items' or 'memories' must be a JSON list")
+        limit = payload.get("limit")
+        items = raw_items[: max(0, int(limit))] if limit is not None else raw_items
+        default_namespace = str(payload.get("namespace") or "global").strip() or "global"
+        default_source = str(payload.get("source") or "").strip() or None
+        results: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        errors: list[dict[str, Any]] = []
+        namespaces: dict[str, int] = {}
+        for idx, item in enumerate(items):
+            if isinstance(item, str):
+                row = {"text": item}
+            elif isinstance(item, dict):
+                row = item
+            else:
+                errors.append({"batch_index": idx, "error": "item must be an object or string"})
+                continue
+            text = str(row.get("text") or row.get("content") or "").strip()
+            if not text:
+                skipped.append({"batch_index": idx, "reason": "empty_text"})
+                continue
+            namespace = str(row.get("namespace") or default_namespace).strip() or "global"
+            source = str(row.get("source") or default_source or "").strip() or None
+            try:
+                if self.pipeline.db.memory_exists_text(text, namespace=namespace):
+                    skipped.append({"batch_index": idx, "namespace": namespace, "reason": "duplicate_exact_text", "text_preview": text[:160]})
+                    continue
+                memory = self.pipeline.ingest(
+                    text,
+                    source=source,
+                    namespace=namespace,
+                    priority=str(row.get("priority") or payload.get("priority") or "").strip() or None,
+                    force_clc_state=str(row.get("force_clc_state") or row.get("clc_state") or payload.get("force_clc_state") or payload.get("clc_state") or "").strip() or None,
+                    domain=str(row.get("domain") or row.get("domain_name") or payload.get("domain") or payload.get("domain_name") or "").strip() or None,
+                    memory_type=str(row.get("memory_type") or payload.get("memory_type") or "").strip() or None,
+                )
+                metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+                self.pipeline.db.set_memory_source(
+                    memory["memory_id"],
+                    source,
+                    int(row.get("chunk_index") if row.get("chunk_index") is not None else idx),
+                    metadata={"namespace": namespace, "batch_index": idx, **metadata},
+                )
+                memory["batch_index"] = idx
+                memory["source"] = source
+                results.append(memory)
+                namespaces[namespace] = namespaces.get(namespace, 0) + 1
+            except Exception as exc:
+                errors.append({"batch_index": idx, "namespace": namespace, "error": str(exc), "text_preview": text[:160]})
+        self.pipeline.db.add_event(
+            None,
+            "batch_ingest",
+            metadata={
+                "source": default_source,
+                "requested": len(raw_items),
+                "accepted": len(items),
+                "stored": len(results),
+                "skipped": len(skipped),
+                "errors": len(errors),
+                "structured_items": True,
+                "namespaces": namespaces,
+            },
+        )
+        return {
+            "ok": True,
+            "mode": "ingest_batch",
+            "structured_items": True,
+            "requested": len(raw_items),
+            "accepted": len(items),
+            "stored": len(results),
+            "skipped": len(skipped),
+            "errors": len(errors),
+            "partial_errors": bool(errors),
+            "namespaces": namespaces,
+            "results": results,
+            "memories": results,
+            "skipped_items": skipped,
+            "error_items": errors,
+        }
 
     def learn(self, payload: dict[str, Any]) -> dict[str, Any]:
         text = str(payload.get("text") or payload.get("content") or "").strip()
@@ -293,13 +423,17 @@ class MemoryApi:
         if not query:
             raise ValueError("POST /retrieve requires JSON field 'query', 'question', or 'q'")
         top_k = max(1, int(payload.get("top_k") or 5))
+        namespace = str(payload.get("namespace") or "global").strip() or "global"
+        include_global = bool(payload.get("include_global", True))
+        results = self.pipeline.retrieve(
+            query,
+            top_k=top_k,
+            namespace=namespace,
+            include_global=include_global,
+        )
         return {
-            "results": self.pipeline.retrieve(
-                query,
-                top_k=top_k,
-                namespace=str(payload.get("namespace") or "global").strip() or "global",
-                include_global=bool(payload.get("include_global", True)),
-            )
+            "results": results,
+            "namespace_warning": self._namespace_warning(results, namespace=namespace, include_global=include_global),
         }
 
     def authority(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -325,19 +459,23 @@ class MemoryApi:
         if not query:
             raise ValueError("POST /ask requires JSON field 'query', 'question', or 'q'")
         top_k = max(1, int(payload.get("top_k") or 5))
+        namespace = str(payload.get("namespace") or "global").strip() or "global"
+        include_global = bool(payload.get("include_global", True))
+        asked = self.pipeline.ask(
+            query,
+            top_k=top_k,
+            session_id=str(payload.get("session_id") or "").strip() or None,
+            agent_id=str(payload.get("agent_id") or "default").strip() or "default",
+            store_session=bool(payload.get("store_session", True)),
+            remember=bool(payload.get("remember", False)),
+            memory_text=str(payload.get("memory_text") or "").strip() or None,
+            namespace=namespace,
+            include_global=include_global,
+        )
         return {
             "ok": True,
-            **self.pipeline.ask(
-                query,
-                top_k=top_k,
-                session_id=str(payload.get("session_id") or "").strip() or None,
-                agent_id=str(payload.get("agent_id") or "default").strip() or "default",
-                store_session=bool(payload.get("store_session", True)),
-                remember=bool(payload.get("remember", False)),
-                memory_text=str(payload.get("memory_text") or "").strip() or None,
-                namespace=str(payload.get("namespace") or "global").strip() or "global",
-                include_global=bool(payload.get("include_global", True)),
-            ),
+            **asked,
+            "namespace_warning": self._namespace_warning(asked.get("evidence") or [], namespace=namespace, include_global=include_global),
         }
 
     @staticmethod
@@ -487,6 +625,74 @@ class MemoryApi:
             namespace=str(payload.get("namespace") or "global").strip() or "global",
         )
 
+    def migration_validate(self, payload: dict[str, Any]) -> dict[str, Any]:
+        query = str(payload.get("query") or "").strip()
+        namespace = str(payload.get("namespace") or "global").strip() or "global"
+        include_global = bool(payload.get("include_global", True))
+        top_k = max(1, int(payload.get("top_k") or 3))
+        stats = self.stats()
+        smoke = None
+        if query:
+            results = self.pipeline.retrieve(query, top_k=top_k, namespace=namespace, include_global=include_global)
+            smoke = {
+                "query": query,
+                "namespace": namespace,
+                "include_global": include_global,
+                "result_count": len(results),
+                "top_memory_ids": [item.get("memory_id") for item in results[:top_k]],
+                "namespace_warning": self._namespace_warning(results, namespace=namespace, include_global=include_global),
+            }
+        return {
+            "ok": True,
+            "mode": "migration_validate",
+            "database": stats.get("database"),
+            "memories": stats.get("memories"),
+            "domains": stats.get("domains"),
+            "vector_dimensions": stats.get("vector_dimensions"),
+            "embedding_signature": stats.get("embedding_signature"),
+            "namespaces_detail": stats.get("namespaces_detail"),
+            "smoke": smoke,
+        }
+
+    def agent_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
+        instruction = str(payload.get("instruction") or payload.get("text") or "").strip()
+        mock_plan = payload.get("mock_plan")
+        llm_config = self.root_config.get("llm") if isinstance(self.root_config.get("llm"), dict) else {}
+        if mock_plan is not None:
+            llm_config = {**llm_config, "enabled": True, "provider": "mock", "mock_plan": mock_plan}
+        return plan_memory_actions(
+            instruction,
+            llm_config,
+            stats=self.stats(),
+            namespace=str(payload.get("namespace") or "global").strip() or "global",
+            context=payload.get("context") if isinstance(payload.get("context"), dict) else None,
+        )
+
+    def _namespace_warning(self, results: list[dict[str, Any]], namespace: str, include_global: bool) -> dict[str, Any] | None:
+        if results:
+            return None
+        counts = self.pipeline.db.namespace_counts()
+        if not counts:
+            return None
+        searched = self._namespace_scope(namespace, include_global=include_global)
+        outside = [item for item in counts if item.get("namespace") not in searched and int(item.get("count") or 0) > 0]
+        searched_count = sum(int(item.get("count") or 0) for item in counts if item.get("namespace") in searched)
+        if not outside or searched_count > 0:
+            return None
+        return {
+            "warning": "No evidence found in the searched namespace scope, but other namespaces contain memories.",
+            "searched_namespaces": searched,
+            "available_namespaces": outside,
+            "hint": "Pass the correct namespace, set namespace='global' after migration, or run /migration_validate.",
+        }
+
+    @staticmethod
+    def _namespace_scope(namespace: str, include_global: bool) -> list[str]:
+        normalized = str(namespace or "global").strip() or "global"
+        if include_global and normalized != "global":
+            return ["global", normalized]
+        return [normalized]
+
 
 def make_handler(api: MemoryApi):
     class Handler(BaseHTTPRequestHandler):
@@ -508,6 +714,8 @@ def make_handler(api: MemoryApi):
                     self._send_json(200, api.memory_usage(self._query_payload(parsed.query)))
                 elif path == "/feedback":
                     self._send_json(200, api.feedback_list(self._query_payload(parsed.query)))
+                elif path == "/migration_validate":
+                    self._send_json(200, api.migration_validate(self._query_payload(parsed.query)))
                 else:
                     self._send_json(404, self._unknown_endpoint(path))
             except Exception as exc:
@@ -531,6 +739,10 @@ def make_handler(api: MemoryApi):
                     self._send_json(200, api.learn(payload))
                 elif path == "/learn/document":
                     self._send_json(200, api.learn_document(payload))
+                elif path == "/agent_plan":
+                    self._send_json(200, api.agent_plan(payload))
+                elif path == "/selector_decide":
+                    self._send_json(200, api.selector_decide(payload))
                 elif path == "/authority":
                     self._send_json(200, api.authority(payload))
                 elif path == "/ask":
@@ -559,6 +771,8 @@ def make_handler(api: MemoryApi):
                     self._send_json(200, api.memory_improve(payload))
                 elif path == "/memory_usage":
                     self._send_json(200, api.memory_usage(payload))
+                elif path == "/migration_validate":
+                    self._send_json(200, api.migration_validate(payload))
                 elif path == "/shutdown":
                     self._send_json(200, {"ok": True, "shutdown": True})
                     threading.Thread(target=self.server.shutdown, daemon=True).start()
@@ -649,6 +863,7 @@ def main() -> None:
                     "/query",
                     "/learn",
                     "/learn/document",
+                    "/agent_plan",
                     "/ask",
                     "/session",
                     "/sessions",
@@ -663,6 +878,7 @@ def main() -> None:
                     "/memory_weak",
                     "/memory_improve",
                     "/memory_usage",
+                    "/migration_validate",
                 ],
             },
             indent=2,

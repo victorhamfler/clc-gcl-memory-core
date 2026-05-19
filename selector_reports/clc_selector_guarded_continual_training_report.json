@@ -1,0 +1,827 @@
+{
+  "ok": true,
+  "accepted": true,
+  "generated_at": "2026-05-19T07:34:14.939880+00:00",
+  "purpose": "guarded continual learned-policy selector training candidate",
+  "source_reports": {
+    "base_combined": "C:\\Users\\victo\\Desktop\\projcod2\\experiments\\clc_selector_combined_training_report.json",
+    "outcome_log": "C:\\Users\\victo\\Desktop\\projcod2\\experiments\\hermes_clc_selector_outcome_labels.jsonl",
+    "matrix_guard": "C:\\Users\\victo\\Desktop\\projcod2\\experiments\\clc_policy_matrix_eval_live_results.json",
+    "v2_boundary_guard": "C:\\Users\\victo\\Desktop\\projcod2\\experiments\\hermes_hard_stale_escalation_v2_results.json"
+  },
+  "sample_counts": {
+    "base_combined": 26,
+    "outcome_conflict_safe": 8,
+    "candidate_total": 34
+  },
+  "oracle_policy_counts": {
+    "long_severe_r16_overwrite": 12,
+    "periodic_baseline": 22
+  },
+  "outcome_sample_summary": {
+    "raw_rows": 404,
+    "conflict_safe": true,
+    "used_rows_by_label": {
+      "oracle_match_passed": 71
+    },
+    "skipped_rows_by_reason": {
+      "label:both_passed": 18,
+      "label:passed_non_oracle": 95,
+      "label:failed": 52,
+      "label:passed": 136
+    },
+    "conflict_skipped_features": 4,
+    "conflict_skipped_rows": 32,
+    "deduped_samples": 8,
+    "policy_counts": {
+      "long_severe_r16_overwrite": 1,
+      "periodic_baseline": 7
+    },
+    "total_capped_weight": 24.0
+  },
+  "scenarios": [
+    {
+      "id": "hard_bad_majority_victor_drink",
+      "family": "hard_bad_majority",
+      "condition_name": "hard_budget144",
+      "source": "clc_policy_matrix_eval_live",
+      "features": {
+        "budget_units": 144.0,
+        "cycles": 1.0,
+        "hard": true,
+        "long_stream": false,
+        "csd_ratio": 1.4,
+        "probe_drop": 0.18,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.0,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.75
+      },
+      "oracle_policy": "periodic_baseline",
+      "oracle_utility": 1.0,
+      "weight": 1.0
+    },
+    {
+      "id": "hard_bad_majority_operator_channel",
+      "family": "hard_bad_majority",
+      "condition_name": "hard_budget144",
+      "source": "clc_policy_matrix_eval_live",
+      "features": {
+        "budget_units": 144.0,
+        "cycles": 1.0,
+        "hard": true,
+        "long_stream": false,
+        "csd_ratio": 1.4,
+        "probe_drop": 0.18,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.0,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.75
+      },
+      "oracle_policy": "periodic_baseline",
+      "oracle_utility": 1.0,
+      "weight": 1.0
+    },
+    {
+      "id": "hard_bad_majority_hermes_mode",
+      "family": "hard_bad_majority",
+      "condition_name": "hard_budget144",
+      "source": "clc_policy_matrix_eval_live",
+      "features": {
+        "budget_units": 144.0,
+        "cycles": 1.0,
+        "hard": true,
+        "long_stream": false,
+        "csd_ratio": 1.4,
+        "probe_drop": 0.18,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.0,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.75
+      },
+      "oracle_policy": "periodic_baseline",
+      "oracle_utility": 1.0,
+      "weight": 1.0
+    },
+    {
+      "id": "hard_bad_majority_victor_tool",
+      "family": "hard_bad_majority",
+      "condition_name": "hard_budget144",
+      "source": "clc_policy_matrix_eval_live",
+      "features": {
+        "budget_units": 144.0,
+        "cycles": 1.0,
+        "hard": true,
+        "long_stream": false,
+        "csd_ratio": 1.4,
+        "probe_drop": 0.18,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.0,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.75
+      },
+      "oracle_policy": "periodic_baseline",
+      "oracle_utility": 1.0,
+      "weight": 1.0
+    },
+    {
+      "id": "hard_bad_majority_agent_memory",
+      "family": "hard_bad_majority",
+      "condition_name": "hard_budget144",
+      "source": "clc_policy_matrix_eval_live",
+      "features": {
+        "budget_units": 144.0,
+        "cycles": 1.0,
+        "hard": true,
+        "long_stream": false,
+        "csd_ratio": 1.4,
+        "probe_drop": 0.18,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.0,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.75
+      },
+      "oracle_policy": "periodic_baseline",
+      "oracle_utility": 1.0,
+      "weight": 1.0
+    },
+    {
+      "id": "hard_bad_majority_lab_protocol",
+      "family": "hard_bad_majority",
+      "condition_name": "hard_budget144",
+      "source": "clc_policy_matrix_eval_live",
+      "features": {
+        "budget_units": 144.0,
+        "cycles": 1.0,
+        "hard": true,
+        "long_stream": false,
+        "csd_ratio": 1.4,
+        "probe_drop": 0.18,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.0,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.75
+      },
+      "oracle_policy": "periodic_baseline",
+      "oracle_utility": 1.0,
+      "weight": 1.0
+    },
+    {
+      "id": "standard_update_standard_cedar",
+      "family": "standard_update",
+      "condition_name": "standard_budget144",
+      "source": "clc_policy_matrix_eval_live",
+      "features": {
+        "budget_units": 144.0,
+        "cycles": 1.0,
+        "hard": false,
+        "long_stream": false,
+        "csd_ratio": 0.9,
+        "probe_drop": 0.08,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.0,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.25
+      },
+      "oracle_policy": "long_severe_r16_overwrite",
+      "oracle_utility": 0.985,
+      "weight": 1.0
+    },
+    {
+      "id": "standard_update_standard_port",
+      "family": "standard_update",
+      "condition_name": "standard_budget144",
+      "source": "clc_policy_matrix_eval_live",
+      "features": {
+        "budget_units": 144.0,
+        "cycles": 1.0,
+        "hard": false,
+        "long_stream": false,
+        "csd_ratio": 0.9,
+        "probe_drop": 0.08,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.0,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.25
+      },
+      "oracle_policy": "long_severe_r16_overwrite",
+      "oracle_utility": 0.985,
+      "weight": 1.0
+    },
+    {
+      "id": "standard_update_standard_embedding",
+      "family": "standard_update",
+      "condition_name": "standard_budget144",
+      "source": "clc_policy_matrix_eval_live",
+      "features": {
+        "budget_units": 144.0,
+        "cycles": 1.0,
+        "hard": false,
+        "long_stream": false,
+        "csd_ratio": 0.9,
+        "probe_drop": 0.08,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.0,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.25
+      },
+      "oracle_policy": "long_severe_r16_overwrite",
+      "oracle_utility": 0.985,
+      "weight": 1.0
+    },
+    {
+      "id": "standard_update_standard_report",
+      "family": "standard_update",
+      "condition_name": "standard_budget144",
+      "source": "clc_policy_matrix_eval_live",
+      "features": {
+        "budget_units": 144.0,
+        "cycles": 1.0,
+        "hard": false,
+        "long_stream": false,
+        "csd_ratio": 0.9,
+        "probe_drop": 0.08,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.0,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.25
+      },
+      "oracle_policy": "periodic_baseline",
+      "oracle_utility": 1.0,
+      "weight": 1.0
+    },
+    {
+      "id": "standard_update_standard_backend",
+      "family": "standard_update",
+      "condition_name": "standard_budget144",
+      "source": "clc_policy_matrix_eval_live",
+      "features": {
+        "budget_units": 144.0,
+        "cycles": 1.0,
+        "hard": false,
+        "long_stream": false,
+        "csd_ratio": 0.9,
+        "probe_drop": 0.08,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.0,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.25
+      },
+      "oracle_policy": "long_severe_r16_overwrite",
+      "oracle_utility": 0.985,
+      "weight": 1.0
+    },
+    {
+      "id": "standard_update_standard_goal",
+      "family": "standard_update",
+      "condition_name": "standard_budget144",
+      "source": "clc_policy_matrix_eval_live",
+      "features": {
+        "budget_units": 144.0,
+        "cycles": 1.0,
+        "hard": false,
+        "long_stream": false,
+        "csd_ratio": 0.9,
+        "probe_drop": 0.08,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.0,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.25
+      },
+      "oracle_policy": "long_severe_r16_overwrite",
+      "oracle_utility": 0.985,
+      "weight": 1.0
+    },
+    {
+      "id": "long_topic_weather",
+      "family": "long_topic",
+      "condition_name": "long2_hard_budget288",
+      "source": "clc_policy_matrix_eval_live",
+      "features": {
+        "budget_units": 288.0,
+        "cycles": 2.0,
+        "hard": true,
+        "long_stream": true,
+        "csd_ratio": 0.7,
+        "probe_drop": 0.04,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.0,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.35
+      },
+      "oracle_policy": "periodic_baseline",
+      "oracle_utility": 1.0,
+      "weight": 1.0
+    },
+    {
+      "id": "long_topic_docs",
+      "family": "long_topic",
+      "condition_name": "long2_hard_budget288",
+      "source": "clc_policy_matrix_eval_live",
+      "features": {
+        "budget_units": 288.0,
+        "cycles": 2.0,
+        "hard": true,
+        "long_stream": true,
+        "csd_ratio": 0.7,
+        "probe_drop": 0.04,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.0,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.35
+      },
+      "oracle_policy": "periodic_baseline",
+      "oracle_utility": 1.0,
+      "weight": 1.0
+    },
+    {
+      "id": "long_topic_memory",
+      "family": "long_topic",
+      "condition_name": "long2_hard_budget288",
+      "source": "clc_policy_matrix_eval_live",
+      "features": {
+        "budget_units": 288.0,
+        "cycles": 2.0,
+        "hard": true,
+        "long_stream": true,
+        "csd_ratio": 0.7,
+        "probe_drop": 0.04,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.0,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.35
+      },
+      "oracle_policy": "periodic_baseline",
+      "oracle_utility": 1.0,
+      "weight": 1.0
+    },
+    {
+      "id": "long_topic_testing",
+      "family": "long_topic",
+      "condition_name": "long2_hard_budget288",
+      "source": "clc_policy_matrix_eval_live",
+      "features": {
+        "budget_units": 288.0,
+        "cycles": 2.0,
+        "hard": true,
+        "long_stream": true,
+        "csd_ratio": 0.7,
+        "probe_drop": 0.04,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.0,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.35
+      },
+      "oracle_policy": "periodic_baseline",
+      "oracle_utility": 1.0,
+      "weight": 1.0
+    },
+    {
+      "id": "long_session_presentation preference",
+      "family": "long_session",
+      "condition_name": "long2_standard_budget288",
+      "source": "clc_policy_matrix_eval_live",
+      "features": {
+        "budget_units": 288.0,
+        "cycles": 2.0,
+        "hard": false,
+        "long_stream": true,
+        "csd_ratio": 0.6,
+        "probe_drop": 0.03,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.0,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.2
+      },
+      "oracle_policy": "periodic_baseline",
+      "oracle_utility": 1.0,
+      "weight": 1.0
+    },
+    {
+      "id": "long_session_testing preference",
+      "family": "long_session",
+      "condition_name": "long2_standard_budget288",
+      "source": "clc_policy_matrix_eval_live",
+      "features": {
+        "budget_units": 288.0,
+        "cycles": 2.0,
+        "hard": false,
+        "long_stream": true,
+        "csd_ratio": 0.6,
+        "probe_drop": 0.03,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.0,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.2
+      },
+      "oracle_policy": "periodic_baseline",
+      "oracle_utility": 1.0,
+      "weight": 1.0
+    },
+    {
+      "id": "long_session_agent preference",
+      "family": "long_session",
+      "condition_name": "long2_standard_budget288",
+      "source": "clc_policy_matrix_eval_live",
+      "features": {
+        "budget_units": 288.0,
+        "cycles": 2.0,
+        "hard": false,
+        "long_stream": true,
+        "csd_ratio": 0.6,
+        "probe_drop": 0.03,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.0,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.2
+      },
+      "oracle_policy": "periodic_baseline",
+      "oracle_utility": 1.0,
+      "weight": 1.0
+    },
+    {
+      "id": "long_session_report preference",
+      "family": "long_session",
+      "condition_name": "long2_standard_budget288",
+      "source": "clc_policy_matrix_eval_live",
+      "features": {
+        "budget_units": 288.0,
+        "cycles": 2.0,
+        "hard": false,
+        "long_stream": true,
+        "csd_ratio": 0.6,
+        "probe_drop": 0.03,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.0,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.2
+      },
+      "oracle_policy": "periodic_baseline",
+      "oracle_utility": 1.0,
+      "weight": 1.0
+    },
+    {
+      "id": "boundary_v2_s13_adversarial_same_domain_stale_biased_implicit",
+      "family": "hard_stale_boundary_v2",
+      "condition_name": "hard_budget144",
+      "source": "hermes_hard_stale_escalation_v2",
+      "features": {
+        "budget_units": 144.0,
+        "cycles": 1.0,
+        "hard": true,
+        "long_stream": false,
+        "csd_ratio": 2.5000000000000004,
+        "probe_drop": 0.624,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.2,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.98
+      },
+      "oracle_policy": "long_severe_r16_overwrite",
+      "oracle_utility": 0.985,
+      "metadata": {
+        "scenario_key": "s13_adversarial_same_domain_stale_biased_implicit",
+        "stale_count": 13,
+        "semantic_similarity": "adversarial",
+        "domain_noise": "same_domain",
+        "query_specificity": "stale_biased",
+        "current_style": "implicit"
+      },
+      "weight": 1.0
+    },
+    {
+      "id": "boundary_v2_s13_adversarial_same_domain_stale_biased_terse",
+      "family": "hard_stale_boundary_v2",
+      "condition_name": "hard_budget144",
+      "source": "hermes_hard_stale_escalation_v2",
+      "features": {
+        "budget_units": 144.0,
+        "cycles": 1.0,
+        "hard": true,
+        "long_stream": false,
+        "csd_ratio": 2.5000000000000004,
+        "probe_drop": 0.624,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.2,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.98
+      },
+      "oracle_policy": "long_severe_r16_overwrite",
+      "oracle_utility": 0.985,
+      "metadata": {
+        "scenario_key": "s13_adversarial_same_domain_stale_biased_terse",
+        "stale_count": 13,
+        "semantic_similarity": "adversarial",
+        "domain_noise": "same_domain",
+        "query_specificity": "stale_biased",
+        "current_style": "terse"
+      },
+      "weight": 1.0
+    },
+    {
+      "id": "boundary_v2_s3_adversarial_same_domain_stale_biased_implicit",
+      "family": "hard_stale_boundary_v2",
+      "condition_name": "hard_budget144",
+      "source": "hermes_hard_stale_escalation_v2",
+      "features": {
+        "budget_units": 144.0,
+        "cycles": 1.0,
+        "hard": true,
+        "long_stream": false,
+        "csd_ratio": 1.5000000000000002,
+        "probe_drop": 0.344,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.2,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.8049999999999999
+      },
+      "oracle_policy": "long_severe_r16_overwrite",
+      "oracle_utility": 0.985,
+      "metadata": {
+        "scenario_key": "s3_adversarial_same_domain_stale_biased_implicit",
+        "stale_count": 3,
+        "semantic_similarity": "adversarial",
+        "domain_noise": "same_domain",
+        "query_specificity": "stale_biased",
+        "current_style": "implicit"
+      },
+      "weight": 1.0
+    },
+    {
+      "id": "boundary_v2_s3_adversarial_same_domain_stale_biased_terse",
+      "family": "hard_stale_boundary_v2",
+      "condition_name": "hard_budget144",
+      "source": "hermes_hard_stale_escalation_v2",
+      "features": {
+        "budget_units": 144.0,
+        "cycles": 1.0,
+        "hard": true,
+        "long_stream": false,
+        "csd_ratio": 1.5000000000000002,
+        "probe_drop": 0.344,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.2,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.8049999999999999
+      },
+      "oracle_policy": "long_severe_r16_overwrite",
+      "oracle_utility": 0.985,
+      "metadata": {
+        "scenario_key": "s3_adversarial_same_domain_stale_biased_terse",
+        "stale_count": 3,
+        "semantic_similarity": "adversarial",
+        "domain_noise": "same_domain",
+        "query_specificity": "stale_biased",
+        "current_style": "terse"
+      },
+      "weight": 1.0
+    },
+    {
+      "id": "boundary_v2_s8_adversarial_same_domain_stale_biased_implicit",
+      "family": "hard_stale_boundary_v2",
+      "condition_name": "hard_budget144",
+      "source": "hermes_hard_stale_escalation_v2",
+      "features": {
+        "budget_units": 144.0,
+        "cycles": 1.0,
+        "hard": true,
+        "long_stream": false,
+        "csd_ratio": 2.0,
+        "probe_drop": 0.484,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.2,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.98
+      },
+      "oracle_policy": "long_severe_r16_overwrite",
+      "oracle_utility": 0.985,
+      "metadata": {
+        "scenario_key": "s8_adversarial_same_domain_stale_biased_implicit",
+        "stale_count": 8,
+        "semantic_similarity": "adversarial",
+        "domain_noise": "same_domain",
+        "query_specificity": "stale_biased",
+        "current_style": "implicit"
+      },
+      "weight": 1.0
+    },
+    {
+      "id": "boundary_v2_s8_adversarial_same_domain_stale_biased_terse",
+      "family": "hard_stale_boundary_v2",
+      "condition_name": "hard_budget144",
+      "source": "hermes_hard_stale_escalation_v2",
+      "features": {
+        "budget_units": 144.0,
+        "cycles": 1.0,
+        "hard": true,
+        "long_stream": false,
+        "csd_ratio": 2.0,
+        "probe_drop": 0.484,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.2,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.98
+      },
+      "oracle_policy": "long_severe_r16_overwrite",
+      "oracle_utility": 0.985,
+      "metadata": {
+        "scenario_key": "s8_adversarial_same_domain_stale_biased_terse",
+        "stale_count": 8,
+        "semantic_similarity": "adversarial",
+        "domain_noise": "same_domain",
+        "query_specificity": "stale_biased",
+        "current_style": "terse"
+      },
+      "weight": 1.0
+    },
+    {
+      "id": "outcome_conflict_safe_000",
+      "family": "outcome_conflict_safe",
+      "condition_name": "standard_budget144",
+      "source": "outcome:0:policy_matrix_hash_eval:15,policy_matrix_live_gemma_eval:10",
+      "features": {
+        "budget_units": 144.0,
+        "cycles": 1.0,
+        "hard": false,
+        "long_stream": false,
+        "csd_ratio": 0.9,
+        "probe_drop": 0.08,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.0,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.25
+      },
+      "oracle_policy": "long_severe_r16_overwrite",
+      "weight": 3.0
+    },
+    {
+      "id": "outcome_conflict_safe_001",
+      "family": "outcome_conflict_safe",
+      "condition_name": "long2_hard_budget288",
+      "source": "outcome:1:policy_matrix_hash_eval:12,policy_matrix_live_gemma_eval:8",
+      "features": {
+        "budget_units": 288.0,
+        "cycles": 2.0,
+        "hard": true,
+        "long_stream": true,
+        "csd_ratio": 0.7,
+        "probe_drop": 0.04,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.0,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.35
+      },
+      "oracle_policy": "periodic_baseline",
+      "weight": 3.0
+    },
+    {
+      "id": "outcome_conflict_safe_002",
+      "family": "outcome_conflict_safe",
+      "condition_name": "long2_standard_budget288",
+      "source": "outcome:2:policy_matrix_hash_eval:8,policy_matrix_live_gemma_eval:8",
+      "features": {
+        "budget_units": 288.0,
+        "cycles": 2.0,
+        "hard": false,
+        "long_stream": true,
+        "csd_ratio": 0.6,
+        "probe_drop": 0.03,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.0,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.2
+      },
+      "oracle_policy": "periodic_baseline",
+      "weight": 3.0
+    },
+    {
+      "id": "outcome_conflict_safe_003",
+      "family": "outcome_conflict_safe",
+      "condition_name": "hard_budget144",
+      "source": "outcome:3:hard_stale_escalation_v2:2",
+      "features": {
+        "budget_units": 144.0,
+        "cycles": 1.0,
+        "hard": true,
+        "long_stream": false,
+        "csd_ratio": 1.3,
+        "probe_drop": 0.108,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.2,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.515
+      },
+      "oracle_policy": "periodic_baseline",
+      "weight": 3.0
+    },
+    {
+      "id": "outcome_conflict_safe_004",
+      "family": "outcome_conflict_safe",
+      "condition_name": "hard_budget144",
+      "source": "outcome:4:hard_stale_escalation_v2:2",
+      "features": {
+        "budget_units": 144.0,
+        "cycles": 1.0,
+        "hard": true,
+        "long_stream": false,
+        "csd_ratio": 1.3,
+        "probe_drop": 0.288,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.2,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.6950000000000001
+      },
+      "oracle_policy": "periodic_baseline",
+      "weight": 3.0
+    },
+    {
+      "id": "outcome_conflict_safe_005",
+      "family": "outcome_conflict_safe",
+      "condition_name": "hard_budget144",
+      "source": "outcome:5:hard_stale_escalation_v2:2",
+      "features": {
+        "budget_units": 144.0,
+        "cycles": 1.0,
+        "hard": true,
+        "long_stream": false,
+        "csd_ratio": 1.7,
+        "probe_drop": 0.22000000000000003,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.2,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.735
+      },
+      "oracle_policy": "periodic_baseline",
+      "weight": 3.0
+    },
+    {
+      "id": "outcome_conflict_safe_006",
+      "family": "outcome_conflict_safe",
+      "condition_name": "hard_budget144",
+      "source": "outcome:6:hard_stale_escalation_v2:2",
+      "features": {
+        "budget_units": 144.0,
+        "cycles": 1.0,
+        "hard": true,
+        "long_stream": false,
+        "csd_ratio": 1.7,
+        "probe_drop": 0.4,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.2,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.915
+      },
+      "oracle_policy": "periodic_baseline",
+      "weight": 3.0
+    },
+    {
+      "id": "outcome_conflict_safe_007",
+      "family": "outcome_conflict_safe",
+      "condition_name": "hard_budget144",
+      "source": "outcome:7:hard_stale_escalation_v2:2",
+      "features": {
+        "budget_units": 144.0,
+        "cycles": 1.0,
+        "hard": true,
+        "long_stream": false,
+        "csd_ratio": 2.5000000000000004,
+        "probe_drop": 0.444,
+        "label_cost": 0.0002,
+        "budget_pressure": 0.2,
+        "recent_return_mean": 0.0,
+        "memory_bad_rate": 0.98
+      },
+      "oracle_policy": "periodic_baseline",
+      "weight": 3.0
+    }
+  ],
+  "guard_summary": {
+    "combined_baseline": {
+      "matrix": {
+        "utility": 19.91,
+        "pass_rate": 1.0,
+        "oracle_match_rate": 0.95
+      },
+      "v2_boundary": {
+        "utility": 5.91,
+        "pass_rate": 1.0,
+        "oracle_match_rate": 1.0
+      },
+      "sample_count": 26
+    },
+    "guarded_continual_candidate": {
+      "matrix": {
+        "utility": 19.91,
+        "pass_rate": 1.0,
+        "oracle_match_rate": 0.95
+      },
+      "v2_boundary": {
+        "utility": 5.91,
+        "pass_rate": 1.0,
+        "oracle_match_rate": 1.0
+      },
+      "sample_count": 34
+    }
+  },
+  "failures": []
+}

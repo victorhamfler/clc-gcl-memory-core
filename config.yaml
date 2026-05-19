@@ -56,6 +56,14 @@ retrieval_weights:
   relation_supersession: 0.16
   summary_relation: 0.08
 
+selector:
+  mode: learned
+  k: 3
+  matrix_report: selector_reports/clc_selector_guarded_continual_training_report.json
+  outcome_log: ../experiments/hermes_clc_selector_outcome_labels.jsonl
+  label_cost_ceiling: 0.00025
+  high_budget_pressure: 0.9
+
 symbolic:
   domain_aliases: clc=CLC,csd=CSD,g-cl=G-CL,gcl=G-CL,geometry controller=OpenClaw,lcm geometry=OpenClaw,openclaw=OpenClaw,clgk=CLGK,robot=robotics,webots=robotics,lora=model_training,memory=agent_memory
   preference_keywords: prefer,preference,likes,loves,hates,dislikes,values,wants

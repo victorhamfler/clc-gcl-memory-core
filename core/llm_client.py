@@ -25,6 +25,13 @@ class OpenAICompatibleLLMClient:
         raw = self._chat_completion(prompt)
         return parse_json_facts(raw)
 
+    def complete_json(self, prompt: str, system: str = "Return only valid JSON.") -> Any:
+        provider = str(self.config.get("provider") or "custom").strip().lower()
+        if provider == "mock":
+            return self.config.get("mock_json", self.config.get("mock_plan", {}))
+        raw = self._chat_completion(prompt, system=system)
+        return parse_json_value(raw)
+
     def _mock_facts(self) -> list[dict[str, Any]]:
         value = self.config.get("mock_facts") or self.config.get("mock_response") or []
         if isinstance(value, str):
@@ -33,7 +40,7 @@ class OpenAICompatibleLLMClient:
             return [item for item in value if isinstance(item, dict)]
         return []
 
-    def _chat_completion(self, prompt: str) -> str:
+    def _chat_completion(self, prompt: str, system: str = "Return only valid JSON for the requested extraction task.") -> str:
         base_url = str(self.config.get("base_url") or "").rstrip("/")
         if not base_url:
             raise LLMClientError("llm.base_url is required for non-mock providers")
@@ -61,7 +68,7 @@ class OpenAICompatibleLLMClient:
                 "messages": [
                     {
                         "role": "system",
-                        "content": "Return only valid JSON for the requested extraction task.",
+                        "content": system,
                     },
                     {"role": "user", "content": prompt},
                 ],
@@ -161,19 +168,23 @@ class OpenAICompatibleLLMClient:
 
 
 def parse_json_facts(raw: str) -> list[dict[str, Any]]:
-    text = str(raw or "").strip()
-    if not text:
-        return []
-    if text.startswith("```"):
-        text = text.strip("`")
-        if text.lower().startswith("json"):
-            text = text[4:].strip()
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise LLMClientError(f"LLM extraction response was not valid JSON: {exc}") from exc
+    data = parse_json_value(raw)
     if isinstance(data, dict) and isinstance(data.get("facts"), list):
         data = data["facts"]
     if not isinstance(data, list):
         raise LLMClientError("LLM extraction JSON must be a list or an object with a facts list")
     return [item for item in data if isinstance(item, dict)]
+
+
+def parse_json_value(raw: str) -> Any:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    if text.startswith("```"):
+        text = text.strip("`")
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise LLMClientError(f"LLM response was not valid JSON: {exc}") from exc

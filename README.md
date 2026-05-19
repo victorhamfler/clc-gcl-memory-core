@@ -17,6 +17,9 @@ The committed config is Windows-first and uses `wsl_llama_cpp` to bridge into WS
 
 For the full agent-facing operating guide, see [docs/AGENT_USER_MANUAL.md](docs/AGENT_USER_MANUAL.md).
 
+For the current CSD/G-CL selector architecture, evidence, and next research steps, see
+[docs/CLC_ARCHITECTURE_STATUS.md](docs/CLC_ARCHITECTURE_STATUS.md).
+
 ## Quick Commands
 
 ```powershell
@@ -35,6 +38,10 @@ py eval/summary_retrieval_eval.py
 py eval/summary_answer_quality_eval.py
 py eval/subtle_contradiction_eval.py
 py eval/clc_threshold_calibration.py
+py eval/build_combined_selector_training_report.py
+py eval/build_guarded_continual_selector_report.py
+py eval/selector_runtime_config_eval.py
+py eval/guarded_continual_live_endpoint_eval.py
 py eval/mechanism_component_eval.py
 py eval/memory_maintenance_eval.py
 py eval/maintenance_impact_eval.py
@@ -104,6 +111,7 @@ If local disk space gets tight after repeated benchmark runs, use `py eval/clean
 - `POST /query` (alias for `/retrieve`)
 - `POST /learn`
 - `POST /learn/document`
+- `POST /agent_plan`
 - `POST /authority`
 - `POST /ask`
 - `POST /session`
@@ -113,6 +121,7 @@ If local disk space gets tight after repeated benchmark runs, use `py eval/clean
 - `POST /feedback`
 - `GET /feedback`
 - `POST /memory_usage`
+- `POST /migration_validate`
 - `POST /consolidation_plan`
 - `POST /consolidate`
 - `POST /consolidation_sources`
@@ -129,6 +138,8 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8765/retrieve" -Method Post -ContentTyp
 
 Agent-friendly aliases are supported for common guesses: `/query` is accepted as `/retrieve`, `question` or `q` can be used wherever a retrieval `query` is expected, and `content` can be used instead of `text` for `/teach`, `/ingest`, and `/learn`.
 
+For migrations, `POST /ingest_batch` accepts structured `items` or `memories` as well as plain `texts`. Structured items can carry their own `namespace`, `source`, `memory_type`, `domain`, `priority`, and `metadata`; the namespace fallback is item namespace, then batch namespace, then `global`. This avoids accidentally importing a full corpus into the wrong agent namespace.
+
 Ask for an extractive answer with cited memory evidence:
 
 ```powershell
@@ -144,6 +155,8 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8765/config"
 ```
 
 Agent-controlled LLM learning is available through `POST /learn`, but it is disabled by default in `config.yaml`. Agents should call it only when a selected text snippet contains durable facts worth extracting. The implementation supports `dry_run`, `extract_only`, and `extract_and_store`; `teach`, `store`, and `store_facts` are accepted as aliases for `extract_and_store`. Dry-run and extract-only responses include a warning that no facts were persisted. The learner routes extracted facts to `teach`, `correct`, or `skip` after similarity checks, and callers can pass `memory_type` or `domain` hints when they need to override LLM/symbolic classification. `POST /learn/document` chunks longer content on paragraph and sentence boundaries where possible, then runs the same learning flow per chunk. Real document learning uses `llm.chunk_delay` between chunks and `llm.max_retries`/`llm.retry_backoff` for transient 429/5xx provider failures. `llm.fallback_models` can list comma-separated backup model names, and `/learn` responses include `llm_model`/`llm_models_by_chunk` so agents can see which model was used. Keep `llm.enabled: false` until an OpenAI-compatible provider and API key environment variable are configured. The default provider settings use `glm-5` at `https://opencode.ai/zen/go/v1`; set `OPENCODE_GO_API_KEY` before enabling real calls.
+
+`POST /agent_plan` lets the configured LLM propose memory API actions from a natural-language instruction. It is deliberately plan-only: it returns endpoints, payloads, reasons, warnings, and `requires_confirmation=true`, but it does not execute the actions. Use this before any future autonomous execution mode.
 
 Continue a session:
 
@@ -222,6 +235,8 @@ Feedback can be audited with `GET /feedback?label=wrong&limit=20` or `GET /feedb
 
 For simple factual questions, answer synthesis uses stricter snippet selection so unrelated evidence is not concatenated into a single answer. Extra retrieved material remains inspectable through `source_context`, `stale_context`, and `/why`.
 
+If `/ask` or `/retrieve` finds no evidence in the searched namespace but other namespaces contain memories, responses include `namespace_warning` with the searched namespace scope and available namespaces. `POST /migration_validate` reports namespace counts, vector dimensions, embedding signature, and an optional smoke query so agents can verify a migrated database before trusting it.
+
 Retrieval ranking weights live in `config.yaml` under `retrieval_weights`. The current profile was selected with `py eval/retrieval_weight_optimization.py` and emphasizes source, feedback, supersession, manifest relation, consolidation-summary, and intent signals over raw vector similarity. CLC controller thresholds live under `thresholds`; `py eval/clc_threshold_calibration.py` compares the configured profile against nearby alternatives. Symbolic domain aliases, memory type keywords, and retrieval intent labels live under `symbolic` and can be inspected with `py main.py config` or `GET /config`. Retrieved evidence now also carries stored CSD contradiction metadata, so `/ask` can surface unresolved correction pressure even when the contradictory memory is not part of the top evidence set. Queries containing exact alphanumeric identifiers such as `TemporalItem027`, ticket ids, or numbered codenames receive a conservative identifier-match boost and broader lexical backfill so nearby IDs do not outrank the exact item.
 
 CSD includes lexical preference conflict checks for common daily-use facts such as `likes tea` versus `hates tea` or `never drinks tea`. These conflicts protect the new memory and store contradiction pressure even when embeddings alone consider the sentences similar.
@@ -248,4 +263,4 @@ py promote_db.py memory_experiment_180_best.db
 
 ## Notes
 
-This repo keeps only the current best baseline database in Git. Older scratch databases, logs, caches, and local runtime files are ignored.
+This repo keeps code, docs, schemas, and test corpora in Git. Runtime databases, logs, caches, local models, and generated experiment artifacts are intentionally ignored.

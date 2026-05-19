@@ -274,6 +274,8 @@ class MemoryPipeline:
                     namespace=memory_namespace,
                     priority=priority,
                     force_clc_state=force_clc_state,
+                    domain=domain,
+                    memory_type=memory_type,
                 )
                 item["batch_index"] = idx
                 item["source"] = source

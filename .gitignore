@@ -10,7 +10,6 @@ logs/*
 !logs/.gitkeep
 
 *.db
-!memory_experiment_180_best.db
 
 *.db-shm
 *.db-wal
@@ -23,4 +22,3 @@ logs/*
 *.tmp
 *.bak
 *.bak_*
-
