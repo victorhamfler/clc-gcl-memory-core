@@ -17,6 +17,8 @@ The active architecture combines:
   - `xseq_memory_r45_badmajority`
 - A guarded continual selector trainer that admits outcome-log samples only when they are conflict-safe and preserve guard evaluations.
 - A retrieval-feature bridge that can derive selector features from live retrieved evidence rows.
+- Retrieval-aware guardrails that use live retrieval diagnostics to protect clean contexts, suppress query-irrelevant stale clutter, and force verified refresh for real stale/current conflict.
+- Source-version grouping by source file, so unrelated files inside `agent_memory_v1` / `agent_memory_v2` do not mark each other stale.
 
 ## Best Current Selector
 
@@ -63,11 +65,13 @@ Live retrieval pipeline bridge result:
 
 Retrieval calibration harness:
 
-| Eval | Cases | Initial alignment | Main signal |
-|---|---:|---:|---|
-| `selector_retrieval_calibration_eval.py` | 6 | 0.5 | hard detection is useful, but learned policy over-escalates some clean contexts and underfires one chained correction |
+| Eval | Cases | Before guards | Current hash | Current config | Main signal |
+|---|---:|---:|---:|---:|---|
+| `selector_retrieval_calibration_eval.py` | 6 | 0.5 | 1.0 | 1.0 | retrieval guards fix clean over-escalation and chained-correction underfire |
+| `selector_retrieval_guard_pressure_eval.py` | 6 | n/a | 1.0 | 1.0 | irrelevant stale clusters and mild updates stay protected |
+| `selector_retrieval_guard_randomized_eval.py` | 32 | 0.9375 during development | 1.0 | 1.0 | randomized corrections, chains, mild updates, and stale clutter align |
 
-The important finding is that the architecture can learn from real agent outcome logs without damaging known memory-boundary behavior, but only with conflict-safe admission and guard tests.
+The important finding is that the architecture can learn from real agent outcome logs without damaging known memory-boundary behavior, but only with conflict-safe admission, retrieval-aware guardrails, and guard tests that include query-irrelevant stale clutter.
 
 ## Technological Value
 
@@ -83,14 +87,13 @@ This makes the architecture relevant for local agents, personal memory systems, 
 
 ## Next Development Steps
 
-1. Calibrate retrieval-derived selector features on larger real task sets:
-   - stale/current retrieval ratio,
-   - top evidence age/source reliability,
-   - contradiction count,
-   - supersession strength,
-   - answer confidence and evidence coverage.
+1. Run multi-day continued-work testing with Hermes:
+   - daily isolated namespaces,
+   - one continuous namespace,
+   - repeated teach/correct/ask/retrieve/selector-explain cycles,
+   - full failure logging and final report.
 
-2. Build a holdout set that is not generated from the same scripts as training:
+2. Build a holdout set from real Hermes long-run failures, not generated from the same scripts as training:
    - real Hermes tasks,
    - personal preference changes,
    - project-memory corrections,
@@ -103,7 +106,7 @@ This makes the architecture relevant for local agents, personal memory systems, 
    - run guard suites,
    - write an accepted report only if all guards pass.
 
-4. Add selector explanation data to outcome logs so future guarded training can learn from the same evidence the selector used.
+4. Add selector explanation and retrieval diagnostics to outcome logs so future guarded training can learn from the same evidence the selector used.
 
 5. Compare against stronger baselines:
    - fixed CLC rules,

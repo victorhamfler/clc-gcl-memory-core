@@ -8,6 +8,9 @@ from core.clc_policy_selector import (
     CLCPolicyFeatures,
     CLCPolicySelector,
     CLCPolicyDecision,
+    POLICY_ACTIONS,
+    POLICY_LONG_SEVERE,
+    POLICY_PERIODIC,
 )
 from core.config import resolve_project_path
 
@@ -85,26 +88,48 @@ def selector_features_from_retrieval_context(
     source_reliability = [float(row.get("source_reliability") or 0.0) for row in rows]
     domain_reliability = [float(row.get("domain_reliability") or 0.0) for row in rows]
     retrieval_scores = [float(row.get("score") or row.get("cosine") or 0.0) for row in rows]
+    text_match_scores = [float(row.get("text_match_score") or 0.0) for row in rows]
 
     stale_rows = 0
     current_rows = 0
-    for row, supersession, relation in zip(rows, supersession_scores, relation_scores):
+    stale_scores: list[float] = []
+    current_scores: list[float] = []
+    standalone_scores: list[float] = []
+    stale_text_matches: list[float] = []
+    current_text_matches: list[float] = []
+    standalone_text_matches: list[float] = []
+    top_stale_rank = 0
+    top_current_rank = 0
+    for row, supersession, relation, text_match in zip(rows, supersession_scores, relation_scores, text_match_scores):
         authority_state = str(row.get("authority_state") or "").lower()
-        if (
+        score = float(row.get("score") or row.get("cosine") or 0.0)
+        is_stale = (
             authority_state in {"superseded", "stale"}
             or row.get("superseded_by_memory_ids")
             or supersession < -0.05
             or relation < -0.05
-        ):
-            stale_rows += 1
-        if (
+        )
+        is_current = (
             authority_state in {"authoritative", "current"}
-            or row.get("authoritative_memory_ids")
             or row.get("supersedes_memory_ids")
             or supersession > 0.05
             or relation > 0.05
-        ):
+        )
+        if is_stale:
+            stale_rows += 1
+            stale_scores.append(score)
+            stale_text_matches.append(text_match)
+            if top_stale_rank == 0:
+                top_stale_rank = len(stale_scores) + len(current_scores) + len(standalone_scores)
+        if is_current:
             current_rows += 1
+            current_scores.append(score)
+            current_text_matches.append(text_match)
+            if top_current_rank == 0:
+                top_current_rank = len(stale_scores) + len(current_scores) + len(standalone_scores)
+        if not is_stale and not is_current:
+            standalone_scores.append(score)
+            standalone_text_matches.append(text_match)
 
     stale_ratio = stale_rows / total
     current_ratio = current_rows / total
@@ -117,6 +142,32 @@ def selector_features_from_retrieval_context(
     avg_source_reliability = sum(source_reliability) / total
     avg_domain_reliability = sum(domain_reliability) / total
     avg_retrieval_score = sum(retrieval_scores) / total
+    top_score = retrieval_scores[0] if retrieval_scores else 0.0
+    top_authority_state = str(rows[0].get("authority_state") or "unknown").lower() if rows else "unknown"
+    stale_score_max = max(stale_scores or [0.0])
+    current_score_max = max(current_scores or [0.0])
+    standalone_score_max = max(standalone_scores or [0.0])
+    stale_score_gap = top_score - stale_score_max
+    stale_text_match_max = max(stale_text_matches or [0.0])
+    current_text_match_max = max(current_text_matches or [0.0])
+    standalone_text_match_max = max(standalone_text_matches or [0.0])
+    irrelevant_stale_cluster = bool(
+        stale_rows >= 1
+        and top_stale_rank >= 3
+        and contradiction_peak <= 0.0
+        and (
+            (
+                top_authority_state in {"standalone", "unknown"}
+                and stale_score_gap >= 0.10
+                and stale_strength <= 0.25
+            )
+            or (
+                standalone_text_match_max >= 0.80
+                and stale_text_match_max <= 0.35
+                and current_text_match_max <= 0.35
+            )
+        )
+    )
     reliability_gap = max(0.0, -min(0.0, avg_source_reliability, avg_domain_reliability))
     stale_pressure = max(stale_ratio, stale_strength, contradiction_peak)
     current_pressure = max(current_ratio, current_strength)
@@ -154,7 +205,7 @@ def selector_features_from_retrieval_context(
             + 0.2 * reliability_gap,
         ),
     )
-    hard = bool(stale_pressure >= 0.35 or contradiction_peak >= 0.5 or stale_rows >= 2)
+    hard = bool((stale_pressure >= 0.35 or contradiction_peak >= 0.5 or stale_rows >= 2) and not irrelevant_stale_cluster)
     condition_l = str(condition_name or "").lower()
     effective_condition = condition_name
     if hard and "hard" not in condition_l:
@@ -182,6 +233,18 @@ def selector_features_from_retrieval_context(
         "avg_source_reliability": round(avg_source_reliability, 6),
         "avg_domain_reliability": round(avg_domain_reliability, 6),
         "avg_retrieval_score": round(avg_retrieval_score, 6),
+        "top_score": round(top_score, 6),
+        "top_authority_state": top_authority_state,
+        "top_stale_rank": top_stale_rank,
+        "top_current_rank": top_current_rank,
+        "stale_score_max": round(stale_score_max, 6),
+        "current_score_max": round(current_score_max, 6),
+        "standalone_score_max": round(standalone_score_max, 6),
+        "stale_score_gap": round(stale_score_gap, 6),
+        "stale_text_match_max": round(stale_text_match_max, 6),
+        "current_text_match_max": round(current_text_match_max, 6),
+        "standalone_text_match_max": round(standalone_text_match_max, 6),
+        "irrelevant_stale_cluster": irrelevant_stale_cluster,
         "memory_bad_rate": round(memory_bad_rate, 6),
         "probe_drop": round(probe_drop, 6),
         "csd_ratio": round(csd_ratio, 6),
@@ -222,6 +285,111 @@ def selector_features_from_payload(payload: dict[str, Any]) -> CLCPolicyFeatures
             return type(features)(**{**features.__dict__, **feature_updates})
         return features
     return dict(payload.get("features") or payload)
+
+
+def apply_retrieval_policy_guard(
+    decision: CLCPolicyDecision,
+    features: CLCPolicyFeatures | dict[str, Any],
+    diagnostics: dict[str, Any] | None,
+) -> CLCPolicyDecision:
+    """Apply interpretable retrieval guards around learned selector votes.
+
+    The learned selector can be pulled by sparse outcome labels. Retrieval-derived
+    diagnostics are stronger evidence for clean/non-clean boundaries, so they get
+    a final veto only when the decision came from retrieved memory context.
+    """
+
+    if not diagnostics:
+        return decision
+    if "label_cost" in decision.reason or "budget_pressure" in decision.reason:
+        return decision
+    f = features if isinstance(features, CLCPolicyFeatures) else CLCPolicySelector()._normalize(features)
+    stale_ratio = float(diagnostics.get("stale_ratio") or 0.0)
+    contradiction_peak = float(diagnostics.get("contradiction_peak") or 0.0)
+    stale_current_conflict = float(diagnostics.get("stale_current_conflict") or 0.0)
+    current_ratio = float(diagnostics.get("current_ratio") or 0.0)
+    memory_bad_rate = float(diagnostics.get("memory_bad_rate", f.memory_bad_rate) or 0.0)
+    probe_drop = float(diagnostics.get("probe_drop", f.probe_drop) or 0.0)
+
+    if (
+        bool(diagnostics.get("irrelevant_stale_cluster"))
+        and contradiction_peak <= 0.0
+    ):
+        return CLCPolicyDecision(
+            policy=POLICY_PERIODIC,
+            action=POLICY_ACTIONS[POLICY_PERIODIC],
+            reason=f"retrieval_guard_irrelevant_stale_cluster:{decision.reason}",
+            confidence=max(0.80, min(0.95, decision.confidence)),
+        )
+    if (
+        not f.hard
+        and stale_ratio <= 0.0
+        and contradiction_peak <= 0.0
+        and stale_current_conflict <= 0.0
+        and memory_bad_rate <= 0.25
+        and probe_drop <= 0.08
+    ):
+        return CLCPolicyDecision(
+            policy=POLICY_PERIODIC,
+            action=POLICY_ACTIONS[POLICY_PERIODIC],
+            reason=f"retrieval_guard_clean_nonhard_context:{decision.reason}",
+            confidence=max(0.82, min(0.95, decision.confidence)),
+        )
+    if (
+        not f.hard
+        and contradiction_peak <= 0.0
+        and stale_ratio <= 0.34
+        and stale_current_conflict <= 0.35
+        and current_ratio >= 0.9
+        and memory_bad_rate <= 0.45
+        and probe_drop <= 0.18
+    ):
+        return CLCPolicyDecision(
+            policy=POLICY_PERIODIC,
+            action=POLICY_ACTIONS[POLICY_PERIODIC],
+            reason=f"retrieval_guard_low_relevance_stale_context:{decision.reason}",
+            confidence=max(0.78, min(0.95, decision.confidence)),
+        )
+    if f.hard and stale_ratio >= 0.5 and stale_current_conflict >= 0.8:
+        return CLCPolicyDecision(
+            policy=POLICY_LONG_SEVERE,
+            action=POLICY_ACTIONS[POLICY_LONG_SEVERE],
+            reason=f"retrieval_guard_hard_stale_current_conflict:{decision.reason}",
+            confidence=max(0.78, min(0.95, decision.confidence)),
+        )
+    return decision
+
+
+def apply_retrieval_explanation_guard(
+    explanation: dict[str, Any],
+    features: CLCPolicyFeatures | dict[str, Any],
+    diagnostics: dict[str, Any] | None,
+) -> dict[str, Any]:
+    base = explanation.get("decision") or {}
+    decision = CLCPolicyDecision(
+        policy=str(base.get("policy") or POLICY_PERIODIC),
+        action=str(base.get("action") or POLICY_ACTIONS[POLICY_PERIODIC]),
+        reason=str(base.get("reason") or "unknown"),
+        confidence=float(base.get("confidence") or 0.0),
+    )
+    guarded = apply_retrieval_policy_guard(decision, features, diagnostics)
+    if guarded == decision:
+        explanation["retrieval_guard"] = {"applied": False}
+        return explanation
+    explanation["base_decision"] = dict(base)
+    explanation["decision"] = {
+        "policy": guarded.policy,
+        "action": guarded.action,
+        "reason": guarded.reason,
+        "confidence": guarded.confidence,
+    }
+    explanation["retrieval_guard"] = {
+        "applied": True,
+        "base_policy": decision.policy,
+        "guarded_policy": guarded.policy,
+        "reason": guarded.reason,
+    }
+    return explanation
 
 
 def select_policy(root: Path, config: dict[str, Any] | None, features: CLCPolicyFeatures | dict[str, Any]) -> CLCPolicyDecision:

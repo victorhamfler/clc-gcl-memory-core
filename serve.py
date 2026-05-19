@@ -16,6 +16,8 @@ from core.learning import learn_from_document, learn_from_text
 from core.maintenance import improvement_plan, memory_review, record_memory_improvement, weak_memories
 from core.runtime import create_pipeline, pipeline_config_view, pipeline_stats
 from core.selector_runtime import (
+    apply_retrieval_explanation_guard,
+    apply_retrieval_policy_guard,
     build_policy_selector,
     selector_config_view,
     selector_features_from_payload,
@@ -95,6 +97,8 @@ class MemoryApi:
         selector = build_policy_selector(self.root, self.root_config)
         features, context = self._selector_features_and_context(payload)
         decision = selector.select(features)
+        if context:
+            decision = apply_retrieval_policy_guard(decision, features, context.get("diagnostics"))
         response = {
             "ok": True,
             "selector": selector_config_view(self.root, self.root_config),
@@ -113,10 +117,13 @@ class MemoryApi:
         selector = build_policy_selector(self.root, self.root_config)
         features, context = self._selector_features_and_context(payload)
         top_k = payload.get("top_k")
+        explanation = selector.explain(features, top_k=None if top_k is None else int(top_k))
+        if context:
+            explanation = apply_retrieval_explanation_guard(explanation, features, context.get("diagnostics"))
         response = {
             "ok": True,
             "selector": selector_config_view(self.root, self.root_config),
-            "explanation": selector.explain(features, top_k=None if top_k is None else int(top_k)),
+            "explanation": explanation,
         }
         if context:
             response["selector_context"] = context

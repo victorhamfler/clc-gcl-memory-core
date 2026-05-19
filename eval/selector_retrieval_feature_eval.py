@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT))
 from core.config import load_config  # noqa: E402
 from core.clc_policy_selector import POLICY_LONG_SEVERE, POLICY_PERIODIC  # noqa: E402
 from core.selector_runtime import (  # noqa: E402
+    apply_retrieval_explanation_guard,
     build_policy_selector,
     selector_features_from_retrieval_context,
 )
@@ -97,8 +98,16 @@ def main() -> int:
         CLEAN_CONTEXT,
         condition_name="standard_budget144",
     )
-    stale_explanation = selector.explain(stale_features, top_k=5)
-    clean_explanation = selector.explain(clean_features, top_k=5)
+    stale_explanation = apply_retrieval_explanation_guard(
+        selector.explain(stale_features, top_k=5),
+        stale_features,
+        stale_diagnostics,
+    )
+    clean_explanation = apply_retrieval_explanation_guard(
+        selector.explain(clean_features, top_k=5),
+        clean_features,
+        clean_diagnostics,
+    )
     failures = []
     if not stale_features.hard:
         failures.append("stale retrieval context should produce hard selector features")
@@ -110,8 +119,8 @@ def main() -> int:
         failures.append("clean retrieval context should not produce hard selector features")
     if clean_diagnostics["stale_ratio"] != 0.0:
         failures.append("clean retrieval context should have zero stale ratio")
-    if clean_explanation["decision"]["policy"] != POLICY_LONG_SEVERE:
-        failures.append(f"clean standard retrieval context should select long severe, got {clean_explanation['decision']['policy']}")
+    if clean_explanation["decision"]["policy"] != POLICY_PERIODIC:
+        failures.append(f"clean retrieval guard should protect periodic, got {clean_explanation['decision']['policy']}")
 
     report = {
         "ok": not failures,
@@ -119,6 +128,7 @@ def main() -> int:
             "features": stale_features.__dict__,
             "diagnostics": stale_diagnostics,
             "decision": stale_explanation["decision"],
+            "retrieval_guard": stale_explanation.get("retrieval_guard"),
             "votes": stale_explanation["votes"],
             "nearest_samples": stale_explanation["nearest_samples"][:5],
         },
@@ -126,6 +136,8 @@ def main() -> int:
             "features": clean_features.__dict__,
             "diagnostics": clean_diagnostics,
             "decision": clean_explanation["decision"],
+            "base_decision": clean_explanation.get("base_decision"),
+            "retrieval_guard": clean_explanation.get("retrieval_guard"),
             "votes": clean_explanation["votes"],
             "nearest_samples": clean_explanation["nearest_samples"][:5],
         },

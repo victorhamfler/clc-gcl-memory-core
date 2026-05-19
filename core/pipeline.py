@@ -1855,13 +1855,21 @@ class MemoryPipeline:
         if not source:
             return None, 0
         path = Path(str(source))
-        candidates = [part.lower() for part in path.parts]
-        candidates.append(path.stem.lower())
-        for candidate in candidates:
+        lowered_parts = [part.lower() for part in path.parts]
+        for index, candidate in enumerate(lowered_parts):
             parts = candidate.split("_")
             if parts and parts[-1].startswith("v") and parts[-1][1:].isdigit():
-                group = "_".join(parts[:-1]).strip("_") or path.stem.lower()
+                group_root = "_".join(parts[:-1]).strip("_") or path.stem.lower()
+                if index < len(lowered_parts) - 1:
+                    group = f"{group_root}/{path.stem.lower()}"
+                else:
+                    group = group_root
                 return group, int(parts[-1][1:])
+        candidate = path.stem.lower()
+        parts = candidate.split("_")
+        if parts and parts[-1].startswith("v") and parts[-1][1:].isdigit():
+            group = "_".join(parts[:-1]).strip("_") or path.stem.lower()
+            return group, int(parts[-1][1:])
         return None, 0
 
     @staticmethod

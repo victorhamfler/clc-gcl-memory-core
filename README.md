@@ -23,6 +23,9 @@ For the current CSD/G-CL selector architecture, evidence, and next research step
 For the Hermes calibration handover, see
 [docs/HERMES_RETRIEVAL_CALIBRATION_HANDOVER.md](docs/HERMES_RETRIEVAL_CALIBRATION_HANDOVER.md).
 
+For the Hermes multi-day architecture handover, see
+[docs/HERMES_LONG_RUN_ARCHITECTURE_HANDOVER.md](docs/HERMES_LONG_RUN_ARCHITECTURE_HANDOVER.md).
+
 ## Quick Commands
 
 ```powershell
@@ -49,6 +52,8 @@ py eval/selector_explain_endpoint_eval.py
 py eval/selector_retrieval_feature_eval.py
 py eval/selector_live_retrieval_pipeline_eval.py
 py eval/selector_retrieval_calibration_eval.py --embedding-backend hash --top-k 8
+py eval/selector_retrieval_guard_pressure_eval.py --embedding-backend hash --top-k 10
+py eval/selector_retrieval_guard_randomized_eval.py --embedding-backend hash --cases 32 --seed 20260519 --top-k 10
 py eval/mechanism_component_eval.py
 py eval/memory_maintenance_eval.py
 py eval/maintenance_impact_eval.py
