@@ -61,6 +61,12 @@ Live retrieval pipeline bridge result:
 |---|---:|---:|---:|---|
 | corrected preference query | 0.5 | 1.0 | 1.0 | `long_severe_r16_overwrite` |
 
+Retrieval calibration harness:
+
+| Eval | Cases | Initial alignment | Main signal |
+|---|---:|---:|---|
+| `selector_retrieval_calibration_eval.py` | 6 | 0.5 | hard detection is useful, but learned policy over-escalates some clean contexts and underfires one chained correction |
+
 The important finding is that the architecture can learn from real agent outcome logs without damaging known memory-boundary behavior, but only with conflict-safe admission and guard tests.
 
 ## Technological Value
