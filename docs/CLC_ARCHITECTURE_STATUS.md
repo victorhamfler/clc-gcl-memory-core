@@ -16,6 +16,7 @@ The active architecture combines:
   - `long_severe_r16_overwrite`
   - `xseq_memory_r45_badmajority`
 - A guarded continual selector trainer that admits outcome-log samples only when they are conflict-safe and preserve guard evaluations.
+- A retrieval-feature bridge that can derive selector features from live retrieved evidence rows.
 
 ## Best Current Selector
 
@@ -52,6 +53,14 @@ Live endpoint smoke with the guarded continual report passed on a temporary serv
 | `v2_stale_boundary` | `long_severe_r16_overwrite` |
 | `high_label_cost_guard` | `periodic_baseline` |
 
+The HTTP API also exposes `POST /selector_explain`, which returns normalized features, the selected policy, active guardrails, nearest training samples, vote totals, and which neighbors were counted in the `k=3` decision. The same endpoint can now derive selector features from either explicit `retrieval_context` rows or from a live `query` retrieval.
+
+Live retrieval pipeline bridge result:
+
+| Case | stale ratio | current ratio | conflict | Policy |
+|---|---:|---:|---:|---|
+| corrected preference query | 0.5 | 1.0 | 1.0 | `long_severe_r16_overwrite` |
+
 The important finding is that the architecture can learn from real agent outcome logs without damaging known memory-boundary behavior, but only with conflict-safe admission and guard tests.
 
 ## Technological Value
@@ -68,7 +77,7 @@ This makes the architecture relevant for local agents, personal memory systems, 
 
 ## Next Development Steps
 
-1. Add richer selector features from live retrieval traces:
+1. Calibrate retrieval-derived selector features on larger real task sets:
    - stale/current retrieval ratio,
    - top evidence age/source reliability,
    - contradiction count,
@@ -88,11 +97,7 @@ This makes the architecture relevant for local agents, personal memory systems, 
    - run guard suites,
    - write an accepted report only if all guards pass.
 
-4. Add a selector explanation endpoint:
-   - nearest samples,
-   - vote weights,
-   - active guardrails,
-   - conflict-safe training provenance.
+4. Add selector explanation data to outcome logs so future guarded training can learn from the same evidence the selector used.
 
 5. Compare against stronger baselines:
    - fixed CLC rules,

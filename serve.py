@@ -15,7 +15,12 @@ from core.consolidation import consolidation_plan, create_consolidation_summarie
 from core.learning import learn_from_document, learn_from_text
 from core.maintenance import improvement_plan, memory_review, record_memory_improvement, weak_memories
 from core.runtime import create_pipeline, pipeline_config_view, pipeline_stats
-from core.selector_runtime import build_policy_selector, selector_config_view, selector_features_for_condition
+from core.selector_runtime import (
+    build_policy_selector,
+    selector_config_view,
+    selector_features_from_payload,
+    selector_features_from_retrieval_context,
+)
 
 
 ROOT = Path(__file__).resolve().parent
@@ -67,33 +72,30 @@ class MemoryApi:
     def config(self) -> dict[str, Any]:
         return {**pipeline_config_view(self.pipeline), "selector": selector_config_view(self.root, self.root_config)}
 
+    def _selector_features_and_context(self, payload: dict[str, Any]) -> tuple[Any, dict[str, Any] | None]:
+        retrieval_rows = payload.get("retrieval_context")
+        if not isinstance(retrieval_rows, list) and payload.get("query"):
+            retrieval_rows = self.pipeline.retrieve(
+                str(payload.get("query") or ""),
+                top_k=max(1, int(payload.get("top_k") or 5)),
+                namespace=str(payload.get("namespace") or "").strip() or None,
+                include_global=bool(payload.get("include_global", True)),
+            )
+        if isinstance(retrieval_rows, list):
+            features, diagnostics = selector_features_from_retrieval_context(
+                retrieval_rows,
+                condition_name=str(payload.get("condition_name") or "hard_budget144"),
+                label_cost=float(payload.get("label_cost", 0.0002) or 0.0002),
+                budget_pressure=float(payload.get("budget_pressure", 0.2) or 0.2),
+            )
+            return features, {"diagnostics": diagnostics, "retrieval_context": retrieval_rows}
+        return selector_features_from_payload(payload), None
+
     def selector_decide(self, payload: dict[str, Any]) -> dict[str, Any]:
         selector = build_policy_selector(self.root, self.root_config)
-        condition_name = str(payload.get("condition_name") or "").strip()
-        if condition_name:
-            features = selector_features_for_condition(condition_name)
-            feature_updates = {
-                key: payload[key]
-                for key in (
-                    "budget_units",
-                    "cycles",
-                    "hard",
-                    "long_stream",
-                    "csd_ratio",
-                    "probe_drop",
-                    "label_cost",
-                    "budget_pressure",
-                    "recent_return_mean",
-                    "memory_bad_rate",
-                )
-                if key in payload
-            }
-            if feature_updates:
-                features = type(features)(**{**features.__dict__, **feature_updates})
-        else:
-            features = dict(payload.get("features") or payload)
+        features, context = self._selector_features_and_context(payload)
         decision = selector.select(features)
-        return {
+        response = {
             "ok": True,
             "selector": selector_config_view(self.root, self.root_config),
             "decision": {
@@ -103,6 +105,22 @@ class MemoryApi:
                 "confidence": decision.confidence,
             },
         }
+        if context:
+            response["selector_context"] = context
+        return response
+
+    def selector_explain(self, payload: dict[str, Any]) -> dict[str, Any]:
+        selector = build_policy_selector(self.root, self.root_config)
+        features, context = self._selector_features_and_context(payload)
+        top_k = payload.get("top_k")
+        response = {
+            "ok": True,
+            "selector": selector_config_view(self.root, self.root_config),
+            "explanation": selector.explain(features, top_k=None if top_k is None else int(top_k)),
+        }
+        if context:
+            response["selector_context"] = context
+        return response
 
     def memory_usage(self, payload: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -743,6 +761,8 @@ def make_handler(api: MemoryApi):
                     self._send_json(200, api.agent_plan(payload))
                 elif path == "/selector_decide":
                     self._send_json(200, api.selector_decide(payload))
+                elif path == "/selector_explain":
+                    self._send_json(200, api.selector_explain(payload))
                 elif path == "/authority":
                     self._send_json(200, api.authority(payload))
                 elif path == "/ask":
@@ -864,6 +884,8 @@ def main() -> None:
                     "/learn",
                     "/learn/document",
                     "/agent_plan",
+                    "/selector_decide",
+                    "/selector_explain",
                     "/ask",
                     "/session",
                     "/sessions",

@@ -42,6 +42,9 @@ py eval/build_combined_selector_training_report.py
 py eval/build_guarded_continual_selector_report.py
 py eval/selector_runtime_config_eval.py
 py eval/guarded_continual_live_endpoint_eval.py
+py eval/selector_explain_endpoint_eval.py
+py eval/selector_retrieval_feature_eval.py
+py eval/selector_live_retrieval_pipeline_eval.py
 py eval/mechanism_component_eval.py
 py eval/memory_maintenance_eval.py
 py eval/maintenance_impact_eval.py

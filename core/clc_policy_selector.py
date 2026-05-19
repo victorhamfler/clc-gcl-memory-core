@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -131,6 +131,24 @@ class CLCPolicySelector:
             confidence=0.70,
         )
 
+    def explain(self, features: CLCPolicyFeatures | dict[str, Any], *, top_k: int | None = None) -> dict[str, Any]:
+        f = self._normalize(features)
+        decision = self.select(f)
+        return {
+            "selector_class": self.__class__.__name__,
+            "features": asdict(f),
+            "decision": _decision_dict(decision),
+            "guardrails": {
+                "label_cost_ceiling": self.label_cost_ceiling,
+                "high_budget_pressure": self.high_budget_pressure,
+            },
+            "nearest_samples": [],
+            "votes": {},
+            "total_vote": 0.0,
+            "sample_count": 0,
+            "explanation": decision.reason,
+        }
+
     def _normalize(self, features: CLCPolicyFeatures | dict[str, Any]) -> CLCPolicyFeatures:
         if isinstance(features, CLCPolicyFeatures):
             return features
@@ -183,6 +201,15 @@ def _distance(a: CLCPolicyFeatures, b: CLCPolicyFeatures) -> float:
 
 def _policy_action(policy: str) -> str:
     return POLICY_ACTIONS.get(policy, "PROTECT_PERIODIC")
+
+
+def _decision_dict(decision: CLCPolicyDecision) -> dict[str, Any]:
+    return {
+        "policy": decision.policy,
+        "action": decision.action,
+        "reason": decision.reason,
+        "confidence": decision.confidence,
+    }
 
 
 def _normalize_features(features: CLCPolicyFeatures | dict[str, Any]) -> CLCPolicyFeatures:
@@ -340,3 +367,70 @@ class CLCLearnedPolicySelector:
             reason=f"learned_knn_k{self.k}_samples{len(self.samples)}",
             confidence=round(confidence, 6),
         )
+
+    def explain(self, features: CLCPolicyFeatures | dict[str, Any], *, top_k: int | None = None) -> dict[str, Any]:
+        f = _normalize_features(features)
+        nearest_count = max(self.k, int(top_k or self.k))
+        if f.label_cost > self.label_cost_ceiling or f.budget_pressure >= self.high_budget_pressure or not self.samples:
+            decision = self.select(f)
+            explanation = {
+                "selector_class": self.__class__.__name__,
+                "features": asdict(f),
+                "decision": _decision_dict(decision),
+                "guardrails": {
+                    "label_cost_ceiling": self.label_cost_ceiling,
+                    "high_budget_pressure": self.high_budget_pressure,
+                },
+                "nearest_samples": [],
+                "votes": {},
+                "total_vote": 0.0,
+                "sample_count": len(self.samples),
+                "explanation": decision.reason,
+            }
+            if not self.samples:
+                explanation["fallback"] = self.fallback.explain(f, top_k=nearest_count)
+            return explanation
+
+        ranked = sorted(
+            (
+                {
+                    "source": sample.source,
+                    "policy": sample.policy,
+                    "weight": sample.weight,
+                    "distance": _distance(f, sample.features),
+                    "features": asdict(sample.features),
+                }
+                for sample in self.samples
+            ),
+            key=lambda row: row["distance"],
+        )
+        votes = {policy: 0.0 for policy in POLICY_ORDER}
+        total_vote = 0.0
+        nearest_samples = []
+        for index, row in enumerate(ranked[:nearest_count]):
+            vote = float(row["weight"]) / (float(row["distance"]) + 0.05)
+            row["vote"] = round(vote, 6)
+            row["vote_counted"] = index < self.k
+            row["distance"] = round(float(row["distance"]), 6)
+            nearest_samples.append(row)
+        for row in nearest_samples:
+            if not row["vote_counted"]:
+                continue
+            votes[str(row["policy"])] += float(row["vote"])
+            total_vote += float(row["vote"])
+        decision = self.select(f)
+        return {
+            "selector_class": self.__class__.__name__,
+            "features": asdict(f),
+            "decision": _decision_dict(decision),
+            "guardrails": {
+                "label_cost_ceiling": self.label_cost_ceiling,
+                "high_budget_pressure": self.high_budget_pressure,
+            },
+            "nearest_samples": nearest_samples,
+            "votes": {policy: round(vote, 6) for policy, vote in votes.items()},
+            "total_vote": round(total_vote, 6),
+            "sample_count": len(self.samples),
+            "k": self.k,
+            "explanation": f"nearest_neighbor_vote:k={self.k},top_k={nearest_count}",
+        }
