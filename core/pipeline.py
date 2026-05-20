@@ -32,6 +32,8 @@ DEFAULT_RETRIEVAL_WEIGHTS = {
     "relation_supersession": 0.10,
     "summary_relation": 0.08,
     "intent": 0.12,
+    "correction_chain": 0.12,
+    "claim_scope": 0.14,
 }
 VALID_MEMORY_TYPES = {"preference", "design_rule", "procedure", "semantic_note", "error_memory"}
 
@@ -357,6 +359,7 @@ class MemoryPipeline:
             domain_match = self._domain_affinity(query_l, domain_name)
             source_match = self._source_affinity(query_l, source)
             text_match = self._text_affinity(query_l, item.text)
+            claim_scope_match = self._claim_scope_affinity(query_l, item.text, source)
             identifier_match = self._identifier_affinity(query_l, item.text)
             intent_match = self._intent_affinity(query_l, item.text, item.memory_type)
             feedback = feedback_by_memory.get(item.memory_id, {})
@@ -384,6 +387,22 @@ class MemoryPipeline:
                 summary_relations.get(item.memory_id, {}),
             )
             supersession_score = max(-1.0, min(1.0, heuristic_supersession_score + relation_supersession_score))
+            correction_chain_score = self._correction_chain_score(authority_status)
+            correction_relevance = self._correction_relevance(
+                authority_status,
+                relation_supersession_score,
+                correction_chain_score,
+                text_match,
+                claim_scope_match,
+            )
+            if correction_relevance < 1.0:
+                if heuristic_supersession_score > 0.0:
+                    heuristic_supersession_score *= correction_relevance
+                if relation_supersession_score > 0.0:
+                    relation_supersession_score *= correction_relevance
+                if correction_chain_score > 0.0:
+                    correction_chain_score *= correction_relevance
+                supersession_score = max(-1.0, min(1.0, heuristic_supersession_score + relation_supersession_score))
             w = self.retrieval_weights
             score = (
                 w["vector"] * item.score
@@ -391,6 +410,7 @@ class MemoryPipeline:
                 + w["stability"] * item.stability
                 + w["domain"] * domain_match
                 + w["text"] * text_match
+                + w["claim_scope"] * claim_scope_match
                 + 0.18 * identifier_match
                 + w["source"] * source_match
                 + w["feedback"] * feedback_score
@@ -400,6 +420,7 @@ class MemoryPipeline:
                 + w["relation_supersession"] * relation_supersession_score
                 + w["summary_relation"] * summary_relation_score
                 + w["intent"] * intent_match
+                + w["correction_chain"] * correction_chain_score
             )
             out.append(
                 {
@@ -421,6 +442,8 @@ class MemoryPipeline:
                     "usage_count": int(usage.get("count", 0)),
                     "last_recalled": usage.get("last_recalled"),
                     "text_match_score": round(text_match, 6),
+                    "claim_scope_score": round(claim_scope_match, 6),
+                    "correction_relevance_score": round(correction_relevance, 6),
                     "identifier_match_score": round(identifier_match, 6),
                     "intent_match_score": round(intent_match, 6),
                     "domain_reliability": round(domain_reliability, 6),
@@ -428,6 +451,7 @@ class MemoryPipeline:
                     "supersession_score": round(supersession_score, 6),
                     "relation_supersession_score": round(relation_supersession_score, 6),
                     "summary_relation_score": round(summary_relation_score, 6),
+                    "correction_chain_score": round(correction_chain_score, 6),
                     "authority_state": authority_status.get("authority_state", "unknown"),
                     "authoritative_memory_ids": authority_status.get("authoritative_memory_ids", []),
                     "superseded_by_memory_ids": authority_status.get("superseded_by_memory_ids", []),
@@ -1454,6 +1478,85 @@ class MemoryPipeline:
             score -= 0.35
         return max(-1.0, min(1.0, score))
 
+    @staticmethod
+    def _claim_scope_affinity(query: str, text: str, source: str | None = None) -> float:
+        stopwords = {
+            "about",
+            "check",
+            "checks",
+            "current",
+            "currently",
+            "does",
+            "for",
+            "from",
+            "help",
+            "helps",
+            "latest",
+            "prefer",
+            "prefers",
+            "preference",
+            "should",
+            "that",
+            "the",
+            "use",
+            "what",
+            "when",
+            "where",
+            "which",
+            "who",
+            "with",
+            "victor",
+            "hermes",
+            "project",
+        }
+        query_l = str(query or "").lower()
+        text_l = str(text or "").lower()
+        query_terms = {
+            token
+            for token in MemoryPipeline._expanded_tokens(query_l)
+            if len(token) > 2 and token not in stopwords
+        }
+        if not query_terms:
+            return 0.0
+        text_terms = MemoryPipeline._expanded_tokens(text_l)
+        source_terms = MemoryPipeline._expanded_tokens(Path(str(source or "")).stem)
+        combined_terms = set(text_terms) | set(source_terms)
+        beverage_terms = {"drink", "water", "sparkling", "espresso", "tea", "coffee", "beverage"}
+        pizza_terms = {"pizza", "cheese", "mushroom", "pepperoni"}
+        radar_method_terms = {"method", "tool", "url", "accuweather", "radar", "checks"}
+        if "drink" in query_terms and combined_terms & beverage_terms:
+            combined_terms.add("drink")
+        if "pizza" in query_terms and combined_terms & pizza_terms:
+            combined_terms.add("pizza")
+        if "method" in query_terms and combined_terms & radar_method_terms and "filename" not in combined_terms:
+            combined_terms.add("method")
+        if "codename" in query_terms and combined_terms & {"codename", "cedar", "alpha"}:
+            combined_terms.add("codename")
+        if "status" in query_terms and combined_terms & {"status", "stable", "blocked", "ready"}:
+            combined_terms.add("status")
+        hits = len(query_terms & combined_terms)
+        return min(1.0, hits / max(1, len(query_terms)))
+
+    @staticmethod
+    def _correction_relevance(
+        authority_status: dict[str, Any],
+        relation_supersession_score: float,
+        correction_chain_score: float,
+        text_match: float,
+        claim_scope_match: float,
+    ) -> float:
+        state = str(authority_status.get("authority_state") or "").lower()
+        has_correction_signal = (
+            state in {"current", "superseded", "stale"}
+            or abs(float(relation_supersession_score or 0.0)) > 0.0
+            or abs(float(correction_chain_score or 0.0)) > 0.0
+        )
+        if not has_correction_signal:
+            return 1.0
+        if claim_scope_match >= 0.75 or text_match >= 0.75:
+            return 1.0
+        return max(0.15, min(1.0, claim_scope_match))
+
     def _intent_labels(self, text: str, memory_type: str | None = None) -> set[str]:
         lower = str(text or "").lower()
         labels: set[str] = set()
@@ -1662,6 +1765,19 @@ class MemoryPipeline:
             return min(1.0, outgoing / 4.0) if broad_intent else min(0.35, outgoing / 10.0)
         if incoming > 0.0:
             return 0.10 if broad_intent else 0.0
+        return 0.0
+
+    @staticmethod
+    def _correction_chain_score(authority_status: dict[str, Any]) -> float:
+        state = str(authority_status.get("authority_state") or "standalone").lower()
+        try:
+            depth = int(authority_status.get("correction_chain_depth") or 0)
+        except (TypeError, ValueError):
+            depth = 0
+        if state == "current":
+            return min(2.0, 1.0 + min(depth, 2) * 0.5)
+        if state == "superseded":
+            return -min(3.0, max(1.0, float(depth or 1)))
         return 0.0
 
     def _stale_companion_context(

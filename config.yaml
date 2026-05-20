@@ -55,6 +55,8 @@ retrieval_weights:
   supersession: 0.14
   relation_supersession: 0.16
   summary_relation: 0.08
+  correction_chain: 0.12
+  claim_scope: 0.14
 
 selector:
   mode: learned

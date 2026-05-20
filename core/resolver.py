@@ -106,6 +106,15 @@ def choose_preferred_evidence(
     top_score = max(float(item.get("score") or 0.0) for item in results)
     if summary and (asks_for_multiple(query) or asks_for_summary_mechanism(query)):
         return summary + historical + current
+    if historical and current:
+        historical_anchor = max(historical, key=lambda item: evidence_preference_score(query, item))
+        current_anchor = max(current, key=lambda item: evidence_preference_score(query, item))
+        historical_scope = float(historical_anchor.get("claim_scope_score") or 0.0)
+        current_scope = float(current_anchor.get("claim_scope_score") or 0.0)
+        historical_score = float(historical_anchor.get("score") or 0.0)
+        current_score = float(current_anchor.get("score") or 0.0)
+        if historical_scope >= 0.75 and historical_scope > current_scope and historical_score >= current_score - 0.04:
+            return sorted(historical, key=lambda item: evidence_preference_score(query, item), reverse=True)
     if current and stale:
         stale_ids = {str(item.get("memory_id") or "") for item in stale if item.get("memory_id")}
         correcting_current = [
@@ -114,6 +123,17 @@ def choose_preferred_evidence(
             if stale_ids & {str(memory_id) for memory_id in item.get("supersedes_memory_ids") or []}
         ]
         if correcting_current:
+            best_correcting = max(correcting_current, key=lambda item: evidence_preference_score(query, item))
+            best_current = max(current, key=lambda item: evidence_preference_score(query, item))
+            best_current_scope = float(best_current.get("claim_scope_score") or 0.0)
+            best_correcting_scope = float(best_correcting.get("claim_scope_score") or 0.0)
+            if (
+                best_current not in correcting_current
+                and best_current_scope >= 0.75
+                and best_current_scope > best_correcting_scope
+                and float(best_current.get("score") or 0.0) >= float(best_correcting.get("score") or 0.0) - 0.04
+            ):
+                return sorted(current, key=lambda item: evidence_preference_score(query, item), reverse=True)
             if allows_stale_definition_context(query):
                 return sorted(correcting_current + stale, key=lambda item: evidence_preference_score(query, item), reverse=True)
             return sorted(correcting_current, key=lambda item: evidence_preference_score(query, item), reverse=True)
@@ -281,11 +301,12 @@ def evidence_preference_score(query: str, item: dict[str, Any]) -> float:
     clean_text = clean_answer_text(text)
     score = float(item.get("score") or 0.0)
     score += 0.20 * float(item.get("text_match_score") or 0.0)
+    score += 0.24 * float(item.get("claim_scope_score") or 0.0)
     score += 0.12 * float(item.get("intent_match_score") or 0.0)
     score += 0.05 * len(normalized_terms(query) & normalized_terms(clean_text))
     authority_state = str(item.get("authority_state") or "").strip().lower()
     if authority_state == "current":
-        score += 0.35
+        score += 0.35 * max(0.30, float(item.get("correction_relevance_score") or 1.0))
     elif authority_state == "superseded" or item.get("superseded_by_memory_ids"):
         score -= 0.55
     lower = text.lower()
@@ -851,6 +872,8 @@ def compact_evidence(item: dict[str, Any]) -> dict[str, Any]:
         "clc_state": item.get("clc_state"),
         "csd_score": item.get("csd_score", 0.0),
         "identifier_match_score": item.get("identifier_match_score"),
+        "claim_scope_score": item.get("claim_scope_score"),
+        "correction_relevance_score": item.get("correction_relevance_score"),
         "session_evidence_score": item.get("session_evidence_score"),
         "session_evidence_boost": item.get("session_evidence_boost"),
         "session_exact_evidence": bool(item.get("session_exact_evidence", False)),

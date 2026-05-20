@@ -89,6 +89,7 @@ def selector_features_from_retrieval_context(
     domain_reliability = [float(row.get("domain_reliability") or 0.0) for row in rows]
     retrieval_scores = [float(row.get("score") or row.get("cosine") or 0.0) for row in rows]
     text_match_scores = [float(row.get("text_match_score") or 0.0) for row in rows]
+    claim_scope_scores = [float(row.get("claim_scope_score") or row.get("text_match_score") or 0.0) for row in rows]
 
     stale_rows = 0
     current_rows = 0
@@ -98,11 +99,25 @@ def selector_features_from_retrieval_context(
     stale_text_matches: list[float] = []
     current_text_matches: list[float] = []
     standalone_text_matches: list[float] = []
+    topical_anchor_text_matches: list[float] = []
+    correction_current_text_matches: list[float] = []
+    stale_claim_matches: list[float] = []
+    current_claim_matches: list[float] = []
+    standalone_claim_matches: list[float] = []
+    topical_anchor_claim_matches: list[float] = []
+    correction_current_claim_matches: list[float] = []
     top_stale_rank = 0
     top_current_rank = 0
-    for row, supersession, relation, text_match in zip(rows, supersession_scores, relation_scores, text_match_scores):
+    for row, supersession, relation, text_match, claim_match in zip(
+        rows,
+        supersession_scores,
+        relation_scores,
+        text_match_scores,
+        claim_scope_scores,
+    ):
         authority_state = str(row.get("authority_state") or "").lower()
         score = float(row.get("score") or row.get("cosine") or 0.0)
+        explicit_current = authority_state in {"authoritative", "current"} or bool(row.get("supersedes_memory_ids"))
         is_stale = (
             authority_state in {"superseded", "stale"}
             or row.get("superseded_by_memory_ids")
@@ -110,26 +125,34 @@ def selector_features_from_retrieval_context(
             or relation < -0.05
         )
         is_current = (
-            authority_state in {"authoritative", "current"}
-            or row.get("supersedes_memory_ids")
+            explicit_current
             or supersession > 0.05
             or relation > 0.05
         )
+        if authority_state in {"standalone", "unknown", ""} and not row.get("superseded_by_memory_ids"):
+            topical_anchor_text_matches.append(text_match)
+            topical_anchor_claim_matches.append(claim_match)
+        if explicit_current:
+            correction_current_text_matches.append(text_match)
+            correction_current_claim_matches.append(claim_match)
         if is_stale:
             stale_rows += 1
             stale_scores.append(score)
             stale_text_matches.append(text_match)
+            stale_claim_matches.append(claim_match)
             if top_stale_rank == 0:
                 top_stale_rank = len(stale_scores) + len(current_scores) + len(standalone_scores)
         if is_current:
             current_rows += 1
             current_scores.append(score)
             current_text_matches.append(text_match)
+            current_claim_matches.append(claim_match)
             if top_current_rank == 0:
                 top_current_rank = len(stale_scores) + len(current_scores) + len(standalone_scores)
         if not is_stale and not is_current:
             standalone_scores.append(score)
             standalone_text_matches.append(text_match)
+            standalone_claim_matches.append(claim_match)
 
     stale_ratio = stale_rows / total
     current_ratio = current_rows / total
@@ -151,6 +174,13 @@ def selector_features_from_retrieval_context(
     stale_text_match_max = max(stale_text_matches or [0.0])
     current_text_match_max = max(current_text_matches or [0.0])
     standalone_text_match_max = max(standalone_text_matches or [0.0])
+    topical_anchor_text_match_max = max(topical_anchor_text_matches or [0.0])
+    correction_current_text_match_max = max(correction_current_text_matches or [0.0])
+    stale_claim_match_max = max(stale_claim_matches or [0.0])
+    current_claim_match_max = max(current_claim_matches or [0.0])
+    standalone_claim_match_max = max(standalone_claim_matches or [0.0])
+    topical_anchor_claim_match_max = max(topical_anchor_claim_matches or [0.0])
+    correction_current_claim_match_max = max(correction_current_claim_matches or [0.0])
     irrelevant_stale_cluster = bool(
         stale_rows >= 1
         and top_stale_rank >= 3
@@ -162,9 +192,19 @@ def selector_features_from_retrieval_context(
                 and stale_strength <= 0.25
             )
             or (
-                standalone_text_match_max >= 0.80
+                standalone_text_match_max >= 0.60
                 and stale_text_match_max <= 0.35
                 and current_text_match_max <= 0.35
+            )
+            or (
+                topical_anchor_text_match_max >= 0.75
+                and stale_text_match_max <= 0.70
+                and correction_current_text_match_max <= 0.70
+            )
+            or (
+                topical_anchor_claim_match_max >= 0.75
+                and stale_claim_match_max <= 0.70
+                and correction_current_claim_match_max <= 0.70
             )
         )
     )
@@ -244,6 +284,13 @@ def selector_features_from_retrieval_context(
         "stale_text_match_max": round(stale_text_match_max, 6),
         "current_text_match_max": round(current_text_match_max, 6),
         "standalone_text_match_max": round(standalone_text_match_max, 6),
+        "topical_anchor_text_match_max": round(topical_anchor_text_match_max, 6),
+        "correction_current_text_match_max": round(correction_current_text_match_max, 6),
+        "stale_claim_match_max": round(stale_claim_match_max, 6),
+        "current_claim_match_max": round(current_claim_match_max, 6),
+        "standalone_claim_match_max": round(standalone_claim_match_max, 6),
+        "topical_anchor_claim_match_max": round(topical_anchor_claim_match_max, 6),
+        "correction_current_claim_match_max": round(correction_current_claim_match_max, 6),
         "irrelevant_stale_cluster": irrelevant_stale_cluster,
         "memory_bad_rate": round(memory_bad_rate, 6),
         "probe_drop": round(probe_drop, 6),
@@ -350,7 +397,7 @@ def apply_retrieval_policy_guard(
             reason=f"retrieval_guard_low_relevance_stale_context:{decision.reason}",
             confidence=max(0.78, min(0.95, decision.confidence)),
         )
-    if f.hard and stale_ratio >= 0.5 and stale_current_conflict >= 0.8:
+    if f.hard and stale_current_conflict >= 0.8 and not bool(diagnostics.get("irrelevant_stale_cluster")):
         return CLCPolicyDecision(
             policy=POLICY_LONG_SEVERE,
             action=POLICY_ACTIONS[POLICY_LONG_SEVERE],
