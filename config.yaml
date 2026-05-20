@@ -66,6 +66,12 @@ selector:
   label_cost_ceiling: 0.00025
   high_budget_pressure: 0.9
 
+outcome_log:
+  enabled: true
+  path: logs/memory_outcomes.jsonl
+  max_text_chars: 600
+  max_list_items: 20
+
 symbolic:
   domain_aliases: clc=CLC,csd=CSD,g-cl=G-CL,gcl=G-CL,geometry controller=OpenClaw,lcm geometry=OpenClaw,openclaw=OpenClaw,clgk=CLGK,robot=robotics,webots=robotics,lora=model_training,memory=agent_memory
   preference_keywords: prefer,preference,likes,loves,hates,dislikes,values,wants

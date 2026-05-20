@@ -654,6 +654,8 @@ py chat.py --agent-id planner --namespace agent:planner --source planner_trainin
 /feedback wrong 2
 ```
 
+When using the HTTP API directly, pass the `/ask` response `operation_id` back to `/feedback` as `operation_id` or `linked_operation_id`. This links the feedback row to the exact answer/retrieval outcome that produced it.
+
 7. Run maintenance.
 
 ```text
@@ -684,6 +686,8 @@ Ask results include:
 - `confidence`: answer confidence
 - `conflict`: whether evidence conflicts
 - `usage_events`: retrieval-use events logged for the evidence used by the answer
+- `operation_id`: append-only outcome-log id that later feedback can reference
+- `outcome_log_logged`: whether the outcome row was written to `logs/memory_outcomes.jsonl`
 - `session_context`: recent turn or active-topic context used for a session follow-up
 - `live_conflicts`: query-time conflict details found inside retrieved evidence
 - `evidence`: primary supporting memories
@@ -820,6 +824,7 @@ py eval\usage_confidence_eval.py
 py eval\api_hardening_regression.py
 py eval\llm_learning_smoke.py
 py eval\agent_plan_regression.py
+py eval\outcome_logging_regression.py
 py eval\migration_namespace_regression.py
 py eval\authority_chain_regression.py
 py eval\authority_endpoint_smoke.py

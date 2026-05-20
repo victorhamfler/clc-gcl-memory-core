@@ -14,6 +14,7 @@ from core.config import load_config, resolve_project_path
 from core.consolidation import consolidation_plan, create_consolidation_summaries
 from core.learning import learn_from_document, learn_from_text
 from core.maintenance import improvement_plan, memory_review, record_memory_improvement, weak_memories
+from core.outcome_log import OutcomeLogger
 from core.runtime import create_pipeline, pipeline_config_view, pipeline_stats
 from core.selector_runtime import (
     apply_retrieval_explanation_guard,
@@ -57,6 +58,7 @@ class MemoryApi:
         self.root = root
         self.root_config = load_config(root)
         self.pipeline = create_pipeline(root, db_path=db_path)
+        self.outcome_logger = OutcomeLogger(root, self.root_config)
 
     def close(self) -> None:
         self.pipeline.close()
@@ -73,6 +75,64 @@ class MemoryApi:
 
     def config(self) -> dict[str, Any]:
         return {**pipeline_config_view(self.pipeline), "selector": selector_config_view(self.root, self.root_config)}
+
+    def _record_outcome(
+        self,
+        event_type: str,
+        payload: dict[str, Any],
+        *,
+        linked_operation_id: str | None = None,
+    ) -> dict[str, Any]:
+        return self.outcome_logger.record(event_type, payload, linked_operation_id=linked_operation_id)
+
+    @staticmethod
+    def _evidence_brief(rows: list[dict[str, Any]] | None, limit: int = 10) -> list[dict[str, Any]]:
+        out = []
+        for row in list(rows or [])[:limit]:
+            out.append(
+                {
+                    "memory_id": row.get("memory_id"),
+                    "rank": row.get("rank"),
+                    "namespace": row.get("namespace"),
+                    "source": row.get("source"),
+                    "domain_name": row.get("domain_name"),
+                    "memory_type": row.get("memory_type"),
+                    "score": row.get("score"),
+                    "cosine": row.get("cosine"),
+                    "authority_state": row.get("authority_state") or row.get("memory_state"),
+                    "claim_scope_score": row.get("claim_scope_score"),
+                    "correction_relevance_score": row.get("correction_relevance_score"),
+                    "correction_chain_score": row.get("correction_chain_score"),
+                    "supersession_score": row.get("supersession_score"),
+                    "relation_supersession_score": row.get("relation_supersession_score"),
+                    "text": row.get("text") or row.get("text_preview"),
+                }
+            )
+        return out
+
+    def _selector_snapshot_from_rows(self, rows: list[dict[str, Any]], payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            features, diagnostics = selector_features_from_retrieval_context(
+                rows,
+                condition_name=str(payload.get("condition_name") or "hard_budget144"),
+                label_cost=float(payload.get("label_cost", 0.0002) or 0.0002),
+                budget_pressure=float(payload.get("budget_pressure", 0.2) or 0.2),
+            )
+            selector = build_policy_selector(self.root, self.root_config)
+            decision = selector.select(features)
+            decision = apply_retrieval_policy_guard(decision, features, diagnostics)
+            return {
+                "ok": True,
+                "decision": {
+                    "policy": decision.policy,
+                    "action": decision.action,
+                    "reason": decision.reason,
+                    "confidence": decision.confidence,
+                },
+                "diagnostics": diagnostics,
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
     def _selector_features_and_context(self, payload: dict[str, Any]) -> tuple[Any, dict[str, Any] | None]:
         retrieval_rows = payload.get("retrieval_context")
@@ -127,6 +187,26 @@ class MemoryApi:
         }
         if context:
             response["selector_context"] = context
+        log_status = self._record_outcome(
+            "selector_explain",
+            {
+                "request": {
+                    "query": payload.get("query"),
+                    "namespace": payload.get("namespace"),
+                    "include_global": payload.get("include_global", True),
+                    "condition_name": payload.get("condition_name"),
+                    "top_k": payload.get("top_k"),
+                },
+                "selector": response.get("selector"),
+                "explanation": explanation,
+                "selector_context": {
+                    "diagnostics": context.get("diagnostics") if context else None,
+                    "retrieval_context": self._evidence_brief(context.get("retrieval_context") if context else [], limit=10),
+                },
+            },
+        )
+        response["operation_id"] = log_status["operation_id"]
+        response["outcome_log_logged"] = bool(log_status["logged"])
         return response
 
     def memory_usage(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -497,11 +577,47 @@ class MemoryApi:
             namespace=namespace,
             include_global=include_global,
         )
-        return {
+        namespace_warning = self._namespace_warning(asked.get("evidence") or [], namespace=namespace, include_global=include_global)
+        response = {
             "ok": True,
             **asked,
-            "namespace_warning": self._namespace_warning(asked.get("evidence") or [], namespace=namespace, include_global=include_global),
+            "namespace_warning": namespace_warning,
         }
+        selector_snapshot = self._selector_snapshot_from_rows(asked.get("raw_results") or [], payload)
+        log_status = self._record_outcome(
+            "ask",
+            {
+                "request": {
+                    "query": query,
+                    "top_k": top_k,
+                    "namespace": namespace,
+                    "include_global": include_global,
+                    "agent_id": payload.get("agent_id") or "default",
+                    "session_id": payload.get("session_id"),
+                    "store_session": payload.get("store_session", True),
+                    "condition_name": payload.get("condition_name") or "hard_budget144",
+                },
+                "response": {
+                    "answer": asked.get("answer"),
+                    "confidence": asked.get("confidence"),
+                    "conflict": asked.get("conflict"),
+                    "session_id": asked.get("session_id"),
+                    "agent_id": asked.get("agent_id"),
+                    "namespace": asked.get("namespace"),
+                    "namespace_warning": namespace_warning,
+                    "evidence": self._evidence_brief(asked.get("evidence") or [], limit=10),
+                    "raw_results": self._evidence_brief(asked.get("raw_results") or [], limit=10),
+                    "source_context": self._evidence_brief(asked.get("source_context") or [], limit=10),
+                    "stale_context": self._evidence_brief(asked.get("stale_context") or [], limit=10),
+                },
+                "selector_snapshot": selector_snapshot,
+            },
+        )
+        response["operation_id"] = log_status["operation_id"]
+        response["outcome_log_logged"] = bool(log_status["logged"])
+        if bool(payload.get("include_selector_snapshot")):
+            response["selector_snapshot"] = selector_snapshot
+        return response
 
     @staticmethod
     def _classification_filters(payload: dict[str, Any], filters: dict[str, Any]) -> dict[str, Any]:
@@ -527,18 +643,45 @@ class MemoryApi:
         metadata = payload.get("metadata")
         if metadata is not None and not isinstance(metadata, dict):
             raise ValueError("'metadata' must be a JSON object when provided")
+        linked_operation_id = str(
+            payload.get("linked_operation_id") or payload.get("operation_id") or payload.get("outcome_id") or ""
+        ).strip() or None
+        feedback_metadata = dict(metadata or {})
+        if linked_operation_id:
+            feedback_metadata["linked_operation_id"] = linked_operation_id
+        feedback = self.pipeline.db.add_retrieval_feedback(
+            memory_id=memory_id,
+            label=label,
+            query=str(payload.get("query") or "").strip() or None,
+            rating=float(rating),
+            rank=payload.get("rank"),
+            retrieval_score=payload.get("retrieval_score"),
+            notes=str(payload.get("notes") or "").strip() or None,
+            metadata=feedback_metadata,
+        )
+        log_status = self._record_outcome(
+            "feedback",
+            {
+                "request": {
+                    "memory_id": memory_id,
+                    "label": label,
+                    "rating": float(rating),
+                    "query": payload.get("query"),
+                    "rank": payload.get("rank"),
+                    "retrieval_score": payload.get("retrieval_score"),
+                    "notes": payload.get("notes"),
+                    "linked_operation_id": linked_operation_id,
+                },
+                "feedback": feedback,
+            },
+            linked_operation_id=linked_operation_id,
+        )
         return {
             "ok": True,
-            "feedback": self.pipeline.db.add_retrieval_feedback(
-                memory_id=memory_id,
-                label=label,
-                query=str(payload.get("query") or "").strip() or None,
-                rating=float(rating),
-                rank=payload.get("rank"),
-                retrieval_score=payload.get("retrieval_score"),
-                notes=str(payload.get("notes") or "").strip() or None,
-                metadata=metadata,
-            ),
+            "operation_id": log_status["operation_id"],
+            "linked_operation_id": linked_operation_id,
+            "outcome_log_logged": bool(log_status["logged"]),
+            "feedback": feedback,
         }
 
     def feedback_list(self, payload: dict[str, Any]) -> dict[str, Any]:

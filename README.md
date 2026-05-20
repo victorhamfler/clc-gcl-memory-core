@@ -54,6 +54,7 @@ py eval/selector_live_retrieval_pipeline_eval.py
 py eval/selector_retrieval_calibration_eval.py --embedding-backend hash --top-k 8
 py eval/selector_retrieval_guard_pressure_eval.py --embedding-backend hash --top-k 10
 py eval/selector_retrieval_guard_randomized_eval.py --embedding-backend hash --cases 32 --seed 20260519 --top-k 10
+py eval/outcome_logging_regression.py
 py eval/mechanism_component_eval.py
 py eval/memory_maintenance_eval.py
 py eval/maintenance_impact_eval.py
@@ -169,6 +170,8 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8765/config"
 Agent-controlled LLM learning is available through `POST /learn`, but it is disabled by default in `config.yaml`. Agents should call it only when a selected text snippet contains durable facts worth extracting. The implementation supports `dry_run`, `extract_only`, and `extract_and_store`; `teach`, `store`, and `store_facts` are accepted as aliases for `extract_and_store`. Dry-run and extract-only responses include a warning that no facts were persisted. The learner routes extracted facts to `teach`, `correct`, or `skip` after similarity checks, and callers can pass `memory_type` or `domain` hints when they need to override LLM/symbolic classification. `POST /learn/document` chunks longer content on paragraph and sentence boundaries where possible, then runs the same learning flow per chunk. Real document learning uses `llm.chunk_delay` between chunks and `llm.max_retries`/`llm.retry_backoff` for transient 429/5xx provider failures. `llm.fallback_models` can list comma-separated backup model names, and `/learn` responses include `llm_model`/`llm_models_by_chunk` so agents can see which model was used. Keep `llm.enabled: false` until an OpenAI-compatible provider and API key environment variable are configured. The default provider settings use `glm-5` at `https://opencode.ai/zen/go/v1`; set `OPENCODE_GO_API_KEY` before enabling real calls.
 
 `POST /agent_plan` lets the configured LLM propose memory API actions from a natural-language instruction. It is deliberately plan-only: it returns endpoints, payloads, reasons, warnings, and `requires_confirmation=true`, but it does not execute the actions. Use this before any future autonomous execution mode.
+
+`POST /ask`, `POST /selector_explain`, and `POST /feedback` now return an `operation_id` and append compact outcome rows to `logs/memory_outcomes.jsonl` by default. Feedback can link to an earlier ask or selector operation by passing `operation_id`, `linked_operation_id`, or `outcome_id`. The schema is documented in [docs/SELECTOR_OUTCOME_LOG_HANDOVER.md](docs/SELECTOR_OUTCOME_LOG_HANDOVER.md).
 
 Continue a session:
 

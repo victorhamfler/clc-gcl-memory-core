@@ -571,6 +571,7 @@ class MemoryDB:
             "memory_id": memory_id,
             "label": normalized_label,
             "rating": rating,
+            "metadata": metadata or {},
             "created_at": created_at,
         }
 
