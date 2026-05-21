@@ -57,6 +57,7 @@ retrieval_weights:
   summary_relation: 0.08
   correction_chain: 0.12
   claim_scope: 0.14
+  answer_type: 0.16
 
 selector:
   mode: learned
@@ -65,6 +66,75 @@ selector:
   outcome_log: ../experiments/hermes_clc_selector_outcome_labels.jsonl
   label_cost_ceiling: 0.00025
   high_budget_pressure: 0.9
+
+claim_scope:
+  stopwords: about,check,checks,current,currently,does,for,from,help,helps,latest,prefer,prefers,preference,remember,should,that,the,use,what,when,where,which,who,with,victor,hermes,project
+  slot_aliases:
+    drink: drink,water,sparkling,espresso,tea,coffee,beverage
+    pizza: pizza,cheese,mushroom,pepperoni
+    method: method,tool,url,accuweather,radar,checks
+    codename: codename,cedar,alpha
+    status: status,stable,blocked,ready
+    backend_port: backend,port,8765
+    github_upload: github,upload,uploads,confirmation,explicitly,requested,requests
+    calendar_change: calendar,schedule,change,changing,meeting,events,manual,approval
+    gcl_curvature: gcl,g-cl,domain,geometry,anchor,drift,curvature,stability
+    csd: csd,novelty,contradiction,semantic,density,domain shift,detect
+    deadline: deadline,due,friday,deadline_report
+  excluded_terms:
+    method: filename
+    backend_port: host,remain,127,local,testing
+    github_upload: calendar,schedule,meeting,broad,note,documented
+    calendar_change: github,upload,uploads,broad,note,documented
+    gcl_curvature: csd,backend,port,filename,report
+    csd: gcl,g-cl,backend,port,filename,report
+    deadline: owner,owns,mina,filename,file
+
+answer_type:
+  rules:
+    owner_relation:
+      query_terms: owner,owners,owns,assignee,assigned,assignment,responsible,accountable,responsibility
+      positive_terms: owner,owners,owns,owned,assignee,assigned,assignment,responsible,accountable,responsibility
+      negative_terms: deadline,due,friday,monday,tuesday,wednesday,thursday,saturday,sunday,today,tomorrow
+      positive_score: 1.0
+      negative_score: -1.0
+    deadline:
+      query_terms: deadline,due
+      positive_terms: due,friday,monday,tuesday,wednesday,thursday,saturday,sunday,today,tomorrow
+      negative_terms: owner,owners,owns,owned,assignee,assigned,assignment,responsible,accountable,responsibility
+      negative_requires_absent: due,friday,monday,tuesday,wednesday,thursday,saturday,sunday,today,tomorrow
+      positive_score: 1.0
+      negative_score: -1.0
+    method_choice:
+      query_terms: method,tool
+      positive_terms: method,tool,url,choice,required,accuweather
+      negative_terms: filename,file,report
+      negative_requires_absent: method,tool,url,choice,required
+      positive_score: 1.0
+      negative_score: -1.0
+    report_filename:
+      query_terms: filename,file
+      positive_terms: filename,file,report,md
+      positive_requires_any: filename,file,md
+      negative_terms: method,tool,url,choice,required
+      negative_requires_absent: filename,file,report,md
+      positive_score: 1.0
+      negative_score: -1.0
+    github_upload_policy:
+      query_terms: github,upload,uploads,uploading
+      positive_terms: github,upload,uploads,uploading,confirmation,explicitly,requested,requests,conversation
+      positive_requires_any: github,upload,uploads,uploading
+      negative_terms: calendar,schedule,meeting,meetings,event,events,change,changing,filename,file,report
+      negative_requires_absent: confirmation,explicitly,requested,requests,conversation
+      positive_score: 1.0
+      negative_score: -1.0
+    calendar_change_policy:
+      query_terms: calendar,schedule,meeting,meetings,event,events,change,changing
+      positive_terms: calendar,schedule,meeting,meetings,event,events,change,changing,manual
+      positive_requires_any: calendar,schedule,meeting,meetings,event,events,change,changing,manual
+      negative_terms: github,repository,upload,uploads,uploading
+      positive_score: 1.0
+      negative_score: -1.0
 
 outcome_log:
   enabled: true

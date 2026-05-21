@@ -34,6 +34,7 @@ DEFAULT_RETRIEVAL_WEIGHTS = {
     "intent": 0.12,
     "correction_chain": 0.12,
     "claim_scope": 0.14,
+    "answer_type": 0.16,
 }
 VALID_MEMORY_TYPES = {"preference", "design_rule", "procedure", "semantic_note", "error_memory"}
 
@@ -52,6 +53,150 @@ DEFAULT_INTENT_LABELS = {
     ),
     "food_drink": ("drink", "drinks", "coffee", "espresso", "tea", "eat", "eats", "pizza", "food"),
     "preference": ("preference", "prefer", "likes", "loves", "hates", "dislikes", "values", "wants"),
+}
+
+DEFAULT_CLAIM_SCOPE_STOPWORDS = (
+    "about",
+    "check",
+    "checks",
+    "current",
+    "currently",
+    "does",
+    "for",
+    "from",
+    "help",
+    "helps",
+    "latest",
+    "prefer",
+    "prefers",
+    "preference",
+    "remember",
+    "should",
+    "that",
+    "the",
+    "use",
+    "what",
+    "when",
+    "where",
+    "which",
+    "who",
+    "with",
+    "victor",
+    "hermes",
+    "project",
+)
+
+DEFAULT_CLAIM_SCOPE_ALIASES = {
+    "drink": ("drink", "water", "sparkling", "espresso", "tea", "coffee", "beverage"),
+    "pizza": ("pizza", "cheese", "mushroom", "pepperoni"),
+    "method": ("method", "tool", "url", "accuweather", "radar", "checks"),
+    "codename": ("codename", "cedar", "alpha"),
+    "status": ("status", "stable", "blocked", "ready"),
+    "backend_port": ("backend", "port", "8765"),
+    "github_upload": ("github", "upload", "uploads", "confirmation", "explicitly", "requested", "requests"),
+    "calendar_change": ("calendar", "schedule", "change", "changing", "meeting", "events", "manual", "approval"),
+    "gcl_curvature": ("gcl", "g-cl", "domain", "geometry", "anchor", "drift", "curvature", "stability"),
+    "csd": ("csd", "novelty", "contradiction", "semantic", "density", "domain shift", "detect"),
+    "deadline": ("deadline", "due", "friday", "deadline_report"),
+}
+
+DEFAULT_CLAIM_SCOPE_EXCLUDED_TERMS = {
+    "method": ("filename",),
+    "backend_port": ("host", "remain", "127", "local", "testing"),
+    "github_upload": ("calendar", "schedule", "meeting"),
+    "calendar_change": ("github", "upload", "uploads"),
+    "gcl_curvature": ("csd", "backend", "port", "filename", "report"),
+    "csd": ("gcl", "g-cl", "backend", "port", "filename", "report"),
+    "deadline": ("owner", "owns", "mina", "filename", "file"),
+}
+
+DEFAULT_ANSWER_TYPE_RULES = {
+    "owner_relation": {
+        "query_terms": (
+            "owner",
+            "owners",
+            "owns",
+            "assignee",
+            "assigned",
+            "assignment",
+            "responsible",
+            "accountable",
+            "responsibility",
+        ),
+        "positive_terms": (
+            "owner",
+            "owners",
+            "owns",
+            "owned",
+            "assignee",
+            "assigned",
+            "assignment",
+            "responsible",
+            "accountable",
+            "responsibility",
+        ),
+        "negative_terms": (
+            "deadline",
+            "due",
+            "friday",
+            "monday",
+            "tuesday",
+            "wednesday",
+            "thursday",
+            "saturday",
+            "sunday",
+            "today",
+            "tomorrow",
+        ),
+        "query_requires_any": (),
+        "positive_requires_any": (),
+        "negative_requires_absent": (),
+        "positive_score": 1.0,
+        "negative_score": -1.0,
+    },
+    "deadline": {
+        "query_terms": ("deadline", "due"),
+        "positive_terms": (
+            "due",
+            "friday",
+            "monday",
+            "tuesday",
+            "wednesday",
+            "thursday",
+            "saturday",
+            "sunday",
+            "today",
+            "tomorrow",
+        ),
+        "negative_terms": (
+            "owner",
+            "owners",
+            "owns",
+            "owned",
+            "assignee",
+            "assigned",
+            "assignment",
+            "responsible",
+            "accountable",
+            "responsibility",
+        ),
+        "query_requires_any": (),
+        "positive_requires_any": (),
+        "negative_requires_absent": (
+            "due",
+            "friday",
+            "monday",
+            "tuesday",
+            "wednesday",
+            "thursday",
+            "saturday",
+            "sunday",
+            "today",
+            "tomorrow",
+        ),
+        "positive_score": 1.0,
+        "negative_score": -1.0,
+    },
 }
 
 
@@ -80,6 +225,102 @@ def _parse_intent_labels(value: Any) -> dict[str, tuple[str, ...]]:
     return out
 
 
+def _parse_term_sequence(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, (list, tuple, set)):
+        return tuple(str(term).strip().lower() for term in value if str(term).strip())
+    raw = str(value or "")
+    for separator in ("|", ";"):
+        raw = raw.replace(separator, ",")
+    return tuple(term.strip().lower() for term in raw.split(",") if term.strip())
+
+
+def _parse_term_map(value: Any) -> dict[str, tuple[str, ...]]:
+    if isinstance(value, dict):
+        return {
+            str(label).strip().lower(): _parse_term_sequence(terms)
+            for label, terms in value.items()
+            if str(label).strip() and _parse_term_sequence(terms)
+        }
+    out: dict[str, tuple[str, ...]] = {}
+    for group in str(value or "").split(";"):
+        if "=" not in group:
+            continue
+        label, raw_terms = group.split("=", 1)
+        terms = _parse_term_sequence(raw_terms.replace("|", ","))
+        if label.strip() and terms:
+            out[label.strip().lower()] = terms
+    return out
+
+
+def _normalize_claim_scope_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
+    cfg = dict(config or {})
+    stopwords = set(DEFAULT_CLAIM_SCOPE_STOPWORDS)
+    stopwords.update(_parse_term_sequence(cfg.get("stopwords")))
+
+    aliases = {key: tuple(values) for key, values in DEFAULT_CLAIM_SCOPE_ALIASES.items()}
+    aliases.update(_parse_term_map(cfg.get("slot_aliases") or cfg.get("aliases")))
+
+    excluded = {key: tuple(values) for key, values in DEFAULT_CLAIM_SCOPE_EXCLUDED_TERMS.items()}
+    excluded.update(_parse_term_map(cfg.get("excluded_terms") or cfg.get("exclusions")))
+
+    return {
+        "stopwords": stopwords,
+        "slot_aliases": aliases,
+        "excluded_terms": excluded,
+    }
+
+
+def _parse_answer_type_rule_map(value: Any) -> dict[str, dict[str, Any]]:
+    if not isinstance(value, dict):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for label, raw_rule in value.items():
+        if not isinstance(raw_rule, dict) or not str(label).strip():
+            continue
+        out[str(label).strip().lower()] = raw_rule
+    return out
+
+
+def _normalize_answer_type_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
+    cfg = dict(config or {})
+    configured_rules = _parse_answer_type_rule_map(cfg.get("rules") or cfg)
+    rules: dict[str, dict[str, Any]] = {}
+    for label, defaults in DEFAULT_ANSWER_TYPE_RULES.items():
+        raw_rule = dict(defaults)
+        raw_rule.update(configured_rules.pop(label, {}))
+        rules[label] = _normalize_answer_type_rule(raw_rule)
+    for label, raw_rule in configured_rules.items():
+        normalized = _normalize_answer_type_rule(raw_rule)
+        if normalized["query_terms"] and (normalized["positive_terms"] or normalized["negative_terms"]):
+            rules[label] = normalized
+    return {"rules": rules}
+
+
+def _normalize_answer_type_rule(raw_rule: dict[str, Any]) -> dict[str, Any]:
+    positive_score = raw_rule.get("positive_score", 1.0)
+    negative_score = raw_rule.get("negative_score", -1.0)
+    try:
+        positive_score = float(positive_score)
+    except (TypeError, ValueError):
+        positive_score = 1.0
+    try:
+        negative_score = float(negative_score)
+    except (TypeError, ValueError):
+        negative_score = -1.0
+    return {
+        "query_terms": _parse_term_sequence(raw_rule.get("query_terms")),
+        "positive_terms": _parse_term_sequence(raw_rule.get("positive_terms")),
+        "negative_terms": _parse_term_sequence(raw_rule.get("negative_terms")),
+        "query_requires_any": _parse_term_sequence(raw_rule.get("query_requires_any")),
+        "positive_requires_any": _parse_term_sequence(raw_rule.get("positive_requires_any")),
+        "negative_requires_absent": _parse_term_sequence(raw_rule.get("negative_requires_absent")),
+        "positive_score": positive_score,
+        "negative_score": negative_score,
+    }
+
+
 class MemoryPipeline:
     def __init__(
         self,
@@ -90,6 +331,8 @@ class MemoryPipeline:
         embedding_config: dict[str, Any] | None = None,
         retrieval_weights: dict[str, Any] | None = None,
         symbolic_config: dict[str, Any] | None = None,
+        claim_scope_config: dict[str, Any] | None = None,
+        answer_type_config: dict[str, Any] | None = None,
         llm_config: dict[str, Any] | None = None,
         clc_thresholds: dict[str, Any] | None = None,
     ):
@@ -98,6 +341,8 @@ class MemoryPipeline:
         self.encoder = build_encoder(embedding_config, default_dim=embedding_dim)
         self.retrieval_weights = self._normalize_retrieval_weights(retrieval_weights)
         self.symbolic_config = dict(symbolic_config or {})
+        self.claim_scope_config = _normalize_claim_scope_config(claim_scope_config)
+        self.answer_type_config = _normalize_answer_type_config(answer_type_config)
         self.llm_config = dict(llm_config or {})
         self.recall_engine = RecallEngine(self.db, top_k=top_k)
         self.csd = CSDLayer(self.db)
@@ -360,6 +605,7 @@ class MemoryPipeline:
             source_match = self._source_affinity(query_l, source)
             text_match = self._text_affinity(query_l, item.text)
             claim_scope_match = self._claim_scope_affinity(query_l, item.text, source)
+            answer_type_match = self._answer_type_affinity(query_l, item.text, source)
             identifier_match = self._identifier_affinity(query_l, item.text)
             intent_match = self._intent_affinity(query_l, item.text, item.memory_type)
             feedback = feedback_by_memory.get(item.memory_id, {})
@@ -421,6 +667,7 @@ class MemoryPipeline:
                 + w["summary_relation"] * summary_relation_score
                 + w["intent"] * intent_match
                 + w["correction_chain"] * correction_chain_score
+                + w["answer_type"] * answer_type_match
             )
             out.append(
                 {
@@ -443,6 +690,7 @@ class MemoryPipeline:
                     "last_recalled": usage.get("last_recalled"),
                     "text_match_score": round(text_match, 6),
                     "claim_scope_score": round(claim_scope_match, 6),
+                    "answer_type_score": round(answer_type_match, 6),
                     "correction_relevance_score": round(correction_relevance, 6),
                     "identifier_match_score": round(identifier_match, 6),
                     "intent_match_score": round(intent_match, 6),
@@ -1478,37 +1726,8 @@ class MemoryPipeline:
             score -= 0.35
         return max(-1.0, min(1.0, score))
 
-    @staticmethod
-    def _claim_scope_affinity(query: str, text: str, source: str | None = None) -> float:
-        stopwords = {
-            "about",
-            "check",
-            "checks",
-            "current",
-            "currently",
-            "does",
-            "for",
-            "from",
-            "help",
-            "helps",
-            "latest",
-            "prefer",
-            "prefers",
-            "preference",
-            "should",
-            "that",
-            "the",
-            "use",
-            "what",
-            "when",
-            "where",
-            "which",
-            "who",
-            "with",
-            "victor",
-            "hermes",
-            "project",
-        }
+    def _claim_scope_affinity(self, query: str, text: str, source: str | None = None) -> float:
+        stopwords = set(self.claim_scope_config["stopwords"])
         query_l = str(query or "").lower()
         text_l = str(text or "").lower()
         query_terms = {
@@ -1521,21 +1740,55 @@ class MemoryPipeline:
         text_terms = MemoryPipeline._expanded_tokens(text_l)
         source_terms = MemoryPipeline._expanded_tokens(Path(str(source or "")).stem)
         combined_terms = set(text_terms) | set(source_terms)
-        beverage_terms = {"drink", "water", "sparkling", "espresso", "tea", "coffee", "beverage"}
-        pizza_terms = {"pizza", "cheese", "mushroom", "pepperoni"}
-        radar_method_terms = {"method", "tool", "url", "accuweather", "radar", "checks"}
-        if "drink" in query_terms and combined_terms & beverage_terms:
-            combined_terms.add("drink")
-        if "pizza" in query_terms and combined_terms & pizza_terms:
-            combined_terms.add("pizza")
-        if "method" in query_terms and combined_terms & radar_method_terms and "filename" not in combined_terms:
-            combined_terms.add("method")
-        if "codename" in query_terms and combined_terms & {"codename", "cedar", "alpha"}:
-            combined_terms.add("codename")
-        if "status" in query_terms and combined_terms & {"status", "stable", "blocked", "ready"}:
-            combined_terms.add("status")
+        for slot, aliases in self.claim_scope_config["slot_aliases"].items():
+            slot_terms = MemoryPipeline._expanded_tokens(slot)
+            if not slot_terms or not (query_terms & slot_terms):
+                continue
+            alias_terms = set(slot_terms)
+            for alias in aliases:
+                alias_terms.update(MemoryPipeline._expanded_tokens(alias))
+            excluded_terms: set[str] = set()
+            for excluded in self.claim_scope_config["excluded_terms"].get(slot, ()):
+                excluded_terms.update(MemoryPipeline._expanded_tokens(excluded))
+            if combined_terms & alias_terms and not (combined_terms & excluded_terms):
+                combined_terms.update(slot_terms)
         hits = len(query_terms & combined_terms)
         return min(1.0, hits / max(1, len(query_terms)))
+
+    def _answer_type_affinity(self, query: str, text: str, source: str | None = None) -> float:
+        query_terms = set(MemoryPipeline._expanded_tokens(query))
+        text_terms = set(MemoryPipeline._expanded_tokens(text))
+        if not query_terms or not text_terms:
+            return 0.0
+
+        score = 0.0
+        for rule in self.answer_type_config["rules"].values():
+            query_rule_terms = self._answer_type_rule_terms(rule["query_terms"])
+            if not query_rule_terms or not (query_terms & query_rule_terms):
+                continue
+            required_query_terms = self._answer_type_rule_terms(rule["query_requires_any"])
+            if required_query_terms and not (query_terms & required_query_terms):
+                continue
+
+            positive_terms = self._answer_type_rule_terms(rule["positive_terms"])
+            positive_required = self._answer_type_rule_terms(rule["positive_requires_any"])
+            if positive_terms and text_terms & positive_terms:
+                if not positive_required or text_terms & positive_required:
+                    score = max(score, float(rule["positive_score"]))
+
+            negative_terms = self._answer_type_rule_terms(rule["negative_terms"])
+            negative_absent = self._answer_type_rule_terms(rule["negative_requires_absent"])
+            if negative_terms and text_terms & negative_terms:
+                if not negative_absent or not (text_terms & negative_absent):
+                    score = min(score, float(rule["negative_score"]))
+        return max(-1.0, min(1.0, score))
+
+    @staticmethod
+    def _answer_type_rule_terms(values: tuple[str, ...]) -> set[str]:
+        terms: set[str] = set()
+        for value in values:
+            terms.update(MemoryPipeline._expanded_tokens(value))
+        return terms
 
     @staticmethod
     def _correction_relevance(

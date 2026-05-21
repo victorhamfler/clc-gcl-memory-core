@@ -80,6 +80,8 @@ def create_pipeline(root: Path, db_path: Path | None = None) -> MemoryPipeline:
         embedding_config=embedding_config,
         retrieval_weights=config.get("retrieval_weights"),
         symbolic_config=config.get("symbolic"),
+        claim_scope_config=config.get("claim_scope"),
+        answer_type_config=config.get("answer_type"),
         llm_config=config.get("llm"),
         clc_thresholds=config.get("thresholds"),
     )
@@ -127,6 +129,32 @@ def pipeline_config_view(pipeline: MemoryPipeline) -> dict[str, Any]:
                 for key, values in configured_intent_terms(pipeline.symbolic_config).items()
             },
             "raw_config": pipeline.symbolic_config,
+        },
+        "claim_scope": {
+            "stopwords": sorted(pipeline.claim_scope_config["stopwords"]),
+            "slot_aliases": {
+                key: list(values)
+                for key, values in sorted(pipeline.claim_scope_config["slot_aliases"].items())
+            },
+            "excluded_terms": {
+                key: list(values)
+                for key, values in sorted(pipeline.claim_scope_config["excluded_terms"].items())
+            },
+        },
+        "answer_type": {
+            "rules": {
+                key: {
+                    "query_terms": list(rule["query_terms"]),
+                    "positive_terms": list(rule["positive_terms"]),
+                    "negative_terms": list(rule["negative_terms"]),
+                    "query_requires_any": list(rule["query_requires_any"]),
+                    "positive_requires_any": list(rule["positive_requires_any"]),
+                    "negative_requires_absent": list(rule["negative_requires_absent"]),
+                    "positive_score": rule["positive_score"],
+                    "negative_score": rule["negative_score"],
+                }
+                for key, rule in sorted(pipeline.answer_type_config["rules"].items())
+            },
         },
         "llm": sanitized_llm_config(pipeline.llm_config),
     }

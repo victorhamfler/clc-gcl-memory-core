@@ -23,12 +23,11 @@ def _parse_simple_yaml(text: str) -> dict[str, Any]:
     """Parse the small YAML subset used by this project config.
 
     This keeps the core dependency-free while still letting the config remain
-    human-editable. It supports top-level keys and one level of indented maps.
+    human-editable. It supports nested indented maps with scalar values.
     """
 
     out: dict[str, Any] = {}
-    current_map: dict[str, Any] | None = None
-    current_indent = 0
+    stack: list[tuple[int, dict[str, Any]]] = [(-1, out)]
     for raw_line in text.splitlines():
         line = raw_line.split("#", 1)[0].rstrip()
         if not line.strip():
@@ -40,15 +39,14 @@ def _parse_simple_yaml(text: str) -> dict[str, Any]:
         key, value = stripped.split(":", 1)
         key = key.strip()
         value = value.strip()
+        while stack and indent <= stack[-1][0]:
+            stack.pop()
+        target = stack[-1][1] if stack else out
         if value == "":
             child: dict[str, Any] = {}
-            out[key] = child
-            current_map = child
-            current_indent = indent
+            target[key] = child
+            stack.append((indent, child))
             continue
-        target = current_map if current_map is not None and indent > current_indent else out
-        if indent <= current_indent:
-            current_map = None
         target[key] = _coerce_value(value)
     return out
 

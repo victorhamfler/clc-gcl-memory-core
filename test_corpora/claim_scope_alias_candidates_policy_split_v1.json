@@ -1,0 +1,137 @@
+{
+  "generated_at": "2026-05-21T00:00:00+00:00",
+  "source_logs": [
+    "fixture"
+  ],
+  "event_count": 0,
+  "ask_count": 0,
+  "feedback_count": 0,
+  "linked_feedback_count": 0,
+  "candidate_count": 5,
+  "candidates": [
+    {
+      "slot": "method",
+      "aliases": [
+        "accuweather",
+        "weather",
+        "url",
+        "choice",
+        "required"
+      ],
+      "excluded_terms": [
+        "report",
+        "filename",
+        "accuweather_radar_report"
+      ],
+      "supporting_queries": [
+        "What radar method should Victor use?"
+      ],
+      "negative_queries": [
+        "What radar report filename should be used?"
+      ],
+      "supporting_memory_ids": [],
+      "positive_count": 4,
+      "negative_count": 4,
+      "confidence": 0.8,
+      "notes": "Fixture candidate for promotion-gate reproducibility."
+    },
+    {
+      "slot": "filename",
+      "aliases": [
+        "accuweather_radar_report",
+        "deadline_status_report",
+        "selector_feedback_report"
+      ],
+      "excluded_terms": [
+        "method",
+        "accuweather",
+        "url",
+        "tool"
+      ],
+      "supporting_queries": [
+        "What radar report filename should be used?"
+      ],
+      "negative_queries": [
+        "What radar method should Victor use?"
+      ],
+      "supporting_memory_ids": [],
+      "positive_count": 4,
+      "negative_count": 4,
+      "confidence": 0.78,
+      "notes": "Fixture candidate for promotion-gate reproducibility."
+    },
+    {
+      "slot": "backend_port",
+      "aliases": [
+        "8765"
+      ],
+      "excluded_terms": [
+        "host",
+        "remain",
+        "127",
+        "local",
+        "testing"
+      ],
+      "supporting_queries": [
+        "What backend port should the memory API use?"
+      ],
+      "negative_queries": [
+        "What host should the memory API use?"
+      ],
+      "supporting_memory_ids": [],
+      "positive_count": 4,
+      "negative_count": 4,
+      "confidence": 0.69,
+      "notes": "Fixture candidate for promotion-gate reproducibility."
+    },
+    {
+      "slot": "deadline",
+      "aliases": [
+        "friday"
+      ],
+      "excluded_terms": [
+        "owner",
+        "owns",
+        "filename",
+        "file"
+      ],
+      "supporting_queries": [
+        "What deadline should Hermes remember?"
+      ],
+      "negative_queries": [
+        "Who owns the selector feedback report?"
+      ],
+      "supporting_memory_ids": [],
+      "positive_count": 4,
+      "negative_count": 4,
+      "confidence": 0.78,
+      "notes": "Fixture candidate for promotion-gate reproducibility."
+    },
+    {
+      "slot": "policy",
+      "aliases": [
+        "policy"
+      ],
+      "excluded_terms": [
+        "github",
+        "upload",
+        "calendar",
+        "schedule",
+        "meeting"
+      ],
+      "supporting_queries": [
+        "Broad policy probe"
+      ],
+      "negative_queries": [
+        "What is the GitHub upload policy?",
+        "What calendar change policy should Hermes follow?"
+      ],
+      "supporting_memory_ids": [],
+      "positive_count": 1,
+      "negative_count": 8,
+      "confidence": 0.2,
+      "notes": "Risk probe only. Do not promote broad policy aliases."
+    }
+  ],
+  "rejected_feedback": []
+}
