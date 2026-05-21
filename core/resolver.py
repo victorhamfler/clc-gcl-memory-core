@@ -523,6 +523,12 @@ def build_extractive_answer(
 
 
 def select_answer_snippets(query: str, evidence: list[dict[str, Any]]) -> list[str]:
+    multi = asks_for_multiple(query)
+    if multi:
+        source_aware = select_multi_intent_snippets(query, evidence)
+        if source_aware:
+            return source_aware
+
     scored: list[tuple[float, int, int, str]] = []
     has_current = any(str(item.get("memory_state") or "") == "current" for item in evidence)
     has_stale = any(str(item.get("memory_state") or "") == "stale" for item in evidence)
@@ -552,7 +558,6 @@ def select_answer_snippets(query: str, evidence: list[dict[str, Any]]) -> list[s
     if not scored:
         return []
     scored.sort(reverse=True)
-    multi = asks_for_multiple(query)
     if multi:
         out = select_diverse_procedural_snippets(query, scored)
         if out:
@@ -574,6 +579,92 @@ def select_answer_snippets(query: str, evidence: list[dict[str, Any]]) -> list[s
         if len(out) >= (3 if multi else 2):
             break
     return out
+
+
+def select_multi_intent_snippets(query: str, evidence: list[dict[str, Any]]) -> list[str]:
+    buckets = query_intent_buckets(query)
+    if len(buckets) < 2:
+        return []
+    selected: list[str] = []
+    used_evidence: set[int] = set()
+    has_non_deflecting_evidence = any(not is_scope_deflection_evidence(query, item) for item in evidence[:4])
+    for bucket in buckets:
+        best: tuple[float, int, str] | None = None
+        for evidence_idx, item in enumerate(evidence[:4]):
+            if evidence_idx in used_evidence:
+                continue
+            if has_non_deflecting_evidence and is_scope_deflection_evidence(query, item):
+                continue
+            if not evidence_matches_intent_bucket(bucket, item):
+                continue
+            for snippet, snippet_score in candidate_snippets(query, item.get("text") or ""):
+                if not snippet:
+                    continue
+                candidate_score = (
+                    snippet_score
+                    + evidence_preference_score(query, item)
+                    + max(0.0, 0.45 - (0.12 * evidence_idx))
+                )
+                if is_broad_generic_evidence(item) and bucket != "approval_log":
+                    candidate_score -= 0.8
+                if best is None or candidate_score > best[0]:
+                    best = (candidate_score, evidence_idx, snippet)
+        if best is None:
+            continue
+        _score, evidence_idx, snippet = best
+        if any(snippet == existing or snippet in existing or existing in snippet for existing in selected):
+            continue
+        selected.append(snippet)
+        used_evidence.add(evidence_idx)
+        if len(selected) >= 3:
+            break
+    return selected if len(selected) >= 2 else []
+
+
+def query_intent_buckets(query: str) -> list[str]:
+    terms = normalized_terms(query)
+    lower = str(query or "").lower()
+    buckets: list[str] = []
+
+    def add(bucket: str, markers: set[str]) -> None:
+        if bucket not in buckets and (terms & markers):
+            buckets.append(bucket)
+
+    add("filename", {"file", "filename", "report", "markdown", "name", "called"})
+    if (
+        terms & {"upload", "uploads", "uploading", "github", "repo", "repository", "publish", "publishing"}
+        and (
+            terms & {"permission", "approval", "approve", "automatic", "automatically", "confirmation", "rule"}
+            or "can hermes upload" in lower
+        )
+    ):
+        buckets.append("upload_policy")
+    add("calendar_policy", {"calendar", "meeting", "meetings", "event", "events", "change", "changing", "edit", "editing", "reschedule"})
+    add("approval_log", {"approval", "approvals", "documented", "log", "logged", "record", "recorded"})
+    return buckets
+
+
+def evidence_matches_intent_bucket(bucket: str, item: dict[str, Any]) -> bool:
+    text_terms = normalized_terms(clean_answer_text(item.get("text") or ""))
+    source = str(item.get("source") or "").lower()
+    if bucket == "filename":
+        return bool(text_terms & {"filename", "file", "report", "md"} or "filename" in source)
+    if bucket == "upload_policy":
+        return bool(
+            text_terms & {"confirmation", "explicit", "explicitly", "permission", "requested", "request", "conversation"}
+            and text_terms & {"github", "upload", "uploads", "uploading", "repository", "repo"}
+        )
+    if bucket == "calendar_policy":
+        return bool(
+            text_terms & {"manual", "approval", "approve", "schedule", "calendar", "meeting", "meetings", "event", "events"}
+            and text_terms & {"calendar", "meeting", "meetings", "event", "events"}
+        )
+    if bucket == "approval_log":
+        return bool(
+            text_terms & {"documented", "document", "log", "logged", "record", "recorded"}
+            and text_terms & {"approval", "approvals", "policy", "note", "change"}
+        )
+    return False
 
 
 def select_diverse_procedural_snippets(query: str, scored: list[tuple[float, int, int, str]]) -> list[str]:
@@ -932,8 +1023,12 @@ def query_ngrams(query: str) -> list[str]:
 
 def asks_for_multiple(query: str) -> bool:
     lower = str(query or "").lower()
-    return any(term in lower for term in ("summarize", "summary", "list", "all ", "main points", "what are")) or (
-        "how" in lower and any(term in lower for term in ("test", "workflow", "process", "steps"))
+    if any(term in lower for term in ("summarize", "summary", "list", "all ", "main points", "what are")):
+        return True
+    if "how" in lower and any(term in lower for term in ("test", "workflow", "process", "steps")):
+        return True
+    return len(query_intent_buckets(query)) >= 2 and any(
+        marker in lower for marker in (" and ", ",", ";", " plus ", " both ", "give ")
     )
 
 

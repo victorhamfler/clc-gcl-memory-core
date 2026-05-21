@@ -64,7 +64,7 @@ Main remaining failure classes:
 
 - approval archive notes beat broad policy log answers
 - broad policy answers sometimes include calendar support snippets
-- multi-intent questions retrieve multiple sources but answer only one part
+- some compound repo publish/report questions still miss the upload permission rule
 - generic filename queries can still surface GitHub filename memories as secondary evidence
 - repo publish/report questions still need better handling when they ask for both filename and permission
 
@@ -76,19 +76,43 @@ Day 1 remains promoted. The new Day 2 harness has already produced one validated
 
 ## Best Next Development Step
 
-The next architectural improvement should target multi-source answer composition.
+The next architectural improvement after this checkpoint should target approval-log ambiguity.
 
 Reason:
 
-- Several Day 2 failures already retrieve the needed memories in the evidence set.
-- The answer text only uses the first source, so it misses the second required fact.
-- This affects multi-intent queries such as filename plus upload permission, and calendar policy plus approval logging.
+- The multi-source answer composition issue has now been converted into a focused regression and fixed locally.
+- The largest remaining Day 2 cluster is approval archive notes beating broad policy log answers.
+- The remaining failures show that `Approval archive entries are stored for audit history...` is too easily treated as the answer to `Where should general approvals be logged?`
+
+Completed multi-intent improvement:
+
+- Added `eval/multi_intent_answer_composition_regression.py`.
+- Added source-aware snippet selection for compound questions.
+- `What file should the GitHub report use, and can Hermes upload it automatically?` now answers with both `github_upload_report.md` and `explicit confirmation`.
+- `Can Hermes change meetings, and where should approvals be documented?` now answers with both `manual approval` and `documented in the change log`.
+- Added the new regression to the full promotion gate.
+
+Validation after the multi-intent improvement:
+
+- `multi_intent_answer_composition_regression.py`: passed
+- `policy_correction_deflection_regression.py`: passed
+- `day1_answer_source_regression.py`: passed
+- `answer_type_policy_split_probe.py`: passed
+- full promotion gate with selector guards: passed
+
+Latest Day 2 live check against a temporary patched server:
+
+- `missing_required_answer_text` improved from 15 to 9
+- Day 2 still does not pass
+- main remaining classes:
+  - approval archive note beats broad policy log answer
+  - generic filename queries can still surface GitHub filename as secondary evidence
+  - repo publish/report questions still need better permission-rule retrieval
 
 Recommended next test:
 
-1. Add a focused local regression for multi-intent `/ask` composition.
-2. Use two evidence memories with clearly different required facts.
-3. Require the answer to include both facts.
-4. Fix `select_answer_snippets` or answer assembly so multi-intent queries preserve one high-quality snippet per expected evidence source.
-5. Rerun Day 2.
-
+1. Add a focused local regression for approval-log ambiguity.
+2. Include `broad_policy_note`, `approval_archive_note`, and unrelated correction pressure.
+3. Query `Where should general approvals be logged?`
+4. Require broad policy note to beat approval archive for logging/documentation questions.
+5. Preserve approval archive behavior for queries explicitly asking about archive/audit history.

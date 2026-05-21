@@ -81,6 +81,7 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
     policy_deflection_report = read_json(
         REPO_ROOT / "experiments" / "policy_correction_deflection_regression_results.json"
     )
+    multi_intent_report = read_json(REPO_ROOT / "experiments" / "multi_intent_answer_composition_regression_results.json")
     gate_ok = all(step["ok"] for step in steps)
 
     required_summary = {
@@ -94,6 +95,7 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
         "answer_type_method_filename_ok": bool(answer_type_method_report and answer_type_method_report.get("ok")),
         "answer_type_policy_split_probe_ok": bool(answer_type_policy_report and answer_type_policy_report.get("ok")),
         "policy_correction_deflection_ok": bool(policy_deflection_report and policy_deflection_report.get("ok")),
+        "multi_intent_answer_composition_ok": bool(multi_intent_report and multi_intent_report.get("ok")),
     }
     if args.include_selector_guards:
         required_summary["selector_guards_ok"] = all(
@@ -163,6 +165,10 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
         "policy_correction_deflection_regression": {
             "ok": policy_deflection_report.get("ok") if policy_deflection_report else None,
             "case_count": policy_deflection_report.get("case_count") if policy_deflection_report else None,
+        },
+        "multi_intent_answer_composition_regression": {
+            "ok": multi_intent_report.get("ok") if multi_intent_report else None,
+            "case_count": multi_intent_report.get("case_count") if multi_intent_report else None,
         },
     }
 
@@ -318,6 +324,7 @@ def main() -> int:
                 str(ROOT / "eval" / "answer_type_method_filename_regression.py"),
                 str(ROOT / "eval" / "answer_type_policy_split_probe.py"),
                 str(ROOT / "eval" / "policy_correction_deflection_regression.py"),
+                str(ROOT / "eval" / "multi_intent_answer_composition_regression.py"),
             ],
         ),
         run_step("nested_config_regression", [python, str(ROOT / "eval" / "config_nested_parser_regression.py")]),
@@ -364,6 +371,10 @@ def main() -> int:
         run_step(
             "policy_correction_deflection_regression",
             [python, str(ROOT / "eval" / "policy_correction_deflection_regression.py")],
+        ),
+        run_step(
+            "multi_intent_answer_composition_regression",
+            [python, str(ROOT / "eval" / "multi_intent_answer_composition_regression.py")],
         ),
     ]
     if args.include_selector_guards:
