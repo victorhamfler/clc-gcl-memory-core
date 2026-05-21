@@ -121,11 +121,11 @@ answer_type:
       positive_score: 1.0
       negative_score: -1.0
     github_upload_policy:
-      query_terms: github,upload,uploads,uploading
+      query_terms: github,repository,repo,upload,uploads,uploading,publish,publishing,permission
       query_excludes_any: filename,file,report
-      positive_terms: github,upload,uploads,uploading,confirmation,explicitly,requested,requests,conversation
+      positive_terms: github,repository,repo,upload,uploads,uploading,publish,publishing,permission,confirmation,explicitly,requested,requests,conversation
       positive_requires_any: github,upload,uploads,uploading
-      negative_terms: calendar,schedule,meeting,meetings,event,events,change,changing,filename,file,report
+      negative_terms: calendar,schedule,meeting,meetings,event,events,change,changing,filename,file,report,issue,issues,note,notes,draft,drafts,release,blockers
       negative_requires_absent: confirmation,explicitly,requested,requests,conversation
       positive_score: 1.0
       negative_score: -1.0
@@ -134,6 +134,15 @@ answer_type:
       positive_terms: calendar,schedule,meeting,meetings,event,events,change,changing,manual
       positive_requires_any: calendar,schedule,meeting,meetings,event,events,change,changing,manual
       negative_terms: github,repository,upload,uploads,uploading
+      positive_score: 1.0
+      negative_score: -1.0
+    broad_policy_note:
+      query_terms: broad,general,overall,policy,note,notes,approval,approvals,logged,log,record,recorded,documented
+      query_requires_any: approval,approvals,logged,log,record,recorded,documented
+      positive_terms: broad,general,overall,policy,note,notes,approval,approvals,documented,change,log
+      positive_requires_any: broad,general,overall,policy,note,notes,approval,approvals,documented,log
+      negative_terms: calendar,schedule,meeting,meetings,event,events,github,repository,repo,upload,uploads,uploading,filename,file,report
+      negative_requires_absent: broad,general,overall,approval,approvals,documented,log
       positive_score: 1.0
       negative_score: -1.0
 

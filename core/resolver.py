@@ -128,6 +128,16 @@ def choose_preferred_evidence(
             best_current = max(current, key=lambda item: evidence_preference_score(query, item))
             best_current_scope = float(best_current.get("claim_scope_score") or 0.0)
             best_correcting_scope = float(best_correcting.get("claim_scope_score") or 0.0)
+            if is_scope_deflection_evidence(query, best_correcting):
+                non_deflecting_historical = [
+                    item
+                    for item in historical
+                    if not is_scope_deflection_evidence(query, item) and has_positive_selector_signal(item)
+                ]
+                if non_deflecting_historical:
+                    best_historical = max(non_deflecting_historical, key=lambda item: evidence_preference_score(query, item))
+                    if float(best_historical.get("score") or 0.0) >= float(best_correcting.get("score") or 0.0) - 0.02:
+                        return order_evidence(query, non_deflecting_historical + correcting_current)
             if (
                 best_current not in correcting_current
                 and best_current_scope >= 0.75
@@ -151,7 +161,11 @@ def choose_preferred_evidence(
             if focused_score >= current_score - 0.02:
                 return order_evidence(query, session_focused)
     if current:
-        relevant_current = [item for item in current if is_relevant_to_query(query, item)]
+        relevant_current = [
+            item
+            for item in current
+            if is_relevant_to_query(query, item) and not is_scope_deflection_evidence(query, item)
+        ]
         current_pool = relevant_current or ([] if (historical or stale or disputed or requires_sensitive_evidence(query)) else current)
         current_score = max((float(item.get("score") or 0.0) for item in current_pool), default=0.0)
         relevance_floor = max(0.18, top_score * 0.90)
@@ -225,6 +239,48 @@ def asks_for_broad_generic_policy(query: str) -> bool:
     broad_terms = {"broad", "general", "generic", "overall"}
     policy_terms = {"policy", "policies", "note", "notes", "guideline", "guidelines"}
     return bool(terms & broad_terms and terms & policy_terms)
+
+
+def is_scope_deflection_evidence(query: str, item: dict[str, Any] | None) -> bool:
+    if item is None:
+        return False
+    query_terms = normalized_terms(query)
+    policy_terms = {
+        "policy",
+        "permission",
+        "approval",
+        "approve",
+        "upload",
+        "github",
+        "repo",
+        "publish",
+        "calendar",
+        "meeting",
+        "event",
+        "change",
+        "changing",
+        "reschedule",
+    }
+    if not (query_terms & policy_terms):
+        return False
+    text = str(item.get("text") or "").strip().lower()
+    source = str(item.get("source") or "").strip().lower()
+    if not (text.startswith("correction:") or source.startswith("correction:")):
+        return False
+    return any(
+        marker in text
+        for marker in (
+            "not permission",
+            "not upload permission",
+            "not authorized",
+            "not authorize",
+            "do not authorize",
+            "does not authorize",
+            "separate policy",
+            "separate calendar policy",
+            "still follows the separate",
+        )
+    )
 
 
 def evidence_is_too_weak(evidence: list[dict[str, Any]]) -> bool:
@@ -365,6 +421,8 @@ def evidence_preference_score(query: str, item: dict[str, Any]) -> float:
         score += max(0.0, 0.08 - (0.015 * (rank - 1)))
     if is_broad_generic_evidence(item) and not asks_for_broad_generic_policy(query):
         score -= 0.18
+    if is_scope_deflection_evidence(query, item):
+        score -= 0.35
     authority_state = str(item.get("authority_state") or "").strip().lower()
     if authority_state == "current":
         score += 0.35 * max(0.30, float(item.get("correction_relevance_score") or 1.0))
@@ -469,7 +527,10 @@ def select_answer_snippets(query: str, evidence: list[dict[str, Any]]) -> list[s
     has_current = any(str(item.get("memory_state") or "") == "current" for item in evidence)
     has_stale = any(str(item.get("memory_state") or "") == "stale" for item in evidence)
     require_current = has_current and has_stale and not asks_for_stale_history(query)
+    has_non_deflecting_evidence = any(not is_scope_deflection_evidence(query, item) for item in evidence[:3])
     for evidence_idx, item in enumerate(evidence[:3]):
+        if has_non_deflecting_evidence and is_scope_deflection_evidence(query, item):
+            continue
         state = str(item.get("memory_state") or "")
         state_bonus = 0.0
         if state == "current":
@@ -482,6 +543,8 @@ def select_answer_snippets(query: str, evidence: list[dict[str, Any]]) -> list[s
             state_bonus = -2.2
         if is_broad_generic_evidence(item) and not asks_for_broad_generic_policy(query):
             state_bonus -= 2.0
+        if is_scope_deflection_evidence(query, item):
+            state_bonus -= 3.5
         primary_bonus = 1.2 if evidence_idx == 0 else 0.0
         for snippet, score in candidate_snippets(query, item.get("text") or ""):
             if snippet:
@@ -944,6 +1007,7 @@ def compact_evidence(item: dict[str, Any]) -> dict[str, Any]:
         "identifier_match_score": item.get("identifier_match_score"),
         "claim_scope_score": item.get("claim_scope_score"),
         "answer_type_score": item.get("answer_type_score"),
+        "scope_deflection_penalty": item.get("scope_deflection_penalty"),
         "text_match_score": item.get("text_match_score"),
         "intent_match_score": item.get("intent_match_score"),
         "correction_relevance_score": item.get("correction_relevance_score"),

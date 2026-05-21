@@ -78,6 +78,9 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
     answer_type_config_report = read_json(REPO_ROOT / "experiments" / "answer_type_config_regression_results.json")
     answer_type_method_report = read_json(REPO_ROOT / "experiments" / "answer_type_method_filename_regression_results.json")
     answer_type_policy_report = read_json(REPO_ROOT / "experiments" / "answer_type_policy_split_probe_results.json")
+    policy_deflection_report = read_json(
+        REPO_ROOT / "experiments" / "policy_correction_deflection_regression_results.json"
+    )
     gate_ok = all(step["ok"] for step in steps)
 
     required_summary = {
@@ -90,6 +93,7 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
         "answer_type_config_ok": bool(answer_type_config_report and answer_type_config_report.get("ok")),
         "answer_type_method_filename_ok": bool(answer_type_method_report and answer_type_method_report.get("ok")),
         "answer_type_policy_split_probe_ok": bool(answer_type_policy_report and answer_type_policy_report.get("ok")),
+        "policy_correction_deflection_ok": bool(policy_deflection_report and policy_deflection_report.get("ok")),
     }
     if args.include_selector_guards:
         required_summary["selector_guards_ok"] = all(
@@ -155,6 +159,10 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
             "ok": answer_type_policy_report.get("ok") if answer_type_policy_report else None,
             "case_count": answer_type_policy_report.get("case_count") if answer_type_policy_report else None,
             "policy_rules": answer_type_policy_report.get("policy_rules") if answer_type_policy_report else None,
+        },
+        "policy_correction_deflection_regression": {
+            "ok": policy_deflection_report.get("ok") if policy_deflection_report else None,
+            "case_count": policy_deflection_report.get("case_count") if policy_deflection_report else None,
         },
     }
 
@@ -309,6 +317,7 @@ def main() -> int:
                 str(ROOT / "eval" / "answer_type_config_regression.py"),
                 str(ROOT / "eval" / "answer_type_method_filename_regression.py"),
                 str(ROOT / "eval" / "answer_type_policy_split_probe.py"),
+                str(ROOT / "eval" / "policy_correction_deflection_regression.py"),
             ],
         ),
         run_step("nested_config_regression", [python, str(ROOT / "eval" / "config_nested_parser_regression.py")]),
@@ -351,6 +360,10 @@ def main() -> int:
         run_step(
             "answer_type_policy_split_probe",
             [python, str(ROOT / "eval" / "answer_type_policy_split_probe.py")],
+        ),
+        run_step(
+            "policy_correction_deflection_regression",
+            [python, str(ROOT / "eval" / "policy_correction_deflection_regression.py")],
         ),
     ]
     if args.include_selector_guards:

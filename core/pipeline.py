@@ -608,6 +608,7 @@ class MemoryPipeline:
             claim_scope_match = self._claim_scope_affinity(query_l, item.text, source)
             answer_type_match = self._answer_type_affinity(query_l, item.text, source)
             broad_generic_penalty = 0.18 if self._broad_generic_note(item.text, source) else 0.0
+            scope_deflection_penalty = 0.55 if self._scope_deflection_note(query_l, item.text, source) else 0.0
             identifier_match = self._identifier_affinity(query_l, item.text)
             intent_match = self._intent_affinity(query_l, item.text, item.memory_type)
             feedback = feedback_by_memory.get(item.memory_id, {})
@@ -671,6 +672,7 @@ class MemoryPipeline:
                 + w["correction_chain"] * correction_chain_score
                 + w["answer_type"] * answer_type_match
                 - broad_generic_penalty
+                - scope_deflection_penalty
             )
             out.append(
                 {
@@ -695,6 +697,7 @@ class MemoryPipeline:
                     "claim_scope_score": round(claim_scope_match, 6),
                     "answer_type_score": round(answer_type_match, 6),
                     "broad_generic_penalty": round(broad_generic_penalty, 6),
+                    "scope_deflection_penalty": round(scope_deflection_penalty, 6),
                     "correction_relevance_score": round(correction_relevance, 6),
                     "identifier_match_score": round(identifier_match, 6),
                     "intent_match_score": round(intent_match, 6),
@@ -1806,6 +1809,46 @@ class MemoryPipeline:
             or "general_policy" in source_l
             or text_l.startswith("broad policy note")
             or text_l.startswith("general policy note")
+        )
+
+    @staticmethod
+    def _scope_deflection_note(query: str, text: str | None, source: str | None) -> bool:
+        query_terms = MemoryPipeline._expanded_tokens(query)
+        policy_terms = {
+            "policy",
+            "permission",
+            "approval",
+            "approve",
+            "upload",
+            "github",
+            "repo",
+            "publish",
+            "calendar",
+            "meeting",
+            "event",
+            "change",
+            "changing",
+            "reschedule",
+        }
+        if not (query_terms & policy_terms):
+            return False
+        text_l = str(text or "").strip().lower()
+        source_l = str(source or "").strip().lower()
+        if not (text_l.startswith("correction:") or source_l.startswith("correction:")):
+            return False
+        return any(
+            marker in text_l
+            for marker in (
+                "not permission",
+                "not upload permission",
+                "not authorized",
+                "not authorize",
+                "do not authorize",
+                "does not authorize",
+                "separate policy",
+                "separate calendar policy",
+                "still follows the separate",
+            )
         )
 
     @staticmethod
