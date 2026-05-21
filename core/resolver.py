@@ -99,13 +99,14 @@ def choose_preferred_evidence(
     disputed = [item for item in disputed if is_relevant_to_query(query, item)]
     stale = [item for item in stale if is_relevant_to_query(query, item)]
     summary = [item for item in summary if is_relevant_to_query(query, item)]
-    historical = sorted(historical, key=lambda item: evidence_preference_score(query, item), reverse=True)
-    stale = sorted(stale, key=lambda item: evidence_preference_score(query, item), reverse=True)
-    disputed = sorted(disputed, key=lambda item: evidence_preference_score(query, item), reverse=True)
-    summary = sorted(summary, key=lambda item: evidence_preference_score(query, item), reverse=True)
+    historical = order_evidence(query, historical)
+    current = order_evidence(query, current)
+    stale = order_evidence(query, stale)
+    disputed = order_evidence(query, disputed)
+    summary = order_evidence(query, summary)
     top_score = max(float(item.get("score") or 0.0) for item in results)
     if summary and (asks_for_multiple(query) or asks_for_summary_mechanism(query)):
-        return summary + historical + current
+        return order_evidence(query, summary + historical + current)
     if historical and current:
         historical_anchor = max(historical, key=lambda item: evidence_preference_score(query, item))
         current_anchor = max(current, key=lambda item: evidence_preference_score(query, item))
@@ -114,7 +115,7 @@ def choose_preferred_evidence(
         historical_score = float(historical_anchor.get("score") or 0.0)
         current_score = float(current_anchor.get("score") or 0.0)
         if historical_scope >= 0.75 and historical_scope > current_scope and historical_score >= current_score - 0.04:
-            return sorted(historical, key=lambda item: evidence_preference_score(query, item), reverse=True)
+            return order_evidence(query, historical)
     if current and stale:
         stale_ids = {str(item.get("memory_id") or "") for item in stale if item.get("memory_id")}
         correcting_current = [
@@ -133,10 +134,10 @@ def choose_preferred_evidence(
                 and best_current_scope > best_correcting_scope
                 and float(best_current.get("score") or 0.0) >= float(best_correcting.get("score") or 0.0) - 0.04
             ):
-                return sorted(current, key=lambda item: evidence_preference_score(query, item), reverse=True)
+                return order_evidence(query, current)
             if allows_stale_definition_context(query):
-                return sorted(correcting_current + stale, key=lambda item: evidence_preference_score(query, item), reverse=True)
-            return sorted(correcting_current, key=lambda item: evidence_preference_score(query, item), reverse=True)
+                return order_evidence(query, correcting_current + stale)
+            return order_evidence(query, correcting_current)
     if historical:
         session_focused = [
             item
@@ -148,7 +149,7 @@ def choose_preferred_evidence(
             current_score = max((float(item.get("score") or 0.0) for item in current), default=0.0)
             focused_score = max(float(item.get("score") or 0.0) for item in session_focused)
             if focused_score >= current_score - 0.02:
-                return sorted(session_focused, key=lambda item: evidence_preference_score(query, item), reverse=True)
+                return order_evidence(query, session_focused)
     if current:
         relevant_current = [item for item in current if is_relevant_to_query(query, item)]
         current_pool = relevant_current or ([] if (historical or stale or disputed or requires_sensitive_evidence(query)) else current)
@@ -164,12 +165,57 @@ def choose_preferred_evidence(
                 for item in stale
                 if evidence_preference_score(query, item) >= evidence_preference_score(query, historical[0]) - 0.08
             ]
-        return sorted(historical + supplemental_stale, key=lambda item: evidence_preference_score(query, item), reverse=True)
+        return order_evidence(query, historical + supplemental_stale)
     if stale and allows_stale_definition_context(query):
         return stale
     if requires_sensitive_evidence(query):
         return []
-    return disputed or stale or current or summary
+    return order_evidence(query, disputed or stale or current or summary)
+
+
+def order_evidence(query: str, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    ordered = sorted(items, key=lambda item: evidence_preference_score(query, item), reverse=True)
+    rank_one = next((item for item in items if int(item.get("rank") or 0) == 1), None)
+    if not rank_one:
+        return ordered
+    if not has_positive_selector_signal(rank_one) or is_broad_generic_evidence(rank_one):
+        return ordered
+    if not is_relevant_to_query(query, rank_one):
+        return ordered
+    leader = ordered[0] if ordered else None
+    if leader is rank_one:
+        return ordered
+    rank_one_score = evidence_preference_score(query, rank_one)
+    leader_score = evidence_preference_score(query, leader) if leader else 0.0
+    if (
+        leader is None
+        or is_broad_generic_evidence(leader)
+        or float(rank_one.get("answer_type_score") or 0.0) > float(leader.get("answer_type_score") or 0.0)
+        or rank_one_score >= leader_score - 0.15
+    ):
+        return [rank_one, *[item for item in ordered if item is not rank_one]]
+    return ordered
+
+
+def has_positive_selector_signal(item: dict[str, Any]) -> bool:
+    return (
+        float(item.get("answer_type_score") or 0.0) > 0.0
+        or float(item.get("claim_scope_score") or 0.0) >= 0.50
+        or float(item.get("text_match_score") or 0.0) >= 0.50
+    )
+
+
+def is_broad_generic_evidence(item: dict[str, Any] | None) -> bool:
+    if item is None:
+        return False
+    text = str(item.get("text") or "").lower()
+    source = str(item.get("source") or "").lower()
+    return (
+        "broad_policy" in source
+        or "general_policy" in source
+        or text.startswith("broad policy note")
+        or text.startswith("general policy note")
+    )
 
 
 def evidence_is_too_weak(evidence: list[dict[str, Any]]) -> bool:
@@ -302,8 +348,14 @@ def evidence_preference_score(query: str, item: dict[str, Any]) -> float:
     score = float(item.get("score") or 0.0)
     score += 0.20 * float(item.get("text_match_score") or 0.0)
     score += 0.24 * float(item.get("claim_scope_score") or 0.0)
+    score += 0.28 * float(item.get("answer_type_score") or 0.0)
     score += 0.12 * float(item.get("intent_match_score") or 0.0)
     score += 0.05 * len(normalized_terms(query) & normalized_terms(clean_text))
+    rank = int(item.get("rank") or 0)
+    if rank > 0 and has_positive_selector_signal(item):
+        score += max(0.0, 0.08 - (0.015 * (rank - 1)))
+    if is_broad_generic_evidence(item):
+        score -= 0.18
     authority_state = str(item.get("authority_state") or "").strip().lower()
     if authority_state == "current":
         score += 0.35 * max(0.30, float(item.get("correction_relevance_score") or 1.0))
@@ -419,9 +471,12 @@ def select_answer_snippets(query: str, evidence: list[dict[str, Any]]) -> list[s
             state_bonus = 0.4
         elif state == "stale" and not asks_for_stale_history(query):
             state_bonus = -2.2
+        if is_broad_generic_evidence(item):
+            state_bonus -= 2.0
+        primary_bonus = 1.2 if evidence_idx == 0 else 0.0
         for snippet, score in candidate_snippets(query, item.get("text") or ""):
             if snippet:
-                scored.append((score + state_bonus, -evidence_idx, 1 if state == "current" else 0, snippet))
+                scored.append((score + state_bonus + primary_bonus, -evidence_idx, 1 if state == "current" else 0, snippet))
     if not scored:
         return []
     scored.sort(reverse=True)
@@ -567,10 +622,12 @@ def normalized_terms(text: Any) -> set[str]:
     for term in re.findall(r"[A-Za-z0-9_-]+", lower_text):
         if len(term) <= 2 or term in ANSWER_STOPWORDS:
             continue
+        terms.add(term)
         terms.add(stem_token(term))
         if "-" in term:
             compact = term.replace("-", "")
             if len(compact) > 2:
+                terms.add(compact)
                 terms.add(stem_token(compact))
     terms |= expanded_query_terms(lower_text, terms)
     return terms
@@ -627,10 +684,14 @@ def is_simple_fact_question(query: str) -> bool:
 
 def stem_token(term: str) -> str:
     term = str(term or "").lower().strip()
+    if len(term) > 6 and term.endswith("ings"):
+        return term[:-4]
     if len(term) > 5 and term.endswith("ies"):
         return term[:-3] + "y"
     if len(term) > 5 and term.endswith("ing"):
         return term[:-3]
+    if len(term) > 4 and term.endswith("ges"):
+        return term[:-1]
     if len(term) > 4 and term.endswith("es"):
         return term[:-2]
     if len(term) > 3 and term.endswith("s"):
@@ -873,6 +934,9 @@ def compact_evidence(item: dict[str, Any]) -> dict[str, Any]:
         "csd_score": item.get("csd_score", 0.0),
         "identifier_match_score": item.get("identifier_match_score"),
         "claim_scope_score": item.get("claim_scope_score"),
+        "answer_type_score": item.get("answer_type_score"),
+        "text_match_score": item.get("text_match_score"),
+        "intent_match_score": item.get("intent_match_score"),
         "correction_relevance_score": item.get("correction_relevance_score"),
         "session_evidence_score": item.get("session_evidence_score"),
         "session_evidence_boost": item.get("session_evidence_boost"),

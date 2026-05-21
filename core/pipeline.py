@@ -606,6 +606,7 @@ class MemoryPipeline:
             text_match = self._text_affinity(query_l, item.text)
             claim_scope_match = self._claim_scope_affinity(query_l, item.text, source)
             answer_type_match = self._answer_type_affinity(query_l, item.text, source)
+            broad_generic_penalty = 0.18 if self._broad_generic_note(item.text, source) else 0.0
             identifier_match = self._identifier_affinity(query_l, item.text)
             intent_match = self._intent_affinity(query_l, item.text, item.memory_type)
             feedback = feedback_by_memory.get(item.memory_id, {})
@@ -668,6 +669,7 @@ class MemoryPipeline:
                 + w["intent"] * intent_match
                 + w["correction_chain"] * correction_chain_score
                 + w["answer_type"] * answer_type_match
+                - broad_generic_penalty
             )
             out.append(
                 {
@@ -691,6 +693,7 @@ class MemoryPipeline:
                     "text_match_score": round(text_match, 6),
                     "claim_scope_score": round(claim_scope_match, 6),
                     "answer_type_score": round(answer_type_match, 6),
+                    "broad_generic_penalty": round(broad_generic_penalty, 6),
                     "correction_relevance_score": round(correction_relevance, 6),
                     "identifier_match_score": round(identifier_match, 6),
                     "intent_match_score": round(intent_match, 6),
@@ -1789,6 +1792,17 @@ class MemoryPipeline:
         for value in values:
             terms.update(MemoryPipeline._expanded_tokens(value))
         return terms
+
+    @staticmethod
+    def _broad_generic_note(text: str | None, source: str | None) -> bool:
+        text_l = str(text or "").strip().lower()
+        source_l = str(source or "").strip().lower()
+        return (
+            "broad_policy" in source_l
+            or "general_policy" in source_l
+            or text_l.startswith("broad policy note")
+            or text_l.startswith("general policy note")
+        )
 
     @staticmethod
     def _correction_relevance(
