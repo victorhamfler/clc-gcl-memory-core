@@ -41,10 +41,26 @@ CASES = [
     {
         "id": "calendar_change_policy_question",
         "query": "What calendar change policy should Hermes follow?",
+        "expected_ref": "calendar_change_policy",
+        "required_terms": ("manual approval",),
+        "required_any": ("meeting", "calendar"),
+        "forbidden_answer_ref": "broad_policy_note",
     },
     {
         "id": "calendar_auto_change_question",
         "query": "Can Hermes change meetings automatically?",
+        "expected_ref": "calendar_change_policy",
+        "required_terms": ("manual approval",),
+        "required_any": ("meeting", "calendar"),
+        "forbidden_answer_ref": "broad_policy_note",
+    },
+    {
+        "id": "broad_policy_note_question",
+        "query": "General policy note: changes should be recorded.",
+        "expected_ref": "broad_policy_note",
+        "required_terms": ("documented",),
+        "required_any": ("change log", "policy note"),
+        "forbidden_answer_ref": "calendar_change_policy",
     },
 ]
 
@@ -104,12 +120,16 @@ def run_case(pipeline: MemoryPipeline, namespace: str, case: dict[str, str]) -> 
     retrieved_top_ref = row_ref(rows[0]) if rows else None
     answer_top_ref = row_ref(evidence[0]) if evidence else None
     answer_l = answer.lower()
+    expected_ref = case["expected_ref"]
+    required_terms = tuple(case.get("required_terms") or ())
+    required_any = tuple(case.get("required_any") or ())
+    forbidden_answer_ref = case.get("forbidden_answer_ref")
     passed = (
-        retrieved_top_ref == "calendar_change_policy"
-        and answer_top_ref == "calendar_change_policy"
-        and "manual approval" in answer_l
-        and ("meeting" in answer_l or "calendar" in answer_l)
-        and not answer_l.startswith("relevant memory indicates: broad policy note")
+        retrieved_top_ref == expected_ref
+        and answer_top_ref == expected_ref
+        and all(term in answer_l for term in required_terms)
+        and (not required_any or any(term in answer_l for term in required_any))
+        and answer_top_ref != forbidden_answer_ref
     )
     return {
         "id": case["id"],

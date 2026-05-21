@@ -178,7 +178,9 @@ def order_evidence(query: str, items: list[dict[str, Any]]) -> list[dict[str, An
     rank_one = next((item for item in items if int(item.get("rank") or 0) == 1), None)
     if not rank_one:
         return ordered
-    if not has_positive_selector_signal(rank_one) or is_broad_generic_evidence(rank_one):
+    if not has_positive_selector_signal(rank_one):
+        return ordered
+    if is_broad_generic_evidence(rank_one) and not asks_for_broad_generic_policy(query):
         return ordered
     if not is_relevant_to_query(query, rank_one):
         return ordered
@@ -216,6 +218,13 @@ def is_broad_generic_evidence(item: dict[str, Any] | None) -> bool:
         or text.startswith("broad policy note")
         or text.startswith("general policy note")
     )
+
+
+def asks_for_broad_generic_policy(query: str) -> bool:
+    terms = normalized_terms(query)
+    broad_terms = {"broad", "general", "generic", "overall"}
+    policy_terms = {"policy", "policies", "note", "notes", "guideline", "guidelines"}
+    return bool(terms & broad_terms and terms & policy_terms)
 
 
 def evidence_is_too_weak(evidence: list[dict[str, Any]]) -> bool:
@@ -354,7 +363,7 @@ def evidence_preference_score(query: str, item: dict[str, Any]) -> float:
     rank = int(item.get("rank") or 0)
     if rank > 0 and has_positive_selector_signal(item):
         score += max(0.0, 0.08 - (0.015 * (rank - 1)))
-    if is_broad_generic_evidence(item):
+    if is_broad_generic_evidence(item) and not asks_for_broad_generic_policy(query):
         score -= 0.18
     authority_state = str(item.get("authority_state") or "").strip().lower()
     if authority_state == "current":
@@ -471,7 +480,7 @@ def select_answer_snippets(query: str, evidence: list[dict[str, Any]]) -> list[s
             state_bonus = 0.4
         elif state == "stale" and not asks_for_stale_history(query):
             state_bonus = -2.2
-        if is_broad_generic_evidence(item):
+        if is_broad_generic_evidence(item) and not asks_for_broad_generic_policy(query):
             state_bonus -= 2.0
         primary_bonus = 1.2 if evidence_idx == 0 else 0.0
         for snippet, score in candidate_snippets(query, item.get("text") or ""):
