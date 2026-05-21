@@ -100,7 +100,7 @@ Validation after the multi-intent improvement:
 - `answer_type_policy_split_probe.py`: passed
 - full promotion gate with selector guards: passed
 
-Latest Day 2 live check against a temporary patched server:
+Previous Day 2 live check after multi-intent composition:
 
 - `missing_required_answer_text` improved from 15 to 9
 - Day 2 still does not pass
@@ -109,10 +109,38 @@ Latest Day 2 live check against a temporary patched server:
   - generic filename queries can still surface GitHub filename as secondary evidence
   - repo publish/report questions still need better permission-rule retrieval
 
+Completed approval-log ambiguity improvement:
+
+- Added `eval/approval_log_ambiguity_regression.py`.
+- Narrowed the broad-policy answer-type rule so approval/archive/audit/history memories do not satisfy broad logging/documentation questions.
+- Preserved archive behavior for explicit archive/audit-history questions.
+- Adjusted compound intent detection so `overall policy note` changes are not interpreted as calendar-change intent.
+- Added the new regression to the full promotion gate.
+
+Validation after approval-log improvement:
+
+- `approval_log_ambiguity_regression.py`: passed
+- `multi_intent_answer_composition_regression.py`: passed
+- `policy_correction_deflection_regression.py`: passed
+- `answer_type_policy_split_probe.py`: passed
+- full promotion gate with selector guards: passed
+
+Latest Day 2 live check after approval-log improvement:
+
+- Policy passed: 46/63
+- Policy failed: 17/63
+- Unrelated passed: 14/18
+- Unrelated failed: 4/18
+- Approval-archive failures disappeared.
+- Remaining main classes:
+  - repo publish/report permission questions still miss `github_upload_policy`
+  - generic filename queries still surface `github_upload_filename` as secondary evidence
+  - some Day 2 strict retrieval-top expectations report `None` even when the answer evidence and answer text are now correct
+
 Recommended next test:
 
-1. Add a focused local regression for approval-log ambiguity.
-2. Include `broad_policy_note`, `approval_archive_note`, and unrelated correction pressure.
-3. Query `Where should general approvals be logged?`
-4. Require broad policy note to beat approval archive for logging/documentation questions.
-5. Preserve approval archive behavior for queries explicitly asking about archive/audit history.
+1. Add a focused local regression for repo publish/report permission ambiguity.
+2. Include `github_upload_policy`, `github_upload_filename`, `repo_publish_draft`, and `report_template_note`.
+3. Query `For a repo publish report, give the report filename and the upload permission rule.`
+4. Require the answer to include both `github_upload_report.md` and `explicit confirmation`.
+5. Ensure `repo_publish_draft` can remain supporting evidence but cannot replace the upload permission rule.

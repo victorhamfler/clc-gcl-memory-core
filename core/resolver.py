@@ -625,6 +625,10 @@ def query_intent_buckets(query: str) -> list[str]:
     terms = normalized_terms(query)
     lower = str(query or "").lower()
     buckets: list[str] = []
+    broad_policy_context = bool(
+        terms & {"broad", "general", "overall"}
+        and terms & {"policy", "note", "notes", "approval", "approvals", "log", "logged", "record", "recorded", "documented"}
+    )
 
     def add(bucket: str, markers: set[str]) -> None:
         if bucket not in buckets and (terms & markers):
@@ -639,7 +643,10 @@ def query_intent_buckets(query: str) -> list[str]:
         )
     ):
         buckets.append("upload_policy")
-    add("calendar_policy", {"calendar", "meeting", "meetings", "event", "events", "change", "changing", "edit", "editing", "reschedule"})
+    if terms & {"calendar", "meeting", "meetings", "event", "events", "edit", "editing", "reschedule"} or (
+        terms & {"change", "changing"} and not broad_policy_context
+    ):
+        buckets.append("calendar_policy")
     add("approval_log", {"approval", "approvals", "documented", "log", "logged", "record", "recorded"})
     return buckets
 

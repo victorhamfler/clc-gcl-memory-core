@@ -140,9 +140,9 @@ answer_type:
       query_terms: broad,general,overall,policy,note,notes,approval,approvals,logged,log,record,recorded,documented
       query_requires_any: approval,approvals,logged,log,record,recorded,documented
       positive_terms: broad,general,overall,policy,note,notes,approval,approvals,documented,change,log
-      positive_requires_any: broad,general,overall,policy,note,notes,approval,approvals,documented,log
-      negative_terms: calendar,schedule,meeting,meetings,event,events,github,repository,repo,upload,uploads,uploading,filename,file,report
-      negative_requires_absent: broad,general,overall,approval,approvals,documented,log
+      positive_requires_any: broad,general,overall,policy,note,notes,documented,log
+      negative_terms: calendar,schedule,meeting,meetings,event,events,github,repository,repo,upload,uploads,uploading,filename,file,report,archive,audit,history,stored,entries,decision
+      negative_requires_absent: broad,general,overall,documented,log
       positive_score: 1.0
       negative_score: -1.0
 
