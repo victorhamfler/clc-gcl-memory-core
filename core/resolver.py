@@ -283,6 +283,25 @@ def is_scope_deflection_evidence(query: str, item: dict[str, Any] | None) -> boo
     )
 
 
+def is_negative_permission_evidence(item: dict[str, Any] | None) -> bool:
+    if item is None:
+        return False
+    text = str(item.get("text") or "").strip().lower()
+    return any(
+        marker in text
+        for marker in (
+            "not permission",
+            "not upload permission",
+            "not authorized",
+            "not authorize",
+            "do not authorize",
+            "does not authorize",
+            "do not grant permission",
+            "does not grant permission",
+        )
+    )
+
+
 def evidence_is_too_weak(evidence: list[dict[str, Any]]) -> bool:
     if not evidence:
         return False
@@ -392,6 +411,8 @@ def is_relevant_to_query(query: str, item: dict[str, Any]) -> bool:
     if intent_match >= 0.65 and normalized_terms(query) & text_terms:
         return True
     overlap = query_terms & text_terms
+    if float(item.get("answer_type_score") or 0.0) > 0.0 and len(overlap) >= 2:
+        return True
     if len(overlap) >= max(1, len(query_terms) // 2):
         return True
     score = float(item.get("score") or 0.0)
@@ -423,6 +444,8 @@ def evidence_preference_score(query: str, item: dict[str, Any]) -> float:
         score -= 0.18
     if is_scope_deflection_evidence(query, item):
         score -= 0.35
+    if is_negative_permission_evidence(item):
+        score -= 0.22
     authority_state = str(item.get("authority_state") or "").strip().lower()
     if authority_state == "current":
         score += 0.35 * max(0.30, float(item.get("correction_relevance_score") or 1.0))
@@ -534,8 +557,14 @@ def select_answer_snippets(query: str, evidence: list[dict[str, Any]]) -> list[s
     has_stale = any(str(item.get("memory_state") or "") == "stale" for item in evidence)
     require_current = has_current and has_stale and not asks_for_stale_history(query)
     has_non_deflecting_evidence = any(not is_scope_deflection_evidence(query, item) for item in evidence[:3])
+    has_non_negative_permission_evidence = any(
+        evidence_matches_intent_bucket("upload_policy", item) and not is_negative_permission_evidence(item)
+        for item in evidence[:3]
+    )
     for evidence_idx, item in enumerate(evidence[:3]):
         if has_non_deflecting_evidence and is_scope_deflection_evidence(query, item):
+            continue
+        if has_non_negative_permission_evidence and is_negative_permission_evidence(item):
             continue
         state = str(item.get("memory_state") or "")
         state_bonus = 0.0
@@ -657,6 +686,8 @@ def evidence_matches_intent_bucket(bucket: str, item: dict[str, Any]) -> bool:
     if bucket == "filename":
         return bool(text_terms & {"filename", "file", "report", "md"} or "filename" in source)
     if bucket == "upload_policy":
+        if is_negative_permission_evidence(item):
+            return False
         return bool(
             text_terms & {"confirmation", "explicit", "explicitly", "permission", "requested", "request", "conversation"}
             and text_terms & {"github", "upload", "uploads", "uploading", "repository", "repo"}
@@ -811,6 +842,10 @@ def expanded_query_terms(lower_text: str, terms: set[str]) -> set[str]:
         expanded.update({"contradict", "contradiction", "conflict", "protect", "protective", "correction", "stale", "csd"})
     if terms & {"consolidation", "consolidate"} or "consolidation work" in lower_text:
         expanded.update({"consolidation", "consolidate", "summary", "summarize", "summarizes", "original", "preserve", "source"})
+    if terms & {"repo", "repository", "publish", "publishing"}:
+        expanded.update({"github", "upload", "uploads", "uploading", "repository", "repo", "publish", "publishing"})
+    if terms & {"permission", "approval", "approve"} and terms & {"github", "repo", "repository", "upload", "uploads", "uploading", "publish", "publishing"}:
+        expanded.update({"permission", "approval", "confirmation", "explicit", "explicitly", "requested", "upload", "github"})
     if "previous question" in lower_text or "remember previous" in lower_text:
         expanded.update({"session", "history", "turn", "context", "previous", "questions", "remember"})
     if terms & {"maintain", "maintains"}:

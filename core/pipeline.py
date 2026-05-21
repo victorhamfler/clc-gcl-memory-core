@@ -315,6 +315,7 @@ def _normalize_answer_type_rule(raw_rule: dict[str, Any]) -> dict[str, Any]:
         "negative_terms": _parse_term_sequence(raw_rule.get("negative_terms")),
         "query_requires_any": _parse_term_sequence(raw_rule.get("query_requires_any")),
         "query_excludes_any": _parse_term_sequence(raw_rule.get("query_excludes_any")),
+        "query_excludes_unless_any": _parse_term_sequence(raw_rule.get("query_excludes_unless_any")),
         "positive_requires_any": _parse_term_sequence(raw_rule.get("positive_requires_any")),
         "negative_requires_absent": _parse_term_sequence(raw_rule.get("negative_requires_absent")),
         "positive_score": positive_score,
@@ -1777,8 +1778,10 @@ class MemoryPipeline:
             if required_query_terms and not (query_terms & required_query_terms):
                 continue
             excluded_query_terms = self._answer_type_rule_terms(rule["query_excludes_any"])
+            excluded_unless_terms = self._answer_type_rule_terms(rule["query_excludes_unless_any"])
             if excluded_query_terms and query_terms & excluded_query_terms:
-                continue
+                if not excluded_unless_terms or not (query_terms & excluded_unless_terms):
+                    continue
 
             positive_terms = self._answer_type_rule_terms(rule["positive_terms"])
             positive_required = self._answer_type_rule_terms(rule["positive_requires_any"])

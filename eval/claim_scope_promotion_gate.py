@@ -83,6 +83,7 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
     )
     multi_intent_report = read_json(REPO_ROOT / "experiments" / "multi_intent_answer_composition_regression_results.json")
     approval_log_report = read_json(REPO_ROOT / "experiments" / "approval_log_ambiguity_regression_results.json")
+    repo_publish_report = read_json(REPO_ROOT / "experiments" / "repo_publish_permission_ambiguity_regression_results.json")
     gate_ok = all(step["ok"] for step in steps)
 
     required_summary = {
@@ -98,6 +99,7 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
         "policy_correction_deflection_ok": bool(policy_deflection_report and policy_deflection_report.get("ok")),
         "multi_intent_answer_composition_ok": bool(multi_intent_report and multi_intent_report.get("ok")),
         "approval_log_ambiguity_ok": bool(approval_log_report and approval_log_report.get("ok")),
+        "repo_publish_permission_ambiguity_ok": bool(repo_publish_report and repo_publish_report.get("ok")),
     }
     if args.include_selector_guards:
         required_summary["selector_guards_ok"] = all(
@@ -175,6 +177,10 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
         "approval_log_ambiguity_regression": {
             "ok": approval_log_report.get("ok") if approval_log_report else None,
             "case_count": approval_log_report.get("case_count") if approval_log_report else None,
+        },
+        "repo_publish_permission_ambiguity_regression": {
+            "ok": repo_publish_report.get("ok") if repo_publish_report else None,
+            "case_count": repo_publish_report.get("case_count") if repo_publish_report else None,
         },
     }
 
@@ -332,6 +338,7 @@ def main() -> int:
                 str(ROOT / "eval" / "policy_correction_deflection_regression.py"),
                 str(ROOT / "eval" / "multi_intent_answer_composition_regression.py"),
                 str(ROOT / "eval" / "approval_log_ambiguity_regression.py"),
+                str(ROOT / "eval" / "repo_publish_permission_ambiguity_regression.py"),
             ],
         ),
         run_step("nested_config_regression", [python, str(ROOT / "eval" / "config_nested_parser_regression.py")]),
@@ -386,6 +393,10 @@ def main() -> int:
         run_step(
             "approval_log_ambiguity_regression",
             [python, str(ROOT / "eval" / "approval_log_ambiguity_regression.py")],
+        ),
+        run_step(
+            "repo_publish_permission_ambiguity_regression",
+            [python, str(ROOT / "eval" / "repo_publish_permission_ambiguity_regression.py")],
         ),
     ]
     if args.include_selector_guards:

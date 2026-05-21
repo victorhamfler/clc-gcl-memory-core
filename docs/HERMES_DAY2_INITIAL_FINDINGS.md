@@ -137,10 +137,39 @@ Latest Day 2 live check after approval-log improvement:
   - generic filename queries still surface `github_upload_filename` as secondary evidence
   - some Day 2 strict retrieval-top expectations report `None` even when the answer evidence and answer text are now correct
 
+Completed repo publish/report permission improvement:
+
+- Added `eval/repo_publish_permission_ambiguity_regression.py`.
+- Added `query_excludes_unless_any` support for answer-type rules.
+- Updated `github_upload_policy` so filename/report terms still suppress filename-only questions, but compound permission/rule questions can activate the upload policy.
+- Expanded resolver query terms so `repo publish permission` maps to GitHub upload confirmation.
+- Added negative-permission evidence handling so `not upload permission` notes can remain context but cannot satisfy the upload-permission answer bucket.
+- Added the new regression to the full promotion gate.
+
+Validation after repo publish/report permission improvement:
+
+- `repo_publish_permission_ambiguity_regression.py`: passed
+- `multi_intent_answer_composition_regression.py`: passed
+- `approval_log_ambiguity_regression.py`: passed
+- `answer_type_policy_split_probe.py`: passed
+- full promotion gate with selector guards: passed
+
+Latest Day 2 live check after repo publish/report permission improvement:
+
+- Policy passed: 49/63
+- Policy failed: 14/63
+- Unrelated passed: 14/18
+- Unrelated failed: 4/18
+- Repo publish/report permission failures disappeared.
+- Remaining main classes:
+  - generic filename queries still surface `github_upload_filename` as secondary evidence
+  - some strict retrieval-top labels report `None` even when answer evidence and answer text are correct
+  - `upload_artifact_paraphrase` answers correctly but its top evidence bookkeeping still reports `broad_policy_note`
+
 Recommended next test:
 
-1. Add a focused local regression for repo publish/report permission ambiguity.
-2. Include `github_upload_policy`, `github_upload_filename`, `repo_publish_draft`, and `report_template_note`.
-3. Query `For a repo publish report, give the report filename and the upload permission rule.`
-4. Require the answer to include both `github_upload_report.md` and `explicit confirmation`.
-5. Ensure `repo_publish_draft` can remain supporting evidence but cannot replace the upload permission rule.
+1. Add a focused local regression for generic filename leakage.
+2. Include `github_upload_filename`, `weather_filename_note`, and `report_template_note`.
+3. Query `What filename is used for weather radar text notes?`
+4. Require the weather filename memory to answer with `radar_snapshot.txt`.
+5. Ensure `github_upload_filename` can remain below the target but does not enter answer evidence for non-GitHub filename questions.

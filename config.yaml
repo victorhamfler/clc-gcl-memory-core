@@ -123,8 +123,9 @@ answer_type:
     github_upload_policy:
       query_terms: github,repository,repo,upload,uploads,uploading,publish,publishing,permission
       query_excludes_any: filename,file,report
+      query_excludes_unless_any: permission,rule,automatic,automatically,approval,approve,confirmation,publish,publishing
       positive_terms: github,repository,repo,upload,uploads,uploading,publish,publishing,permission,confirmation,explicitly,requested,requests,conversation
-      positive_requires_any: github,upload,uploads,uploading
+      positive_requires_any: github,repository,repo,upload,uploads,uploading,publish,publishing,permission,confirmation
       negative_terms: calendar,schedule,meeting,meetings,event,events,change,changing,filename,file,report,issue,issues,note,notes,draft,drafts,release,blockers
       negative_requires_absent: confirmation,explicitly,requested,requests,conversation
       positive_score: 1.0
