@@ -1,0 +1,27 @@
+{
+  "schema": "retrieval_signal_candidates/v1",
+  "description": "Fixture candidate artifact for validating retrieval-signal config proposals before promotion.",
+  "candidates": [
+    {
+      "id": "mission_control_broad_note",
+      "section": "broad_generic",
+      "source_contains": ["mission_control"],
+      "text_prefixes": ["global operations note"],
+      "notes": "Example additive broad-generic markers for a future operations-note failure."
+    },
+    {
+      "id": "transfer_scope_deflection",
+      "section": "scope_deflection",
+      "query_terms": ["transfer"],
+      "text_markers": ["not transfer approval"],
+      "notes": "Example additive scope-deflection marker for near-topic transfer-policy corrections."
+    },
+    {
+      "id": "default_correction_relevance",
+      "section": "correction_relevance",
+      "match_threshold": 0.75,
+      "min_relevance": 0.15,
+      "notes": "No-op threshold candidate used to validate numeric artifact parsing without changing current behavior."
+    }
+  ]
+}

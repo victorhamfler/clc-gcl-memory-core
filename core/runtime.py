@@ -82,6 +82,8 @@ def create_pipeline(root: Path, db_path: Path | None = None) -> MemoryPipeline:
         symbolic_config=config.get("symbolic"),
         claim_scope_config=config.get("claim_scope"),
         answer_type_config=config.get("answer_type"),
+        retrieval_signal_config=config.get("retrieval_signals"),
+        evidence_state_config=config.get("evidence_states"),
         llm_config=config.get("llm"),
         clc_thresholds=config.get("thresholds"),
     )
@@ -158,6 +160,8 @@ def pipeline_config_view(pipeline: MemoryPipeline) -> dict[str, Any]:
                 for key, rule in sorted(pipeline.answer_type_config["rules"].items())
             },
         },
+        "retrieval_signals": pipeline.retrieval_signal_config,
+        "evidence_states": pipeline.evidence_state_config,
         "llm": sanitized_llm_config(pipeline.llm_config),
     }
 

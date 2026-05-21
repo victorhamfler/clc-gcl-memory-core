@@ -147,6 +147,35 @@ answer_type:
       positive_score: 1.0
       negative_score: -1.0
 
+retrieval_signals:
+  broad_generic:
+    source_contains: broad_policy,general_policy
+    text_prefixes: broad policy note,general policy note
+    penalty: 0.18
+  scope_deflection:
+    query_terms: policy,permission,approval,approve,upload,github,repo,publish,calendar,meeting,event,change,changing,reschedule
+    correction_prefixes: "correction:"
+    text_markers: not permission,not upload permission,not authorized,not authorize,do not authorize,does not authorize,separate policy,separate calendar policy,still follows the separate
+    penalty: 0.55
+  correction_relevance:
+    match_threshold: 0.75
+    min_relevance: 0.15
+
+evidence_states:
+  current_threshold: 0.30
+  stale_threshold: -0.25
+  stale_feedback_threshold: -0.50
+  disputed_feedback_threshold: -0.20
+  stale_language_terms: not final truth,marked stale,stale memory,superseded,no longer current,historical but no longer current
+  stale_regex: \bold\s+(policy|memory|fact|rule|preference|profile|deployment|geometry|evidence|version|value)\b
+  correction_language_terms: "correction:,must not,only when,prefer the corrected,no longer current"
+  sensitive_lookup_terms: address,email,key,license,passport,password,phone,private,secret,signing,ssn,token
+  weak_evidence:
+    score_threshold: 0.20
+    text_match_threshold: 0.50
+    intent_match_threshold: 0.80
+    intent_text_match_threshold: 0.30
+
 outcome_log:
   enabled: true
   path: logs/memory_outcomes.jsonl

@@ -29,6 +29,10 @@ def build_test_api(tmp: Path) -> MemoryApi:
         embedding_config={"backend": "hash", "dim": 128},
         retrieval_weights=api.root_config.get("retrieval_weights"),
         symbolic_config=api.root_config.get("symbolic"),
+        claim_scope_config=api.root_config.get("claim_scope"),
+        answer_type_config=api.root_config.get("answer_type"),
+        retrieval_signal_config=api.root_config.get("retrieval_signals"),
+        evidence_state_config=api.root_config.get("evidence_states"),
         llm_config=api.root_config.get("llm"),
         clc_thresholds=api.root_config.get("thresholds"),
     )
@@ -107,6 +111,22 @@ def main() -> int:
             "feedback_linked_to_ask": by_type["feedback"]["linked_operation_id"] == asked["operation_id"],
             "feedback_metadata_linked": feedback["feedback"]["metadata"]["linked_operation_id"] == asked["operation_id"],
             "selector_context_logged": bool(by_type["selector_explain"]["payload"]["selector_context"]["retrieval_context"]),
+            "ask_raw_results_have_training_fields": all(
+                field in by_type["ask"]["payload"]["response"]["raw_results"][0]
+                for field in (
+                    "memory_id",
+                    "score",
+                    "text_match_score",
+                    "intent_match_score",
+                    "supersession_score",
+                    "relation_supersession_score",
+                    "summary_relation_score",
+                    "feedback_score",
+                    "authority_state",
+                    "source",
+                    "text",
+                )
+            ),
         }
         report = {
             "ok": all(checks.values()),

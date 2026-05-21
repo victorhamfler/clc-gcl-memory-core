@@ -3,12 +3,21 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from core.evidence_states import (
+    CURRENT_THRESHOLD,
+    SENSITIVE_LOOKUP_TERMS,
+    STALE_THRESHOLD,
+    classify_memory_state as _classify_memory_state,
+    evidence_is_too_weak as _evidence_is_too_weak,
+    requires_sensitive_evidence as _requires_sensitive_evidence,
+)
 
-CURRENT_THRESHOLD = 0.30
-STALE_THRESHOLD = -0.25
 
-
-def resolve_answer(query: str, results: list[dict[str, Any]]) -> dict[str, Any]:
+def resolve_answer(
+    query: str,
+    results: list[dict[str, Any]],
+    evidence_state_config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     summary: list[dict[str, Any]] = []
     current: list[dict[str, Any]] = []
     historical: list[dict[str, Any]] = []
@@ -18,7 +27,7 @@ def resolve_answer(query: str, results: list[dict[str, Any]]) -> dict[str, Any]:
     for rank, item in enumerate(results, start=1):
         row = dict(item)
         row["rank"] = rank
-        state = classify_memory_state(row)
+        state = classify_memory_state(row, evidence_state_config)
         row["memory_state"] = state
         if state == "summary":
             summary.append(row)
@@ -31,9 +40,18 @@ def resolve_answer(query: str, results: list[dict[str, Any]]) -> dict[str, Any]:
         else:
             historical.append(row)
 
-    preferred = choose_preferred_evidence(query, results, summary, current, historical, disputed, stale)
+    preferred = choose_preferred_evidence(
+        query,
+        results,
+        summary,
+        current,
+        historical,
+        disputed,
+        stale,
+        evidence_state_config=evidence_state_config,
+    )
     evidence = preferred[: min(3, len(preferred))]
-    if evidence_is_too_weak(evidence):
+    if evidence_is_too_weak(evidence, evidence_state_config):
         evidence = []
     correction_conflict = has_correction_conflict_evidence(evidence)
     live_conflicts = detect_live_evidence_conflicts(evidence)
@@ -92,6 +110,7 @@ def choose_preferred_evidence(
     historical: list[dict[str, Any]],
     disputed: list[dict[str, Any]],
     stale: list[dict[str, Any]],
+    evidence_state_config: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     if not results:
         return []
@@ -166,7 +185,9 @@ def choose_preferred_evidence(
             for item in current
             if is_relevant_to_query(query, item) and not is_scope_deflection_evidence(query, item)
         ]
-        current_pool = relevant_current or ([] if (historical or stale or disputed or requires_sensitive_evidence(query)) else current)
+        current_pool = relevant_current or (
+            [] if (historical or stale or disputed or requires_sensitive_evidence(query, evidence_state_config)) else current
+        )
         current_score = max((float(item.get("score") or 0.0) for item in current_pool), default=0.0)
         relevance_floor = max(0.18, top_score * 0.90)
         if current_pool and (current_score >= relevance_floor or not (historical or summary)):
@@ -182,7 +203,7 @@ def choose_preferred_evidence(
         return order_evidence(query, historical + supplemental_stale)
     if stale and allows_stale_definition_context(query):
         return stale
-    if requires_sensitive_evidence(query):
+    if requires_sensitive_evidence(query, evidence_state_config):
         return []
     return order_evidence(query, disputed or stale or current or summary)
 
@@ -302,84 +323,16 @@ def is_negative_permission_evidence(item: dict[str, Any] | None) -> bool:
     )
 
 
-def evidence_is_too_weak(evidence: list[dict[str, Any]]) -> bool:
-    if not evidence:
-        return False
-    top_score = max(float(item.get("score") or 0.0) for item in evidence)
-    top_text_match = max(float(item.get("text_match_score") or 0.0) for item in evidence)
-    top_intent_match = max(float(item.get("intent_match_score") or 0.0) for item in evidence)
-    has_authority_signal = any(
-        float(item.get("supersession_score") or 0.0) > 0.0
-        or float(item.get("relation_supersession_score") or 0.0) > 0.0
-        or float(item.get("stored_contradiction_score") or 0.0) > 0.0
-        for item in evidence
-    )
-    if has_authority_signal:
-        return False
-    if top_intent_match >= 0.80 and top_text_match >= 0.30:
-        return False
-    return top_score < 0.20 and top_text_match < 0.50
+def evidence_is_too_weak(evidence: list[dict[str, Any]], config: dict[str, Any] | None = None) -> bool:
+    return _evidence_is_too_weak(evidence, config)
 
 
-def requires_sensitive_evidence(query: str) -> bool:
-    return bool(normalized_terms(query) & SENSITIVE_LOOKUP_TERMS)
+def requires_sensitive_evidence(query: str, config: dict[str, Any] | None = None) -> bool:
+    return _requires_sensitive_evidence(query, normalized_terms, config)
 
 
-def classify_memory_state(item: dict[str, Any]) -> str:
-    supersession = float(item.get("supersession_score") or 0.0)
-    relation_supersession = float(item.get("relation_supersession_score") or 0.0)
-    summary_relation = float(item.get("summary_relation_score") or 0.0)
-    feedback = float(item.get("feedback_score") or 0.0)
-    text = str(item.get("text") or "").lower()
-    authority_state = str(item.get("authority_state") or "").strip().lower()
-
-    if text.startswith("consolidated summary:") or (summary_relation > 0.0 and "source memory ids:" in text):
-        return "summary"
-    if authority_state == "current":
-        return "current"
-    if authority_state == "superseded" or item.get("superseded_by_memory_ids"):
-        return "stale"
-
-    stale_language = any(
-        term in text
-        for term in (
-            "not final truth",
-            "marked stale",
-            "stale memory",
-            "superseded",
-            "no longer current",
-            "historical but no longer current",
-        )
-    ) or bool(
-        re.search(
-            r"\bold\s+(policy|memory|fact|rule|preference|profile|deployment|geometry|evidence|version|value)\b",
-            text,
-        )
-    )
-    correction_language = any(
-        term in text
-        for term in (
-            "correction:",
-            "must not",
-            "only when",
-            "prefer the corrected",
-            "no longer current",
-        )
-    )
-
-    if supersession <= STALE_THRESHOLD or relation_supersession < 0.0 or feedback <= -0.5:
-        return "stale"
-    if feedback < -0.2:
-        return "disputed"
-    if supersession >= CURRENT_THRESHOLD:
-        return "current"
-    if relation_supersession > 0.0 and correction_language:
-        return "current"
-    if correction_language and not stale_language:
-        return "current"
-    if stale_language:
-        return "stale"
-    return "historical"
+def classify_memory_state(item: dict[str, Any], config: dict[str, Any] | None = None) -> str:
+    return _classify_memory_state(item, config)
 
 
 def is_relevant_to_query(query: str, item: dict[str, Any]) -> bool:
@@ -1031,22 +984,6 @@ ANSWER_STOPWORDS = {
     "whether",
     "which",
     "with",
-}
-
-
-SENSITIVE_LOOKUP_TERMS = {
-    "address",
-    "email",
-    "key",
-    "license",
-    "passport",
-    "password",
-    "phone",
-    "private",
-    "secret",
-    "signing",
-    "ssn",
-    "token",
 }
 
 

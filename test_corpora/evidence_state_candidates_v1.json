@@ -1,0 +1,33 @@
+{
+  "schema": "evidence_state_candidates/v1",
+  "description": "Fixture evidence-state candidates for stale/correction/sensitive/weak-evidence adaptation.",
+  "candidates": [
+    {
+      "id": "retired_truth_stale_language",
+      "section": "stale_language",
+      "terms": ["retired truth"],
+      "notes": "Marks memories that explicitly describe themselves as retired truth as stale."
+    },
+    {
+      "id": "replacement_correction_language",
+      "section": "correction_language",
+      "terms": ["replacement:"],
+      "notes": "Marks replacement notes as current correction evidence."
+    },
+    {
+      "id": "routing_sensitive_lookup",
+      "section": "sensitive_lookup",
+      "terms": ["routing"],
+      "notes": "Requires direct evidence for routing-key lookup queries."
+    },
+    {
+      "id": "slightly_stricter_weak_evidence",
+      "section": "weak_evidence",
+      "score_threshold": 0.25,
+      "text_match_threshold": 0.50,
+      "intent_match_threshold": 0.80,
+      "intent_text_match_threshold": 0.30,
+      "notes": "Rejects very low-score evidence a little more aggressively."
+    }
+  ]
+}
