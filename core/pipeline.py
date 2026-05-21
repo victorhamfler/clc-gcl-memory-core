@@ -314,6 +314,7 @@ def _normalize_answer_type_rule(raw_rule: dict[str, Any]) -> dict[str, Any]:
         "positive_terms": _parse_term_sequence(raw_rule.get("positive_terms")),
         "negative_terms": _parse_term_sequence(raw_rule.get("negative_terms")),
         "query_requires_any": _parse_term_sequence(raw_rule.get("query_requires_any")),
+        "query_excludes_any": _parse_term_sequence(raw_rule.get("query_excludes_any")),
         "positive_requires_any": _parse_term_sequence(raw_rule.get("positive_requires_any")),
         "negative_requires_absent": _parse_term_sequence(raw_rule.get("negative_requires_absent")),
         "positive_score": positive_score,
@@ -1771,6 +1772,9 @@ class MemoryPipeline:
                 continue
             required_query_terms = self._answer_type_rule_terms(rule["query_requires_any"])
             if required_query_terms and not (query_terms & required_query_terms):
+                continue
+            excluded_query_terms = self._answer_type_rule_terms(rule["query_excludes_any"])
+            if excluded_query_terms and query_terms & excluded_query_terms:
                 continue
 
             positive_terms = self._answer_type_rule_terms(rule["positive_terms"])

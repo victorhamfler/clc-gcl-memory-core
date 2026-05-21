@@ -148,6 +148,7 @@ def pipeline_config_view(pipeline: MemoryPipeline) -> dict[str, Any]:
                     "positive_terms": list(rule["positive_terms"]),
                     "negative_terms": list(rule["negative_terms"]),
                     "query_requires_any": list(rule["query_requires_any"]),
+                    "query_excludes_any": list(rule["query_excludes_any"]),
                     "positive_requires_any": list(rule["positive_requires_any"]),
                     "negative_requires_absent": list(rule["negative_requires_absent"]),
                     "positive_score": rule["positive_score"],

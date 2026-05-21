@@ -122,6 +122,7 @@ answer_type:
       negative_score: -1.0
     github_upload_policy:
       query_terms: github,upload,uploads,uploading
+      query_excludes_any: filename,file,report
       positive_terms: github,upload,uploads,uploading,confirmation,explicitly,requested,requests,conversation
       positive_requires_any: github,upload,uploads,uploading
       negative_terms: calendar,schedule,meeting,meetings,event,events,change,changing,filename,file,report
