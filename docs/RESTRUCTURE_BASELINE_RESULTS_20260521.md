@@ -1044,3 +1044,76 @@ selector_candidate_pipeline_from_log.py: PASS
 ```
 
 Evidence miner judgment: the latest Hermes run produced the first useful candidate-quality improvement. The architecture should still not promote these terms yet; they should be held for repeated support from real linked feedback.
+
+## Hermes Live Linked-Feedback Validation
+
+Hermes then ran the pipeline against the live memory server on `localhost:8765` using namespace `hermes_policy_shadow_day1`.
+
+The run used real server calls:
+
+- `POST /ask`
+- review actual retrieved rows;
+- `POST /feedback` linked back to the ask `operation_id`.
+
+Live run stats:
+
+- 48 ask events generated that day;
+- 17 real linked feedback events;
+- 100% linked feedback with matching ask events;
+- labels: `current`, `wrong_domain`, `sensitive_lookup`, `needs_exact_evidence`, `stale`.
+
+Pipeline result:
+
+```text
+PASS
+retrieval candidate sections: 0
+evidence candidate sections: 1
+architecture gate: PASS
+```
+
+Candidate analysis:
+
+- no retrieval-signal candidates were mined, which is correct because no broad/generic note failures were observed;
+- evidence-state sensitive lookup terms mined: `configuration`, `drink`, `exact`, `live`, `morning`, `server`;
+- `live` was judged marginal because it is too broad as a standalone config term.
+
+### Ambiguous Sensitive Term Holdout
+
+Fix:
+
+`eval/mine_evidence_state_candidates.py` now holds out ambiguous sensitive terms instead of adding them directly to candidate config.
+
+Held-out terms currently include:
+
+```text
+live, lives, located, location
+```
+
+These terms still appear in the miner report under:
+
+```text
+support.held_out_sensitive_lookup
+```
+
+but they are not placed in the candidate `terms` list.
+
+Validation:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\evidence_state_miner_regression.py
+..\.venv-torch\Scripts\python.exe .\eval\mine_evidence_state_candidates.py --log C:\Users\victo\Documents\GitHub\clc-gcl-memory-core\logs\memory_outcomes.jsonl --out-json ..\experiments\evidence_candidates_live_session_heldout_terms_results.json --out-md ..\experiments\evidence_candidates_live_session_heldout_terms_report.md
+..\.venv-torch\Scripts\python.exe .\eval\selector_candidate_pipeline_from_log.py --log C:\Users\victo\Documents\GitHub\clc-gcl-memory-core\logs\memory_outcomes.jsonl --out-json ..\experiments\selector_real_live_session_after_heldout_terms_results.json --out-md ..\experiments\selector_real_live_session_after_heldout_terms_report.md
+```
+
+Results:
+
+```text
+evidence_state_miner_regression.py: PASS
+live held out: true
+live candidate mined: false
+live-session pipeline: PASS
+candidate terms: configuration, drink, exact, morning, server
+held-out terms: live
+```
+
+Live-feedback judgment: the architecture has now completed a real closed loop from live ask/feedback events to candidate mining and gated validation. Candidate promotion should still wait for repeated evidence across more sessions.

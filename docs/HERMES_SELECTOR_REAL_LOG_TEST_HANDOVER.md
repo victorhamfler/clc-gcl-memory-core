@@ -296,6 +296,49 @@ and no longer mined:
 does
 ```
 
+## Follow-Up From Live Linked-Feedback Run
+
+Hermes then ran a live memory-server session against `localhost:8765` and produced real linked feedback.
+
+Result:
+
+```text
+PASS
+retrieval candidate sections: 0
+evidence candidate sections: 1
+architecture gate: PASS
+```
+
+The evidence miner initially proposed:
+
+```text
+configuration, drink, exact, live, morning, server
+```
+
+The selector session judged `live` too broad as a raw standalone config term, so the miner now holds out ambiguous location/action terms:
+
+```text
+live, lives, located, location
+```
+
+Held-out terms remain visible in reports under:
+
+```text
+support.held_out_sensitive_lookup
+```
+
+After this change, the live log mined:
+
+```text
+configuration, drink, exact, morning, server
+```
+
+and held out:
+
+```text
+live
+```
+
 ## Important Caution
 
 Candidate artifacts are proposals, not accepted policy.

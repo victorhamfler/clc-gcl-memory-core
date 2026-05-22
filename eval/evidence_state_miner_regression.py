@@ -19,9 +19,13 @@ OUT_MD = REPO_ROOT / "experiments" / "evidence_state_miner_regression_report.md"
 
 def main() -> int:
     report = build_report(FIXTURE)
-    sensitive_terms = set(((report.get("support") or {}).get("sensitive_lookup") or {}).keys())
+    support = report.get("support") or {}
+    sensitive_terms = set((support.get("sensitive_lookup") or {}).keys())
+    held_out_terms = set((support.get("held_out_sensitive_lookup") or {}).keys())
     checks = {
         "auxiliary_does_not_mined": "does" not in sensitive_terms,
+        "ambiguous_live_not_mined": "live" not in sensitive_terms,
+        "ambiguous_live_held_out": "live" in held_out_terms,
         "drink_still_mined": "drink" in sensitive_terms,
         "prefer_still_mined": "prefer" in sensitive_terms,
         "candidate_section_present": report.get("candidate_count") == 1,
@@ -31,7 +35,7 @@ def main() -> int:
         "checks": checks,
         "fixture": str(FIXTURE),
         "candidate_count": report.get("candidate_count"),
-        "support": report.get("support"),
+        "support": support,
     }
     OUT_JSON.parent.mkdir(parents=True, exist_ok=True)
     OUT_JSON.write_text(json.dumps(result, indent=2), encoding="utf-8")

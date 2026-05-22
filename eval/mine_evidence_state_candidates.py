@@ -22,6 +22,12 @@ OUT_MD = REPO_ROOT / "experiments" / "evidence_state_candidates_mined_report.md"
 STALE_LABELS = {"stale", "old", "obsolete", "superseded", "incorrect_stale"}
 CURRENT_LABELS = {"current", "should_be_current", "fresh", "corrected_current"}
 SENSITIVE_LABELS = {"sensitive", "sensitive_lookup", "needs_exact_evidence", "private_lookup"}
+AMBIGUOUS_SENSITIVE_TERMS = {
+    "live",
+    "lives",
+    "located",
+    "location",
+}
 STOP_TERMS = {
     "about",
     "channel",
@@ -172,6 +178,7 @@ def build_report(log_path: Path, *, min_support: int = 1) -> dict[str, Any]:
     stale_terms: Counter[str] = Counter()
     correction_terms: Counter[str] = Counter()
     sensitive_terms: Counter[str] = Counter()
+    held_out_sensitive_terms: Counter[str] = Counter()
     examples: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
     for feedback in feedback_events:
@@ -204,6 +211,12 @@ def build_report(log_path: Path, *, min_support: int = 1) -> dict[str, Any]:
         if label in SENSITIVE_LABELS:
             for term in query_terms(query):
                 if term not in existing_sensitive_terms:
+                    if term in AMBIGUOUS_SENSITIVE_TERMS:
+                        held_out_sensitive_terms[term] += 1
+                        examples[f"held_out_sensitive_lookup:{term}"].append(
+                            example_row(query, row, feedback, observed_state)
+                        )
+                        continue
                     sensitive_terms[term] += 1
                     examples[f"sensitive_lookup:{term}"].append(example_row(query, row, feedback, observed_state))
 
@@ -255,6 +268,7 @@ def build_report(log_path: Path, *, min_support: int = 1) -> dict[str, Any]:
             "stale_language": dict(sorted(stale_terms.items())),
             "correction_language": dict(sorted(correction_terms.items())),
             "sensitive_lookup": dict(sorted(sensitive_terms.items())),
+            "held_out_sensitive_lookup": dict(sorted(held_out_sensitive_terms.items())),
         },
         "examples": {key: value[:5] for key, value in sorted(examples.items())},
     }
