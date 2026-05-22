@@ -872,3 +872,103 @@ Artifacts:
 - `C:\Users\victo\Desktop\projcod2\experiments\selector_candidate_pipeline_from_log_report.md`
 
 Pipeline judgment: this is now the preferred command for testing a real Hermes outcome log before any candidate-promotion discussion.
+
+## Hermes Real-Log Tooling Fixes
+
+Hermes ran the selector candidate pipeline against a realistic generated Hermes outcome log with:
+
+- 30 ask events;
+- 16 linked feedback events;
+- normal queries;
+- stale/current corrections;
+- wrong-domain distractors;
+- broad policy distractors;
+- sensitive lookups;
+- bad-source cases.
+
+The pipeline passed, but Hermes found two auxiliary-tooling bugs.
+
+### Bug 1: Missing Claim-Scope Candidate File
+
+Problem:
+
+```text
+claim_scope_promotion_gate.py crashed when experiments/claim_scope_alias_candidates_v2.json was missing.
+```
+
+Fix:
+
+`eval/claim_scope_candidate_ab_eval.py` now treats a missing candidate file as a no-op candidate artifact:
+
+```json
+{
+  "schema": "claim_scope_alias_candidates/v1",
+  "candidates": []
+}
+```
+
+Validation:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\claim_scope_candidate_ab_eval.py --candidates ..\experiments\definitely_missing_claim_scope_candidates.json --out-json ..\experiments\claim_scope_candidate_ab_missing_file_results.json --out-md ..\experiments\claim_scope_candidate_ab_missing_file_report.md
+..\.venv-torch\Scripts\python.exe .\eval\claim_scope_promotion_gate.py --candidates ..\experiments\definitely_missing_claim_scope_candidates.json --out-json ..\experiments\claim_scope_promotion_gate_missing_candidate_results.json --out-md ..\experiments\claim_scope_promotion_gate_missing_candidate_report.md
+```
+
+Results:
+
+```text
+claim_scope_candidate_ab_eval.py missing candidate: PASS
+claim_scope_promotion_gate.py missing candidate: PASS
+```
+
+### Bug 2: Redundant Broad-Generic Source Markers
+
+Problem:
+
+```text
+mine_retrieval_signal_candidates.py could mine broad_policy_note even though broad_policy already covered it by substring match.
+```
+
+Fix:
+
+`eval/mine_retrieval_signal_candidates.py` now checks source stems and text prefixes using the same coverage semantics as `RetrievalSignalScorer.broad_generic_note()`.
+
+Added:
+
+- `test_corpora/retrieval_signal_redundant_marker_outcomes.jsonl`
+- `eval/retrieval_signal_miner_regression.py`
+
+`eval/retrieval_signal_promotion_gate.py` now runs this miner regression as a required sub-check.
+
+Validation:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\retrieval_signal_miner_regression.py
+..\.venv-torch\Scripts\python.exe .\eval\retrieval_signal_promotion_gate.py --candidates .\test_corpora\retrieval_signal_candidates_v1.json --out-json ..\experiments\retrieval_signal_promotion_gate_after_tooling_fixes_results.json --out-md ..\experiments\retrieval_signal_promotion_gate_after_tooling_fixes_report.md
+```
+
+Results:
+
+```text
+retrieval_signal_miner_regression.py: PASS
+retrieval_signal_promotion_gate.py: PASS, miner_regression_ok=true
+```
+
+### Hermes Real-Log Pipeline Rerun
+
+Command:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\selector_candidate_pipeline_from_log.py --log C:\Users\victo\Documents\GitHub\clc-gcl-memory-core\logs\hermes_real_test_outcome.jsonl --out-json ..\experiments\selector_candidate_pipeline_hermes_real_after_gate_regression_results.json --out-md ..\experiments\selector_candidate_pipeline_hermes_real_after_gate_regression_report.md
+```
+
+Result:
+
+```text
+PASS
+retrieval candidate sections: 1
+evidence candidate sections: 1
+architecture gate: PASS
+```
+
+Tooling-fix judgment: Hermes' two reported auxiliary bugs are fixed, covered by regression checks, and the full real-log pipeline still passes.

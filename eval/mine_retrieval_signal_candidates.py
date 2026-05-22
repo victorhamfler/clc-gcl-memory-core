@@ -137,6 +137,16 @@ def query_candidate_terms(query: str) -> list[str]:
     return out[:6]
 
 
+def covered_by_existing_source_marker(stem: str, existing_source_markers: set[str]) -> bool:
+    stem_l = str(stem or "").lower()
+    return any(marker and marker in stem_l for marker in existing_source_markers)
+
+
+def covered_by_existing_prefix(prefix: str, existing_prefixes: set[str]) -> bool:
+    prefix_l = str(prefix or "").lower()
+    return any(marker and prefix_l.startswith(marker) for marker in existing_prefixes)
+
+
 def build_report(log_path: Path, *, min_support: int = 1) -> dict[str, Any]:
     config = load_config(ROOT)
     current = normalize_retrieval_signal_config(config.get("retrieval_signals") or {})
@@ -181,10 +191,14 @@ def build_report(log_path: Path, *, min_support: int = 1) -> dict[str, Any]:
         prefix = starts_broad_note(text)
         marker = negative_marker(text)
 
-        if prefix and prefix not in existing_prefixes:
+        if prefix and not covered_by_existing_prefix(prefix, existing_prefixes):
             broad_prefixes[prefix] += 1
             examples[f"broad_prefix:{prefix}"].append(example_row(query, row, feedback))
-        if ("note" in stem or "ops" in stem or "control" in stem) and stem and stem not in existing_source_markers:
+        if (
+            ("note" in stem or "ops" in stem or "control" in stem)
+            and stem
+            and not covered_by_existing_source_marker(stem, existing_source_markers)
+        ):
             broad_sources[stem] += 1
             examples[f"broad_source:{stem}"].append(example_row(query, row, feedback))
         if marker and marker not in existing_text_markers:

@@ -75,6 +75,7 @@ def clean_cell(value: Any, limit: int = 140) -> str:
 def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifacts: dict[str, str]) -> dict[str, Any]:
     candidate_report = read_json(Path(artifacts["candidate_json"]))
     module_smoke = read_json(REPO_ROOT / "experiments" / "retrieval_signals_module_smoke_results.json")
+    miner_regression = read_json(REPO_ROOT / "experiments" / "retrieval_signal_miner_regression_results.json")
     nested_config = read_json(REPO_ROOT / "experiments" / "config_nested_parser_regression_results.json")
     claim_scope_gate = read_json(REPO_ROOT / "experiments" / "claim_scope_promotion_gate_results.json")
     randomized = read_json(REPO_ROOT / "experiments" / "selector_retrieval_guard_randomized_eval_seed20260520_n64_results.json")
@@ -87,6 +88,7 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
     required_summary = {
         "candidate_eval_ok": bool(candidate_report and candidate_report.get("ok")),
         "module_smoke_ok": bool(module_smoke and module_smoke.get("ok")),
+        "miner_regression_ok": bool(miner_regression and miner_regression.get("ok")),
         "nested_config_ok": bool(nested_config and nested_config.get("ok")),
         "claim_scope_gate_ok": bool(claim_scope_gate and claim_scope_gate.get("ok")),
         "randomized_guard_ok": bool(randomized and randomized.get("ok")),
@@ -109,6 +111,10 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
         "module_smoke": {
             "ok": module_smoke.get("ok") if module_smoke else None,
             "check_count": len(module_smoke.get("checks") or []) if module_smoke else None,
+        },
+        "miner_regression": {
+            "ok": miner_regression.get("ok") if miner_regression else None,
+            "checks": miner_regression.get("checks") if miner_regression else None,
         },
         "claim_scope_gate": {
             "ok": claim_scope_gate.get("ok") if claim_scope_gate else None,
@@ -154,6 +160,11 @@ def write_markdown(report: dict[str, Any], out_md: Path) -> None:
             f"- Checks: `{report['candidate_eval']['check_count']}`",
             f"- Validation failures: `{', '.join(report['candidate_eval']['validation_failures'] or []) or 'none'}`",
             f"- Check failures: `{', '.join(report['candidate_eval']['failures'] or []) or 'none'}`",
+            "",
+            "## Miner Regression",
+            "",
+            f"- Passed: `{report['miner_regression']['ok']}`",
+            f"- Checks: `{json.dumps(report['miner_regression']['checks'], sort_keys=True)}`",
             "",
             "## Behavior Gates",
             "",
@@ -212,6 +223,7 @@ def main() -> int:
                 str(ROOT / "core" / "runtime.py"),
                 str(ROOT / "eval" / "retrieval_signal_candidate_eval.py"),
                 str(ROOT / "eval" / "mine_retrieval_signal_candidates.py"),
+                str(ROOT / "eval" / "retrieval_signal_miner_regression.py"),
                 str(ROOT / "eval" / "retrieval_signals_module_smoke.py"),
                 str(ROOT / "eval" / "policy_correction_deflection_regression.py"),
             ],
@@ -230,6 +242,7 @@ def main() -> int:
             ],
         ),
         run_step("module_smoke", [python, str(ROOT / "eval" / "retrieval_signals_module_smoke.py")]),
+        run_step("miner_regression", [python, str(ROOT / "eval" / "retrieval_signal_miner_regression.py")]),
         run_step("nested_config", [python, str(ROOT / "eval" / "config_nested_parser_regression.py")]),
         run_step("claim_scope_gate", [python, str(ROOT / "eval" / "claim_scope_promotion_gate.py")]),
         run_step(

@@ -238,6 +238,27 @@ architecture gate: PASS
 
 This proves the plumbing works. The next question is whether real Hermes logs produce candidates worth studying.
 
+## Follow-Up From First Hermes Run
+
+Hermes ran this test once and reported two auxiliary-tooling bugs:
+
+- missing claim-scope candidate files could block `claim_scope_promotion_gate.py`;
+- retrieval-signal mining could propose redundant broad-generic markers already covered by substring matching.
+
+Both are fixed in the selector session:
+
+- missing claim-scope candidate files now use a no-op candidate artifact;
+- `retrieval_signal_miner_regression.py` verifies redundant broad-policy markers are not mined;
+- the retrieval-signal promotion gate now requires that miner regression.
+
+After the fixes, the Hermes real-log pipeline was rerun and passed:
+
+```text
+retrieval candidate sections: 1
+evidence candidate sections: 1
+architecture gate: PASS
+```
+
 ## Important Caution
 
 Candidate artifacts are proposals, not accepted policy.

@@ -22,6 +22,11 @@ SCHEMA_PATH = ROOT / "storage" / "schema.sql"
 DEFAULT_CANDIDATES = REPO_ROOT / "experiments" / "claim_scope_alias_candidates.json"
 OUT_JSON = REPO_ROOT / "experiments" / "claim_scope_candidate_ab_eval_results.json"
 OUT_MD = REPO_ROOT / "experiments" / "claim_scope_candidate_ab_eval_report.md"
+EMPTY_CANDIDATE_REPORT = {
+    "schema": "claim_scope_alias_candidates/v1",
+    "description": "No-op candidate artifact automatically used because no claim-scope candidate file was found.",
+    "candidates": [],
+}
 CONSERVATIVE_SLOTS = {"backend_port", "filename", "method"}
 RISK_PROBE_SLOTS = {"policy"}
 SPLIT_OVERLAY_ALIASES = {
@@ -648,10 +653,16 @@ def active_conservative_slots(candidate_report: dict[str, Any]) -> set[str]:
     return active
 
 
+def load_candidate_report(candidate_path: Path) -> tuple[dict[str, Any], bool]:
+    if not candidate_path.exists():
+        return json.loads(json.dumps(EMPTY_CANDIDATE_REPORT)), True
+    return json.loads(candidate_path.read_text(encoding="utf-8")), False
+
+
 def evaluate(candidate_path: Path) -> dict[str, Any]:
     config = load_config(ROOT)
     baseline_config = dict(config.get("claim_scope") or {})
-    candidate_report = json.loads(candidate_path.read_text(encoding="utf-8"))
+    candidate_report, candidate_missing = load_candidate_report(candidate_path)
     conservative_slots = active_conservative_slots(candidate_report)
     conservative_config = merge_candidate_overlay(
         baseline_config,
@@ -747,6 +758,7 @@ def evaluate(candidate_path: Path) -> dict[str, Any]:
     return {
         "ok": not failures,
         "candidate_path": str(candidate_path),
+        "candidate_missing": candidate_missing,
         "conservative_slots": useful_slots,
         "split_overlay_slots": sorted(split_aliases),
         "risk_probe_slots": sorted(RISK_PROBE_SLOTS),
@@ -765,6 +777,7 @@ def write_report(report: dict[str, Any], out_json: Path, out_md: Path) -> None:
         "",
         f"Passed: **{report['ok']}**",
         f"Candidate file: `{report['candidate_path']}`",
+        f"Candidate file missing: `{report.get('candidate_missing')}`",
         f"Conservative slots: `{', '.join(report['conservative_slots'])}`",
         f"Split-overlay slots: `{', '.join(report['split_overlay_slots'])}`",
         f"Risk-probe slots: `{', '.join(report['risk_probe_slots'])}`",
@@ -813,15 +826,13 @@ def main() -> int:
     parser.add_argument("--out-md", default=str(OUT_MD))
     args = parser.parse_args()
 
-    candidate_path = Path(args.candidates)
-    if not candidate_path.exists():
-        raise FileNotFoundError(f"Candidate file not found: {candidate_path}")
-    report = evaluate(candidate_path)
+    report = evaluate(Path(args.candidates))
     write_report(report, Path(args.out_json), Path(args.out_md))
     print(
         json.dumps(
             {
                 "ok": report["ok"],
+                "candidate_missing": report["candidate_missing"],
                 "case_count": report["case_count"],
                 "conservative_slots": report["conservative_slots"],
                 "split_overlay_slots": report["split_overlay_slots"],
