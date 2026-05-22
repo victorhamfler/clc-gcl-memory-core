@@ -259,6 +259,43 @@ evidence candidate sections: 1
 architecture gate: PASS
 ```
 
+## Follow-Up From Real Ask + Feedback Run
+
+Hermes then tested a log built from real ask events plus realistic linked feedback.
+
+Result:
+
+```text
+PASS
+retrieval candidate sections: 1
+evidence candidate sections: 1
+architecture gate: PASS
+```
+
+Useful finding:
+
+- `report_template_note` was mined as a plausible broad-generic source marker.
+- `drink`, `prefer`, `project`, and `working` were mined as plausible exact-evidence/sensitive lookup markers.
+- `does` was mined as noise.
+
+The selector session fixed the noise case:
+
+- `eval/mine_evidence_state_candidates.py` now filters auxiliary/modal terms such as `does`, `have`, `would`, `could`, `will`, and `must`.
+- `eval/evidence_state_miner_regression.py` covers this behavior.
+- `eval/evidence_state_promotion_gate.py` now requires the evidence miner regression.
+
+After the fix, the same Hermes log mined:
+
+```text
+drink, prefer, project, working
+```
+
+and no longer mined:
+
+```text
+does
+```
+
 ## Important Caution
 
 Candidate artifacts are proposals, not accepted policy.

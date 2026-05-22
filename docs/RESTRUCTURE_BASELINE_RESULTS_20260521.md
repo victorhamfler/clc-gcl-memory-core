@@ -972,3 +972,75 @@ architecture gate: PASS
 ```
 
 Tooling-fix judgment: Hermes' two reported auxiliary bugs are fixed, covered by regression checks, and the full real-log pipeline still passes.
+
+## Hermes Real-Ask Feedback Log Validation
+
+Hermes next tested a log built from real `memory_outcomes.jsonl` ask events plus realistic linked feedback.
+
+First, Hermes confirmed that the true real log contained:
+
+- 426 ask events;
+- 0 feedback events.
+
+The pipeline correctly passed with zero mined candidates because candidate mining requires linked feedback.
+
+Hermes then generated a feedback-enriched log from real ask events:
+
+- 27 real ask events;
+- 12 linked feedback events;
+- labels covering wrong domain, bad source, stale, irrelevant, not useful, sensitive lookup, needs exact evidence, and current.
+
+Pipeline result:
+
+```text
+PASS
+retrieval candidate sections: 1
+evidence candidate sections: 1
+architecture gate: PASS
+```
+
+Mined candidates:
+
+- retrieval `broad_generic`: `report_template_note`
+- evidence `sensitive_lookup`: `does`, `drink`, `prefer`, `project`, `working`
+
+Hermes judged:
+
+- `report_template_note` is plausible but needs more support before promotion;
+- `drink`, `prefer`, `project`, and `working` are plausible exact-evidence markers;
+- `does` is stop-word noise.
+
+### Evidence Miner Stop-Term Fix
+
+Fix:
+
+`eval/mine_evidence_state_candidates.py` now filters additional auxiliary/modal terms such as:
+
+```text
+does, have, has, had, would, could, will, must, need, needs
+```
+
+Added:
+
+- `test_corpora/evidence_state_sensitive_stop_terms_outcomes.jsonl`
+- `eval/evidence_state_miner_regression.py`
+
+`eval/evidence_state_promotion_gate.py` now runs this miner regression as a required sub-check.
+
+Validation:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\evidence_state_miner_regression.py
+..\.venv-torch\Scripts\python.exe .\eval\mine_evidence_state_candidates.py --log C:\Users\victo\Documents\GitHub\clc-gcl-memory-core\logs\hermes_real_with_feedback.jsonl --out-json ..\experiments\evidence_candidates_hermes_real_stop_terms_fix.json --out-md ..\experiments\evidence_candidates_hermes_real_stop_terms_fix.md
+..\.venv-torch\Scripts\python.exe .\eval\selector_candidate_pipeline_from_log.py --log C:\Users\victo\Documents\GitHub\clc-gcl-memory-core\logs\hermes_real_with_feedback.jsonl --out-json ..\experiments\selector_real_with_feedback_after_evidence_stop_fix_results.json --out-md ..\experiments\selector_real_with_feedback_after_evidence_stop_fix_report.md
+```
+
+Results:
+
+```text
+evidence_state_miner_regression.py: PASS
+Hermes evidence candidate rerun: PASS, terms=drink, prefer, project, working
+selector_candidate_pipeline_from_log.py: PASS
+```
+
+Evidence miner judgment: the latest Hermes run produced the first useful candidate-quality improvement. The architecture should still not promote these terms yet; they should be held for repeated support from real linked feedback.

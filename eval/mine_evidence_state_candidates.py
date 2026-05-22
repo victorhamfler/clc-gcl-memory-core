@@ -25,12 +25,20 @@ SENSITIVE_LABELS = {"sensitive", "sensitive_lookup", "needs_exact_evidence", "pr
 STOP_TERMS = {
     "about",
     "channel",
+    "could",
     "current",
     "deployment",
+    "does",
     "evidence",
     "general",
+    "have",
+    "has",
+    "had",
     "hermes",
+    "must",
     "memory",
+    "need",
+    "needs",
     "private",
     "rule",
     "should",
@@ -39,8 +47,10 @@ STOP_TERMS = {
     "value",
     "victor",
     "what",
+    "will",
     "where",
     "which",
+    "would",
 }
 
 

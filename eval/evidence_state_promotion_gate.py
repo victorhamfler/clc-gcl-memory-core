@@ -75,6 +75,7 @@ def clean_cell(value: Any, limit: int = 140) -> str:
 def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifacts: dict[str, str]) -> dict[str, Any]:
     candidate_report = read_json(Path(artifacts["candidate_json"]))
     module_smoke = read_json(REPO_ROOT / "experiments" / "evidence_states_module_smoke_results.json")
+    miner_regression = read_json(REPO_ROOT / "experiments" / "evidence_state_miner_regression_results.json")
     nested_config = read_json(REPO_ROOT / "experiments" / "config_nested_parser_regression_results.json")
     resolver_conflict = read_json(REPO_ROOT / "experiments" / "resolver_conflict_classification_results.json") or parsed_step(
         steps,
@@ -91,6 +92,7 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
     required_summary = {
         "candidate_eval_ok": bool(candidate_report and candidate_report.get("ok")),
         "module_smoke_ok": bool(module_smoke and module_smoke.get("ok")),
+        "miner_regression_ok": bool(miner_regression and miner_regression.get("ok")),
         "nested_config_ok": bool(nested_config and nested_config.get("ok")),
         "resolver_conflict_ok": bool(resolver_conflict and resolver_conflict.get("ok")),
         "claim_scope_gate_ok": bool(claim_scope_gate and claim_scope_gate.get("ok")),
@@ -114,6 +116,10 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
         "module_smoke": {
             "ok": module_smoke.get("ok") if module_smoke else None,
             "check_count": len(module_smoke.get("checks") or []) if module_smoke else None,
+        },
+        "miner_regression": {
+            "ok": miner_regression.get("ok") if miner_regression else None,
+            "checks": miner_regression.get("checks") if miner_regression else None,
         },
         "randomized_guard": {
             "ok": randomized.get("ok") if randomized else None,
@@ -151,6 +157,11 @@ def write_markdown(report: dict[str, Any], out_md: Path) -> None:
             f"- Checks: `{report['candidate_eval']['check_count']}`",
             f"- Validation failures: `{', '.join(report['candidate_eval']['validation_failures'] or []) or 'none'}`",
             f"- Check failures: `{', '.join(report['candidate_eval']['failures'] or []) or 'none'}`",
+            "",
+            "## Miner Regression",
+            "",
+            f"- Passed: `{report['miner_regression']['ok']}`",
+            f"- Checks: `{json.dumps(report['miner_regression']['checks'], sort_keys=True)}`",
             "",
             "## Behavior Gates",
             "",
@@ -208,6 +219,7 @@ def main() -> int:
                 str(ROOT / "core" / "runtime.py"),
                 str(ROOT / "eval" / "evidence_state_candidate_eval.py"),
                 str(ROOT / "eval" / "mine_evidence_state_candidates.py"),
+                str(ROOT / "eval" / "evidence_state_miner_regression.py"),
                 str(ROOT / "eval" / "evidence_states_module_smoke.py"),
             ],
         ),
@@ -225,6 +237,7 @@ def main() -> int:
             ],
         ),
         run_step("module_smoke", [python, str(ROOT / "eval" / "evidence_states_module_smoke.py")]),
+        run_step("miner_regression", [python, str(ROOT / "eval" / "evidence_state_miner_regression.py")]),
         run_step("nested_config", [python, str(ROOT / "eval" / "config_nested_parser_regression.py")]),
         run_step("resolver_conflict", [python, str(ROOT / "eval" / "resolver_conflict_classification.py")]),
         run_step("authority_chain", [python, str(ROOT / "eval" / "authority_chain_regression.py")]),
