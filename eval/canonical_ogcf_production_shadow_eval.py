@@ -48,6 +48,12 @@ def parse_args() -> argparse.Namespace:
         help="Embedding runtime for query retrieval. Auto uses DB runtime_state when possible.",
     )
     parser.add_argument("--embedding-dim", type=int, default=None)
+    parser.add_argument(
+        "--embedding-normalize",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Override embedding normalize flag for query retrieval; useful for raw-Gemma OGCF fixtures.",
+    )
     parser.add_argument("--queries-json", type=Path, default=None)
     parser.add_argument("--out-json", type=Path, default=DEFAULT_OUT_JSON)
     parser.add_argument("--out-md", type=Path, default=DEFAULT_OUT_MD)
@@ -86,6 +92,7 @@ def apply_embedding_override(
     db_path: Path,
     backend: str,
     embedding_dim: int | None,
+    embedding_normalize: bool | None,
 ) -> dict[str, Any]:
     out = copy.deepcopy(config)
     selected = str(backend or "auto").lower()
@@ -96,6 +103,10 @@ def apply_embedding_override(
         out["embedding"] = {"backend": "hash", "dim": dim}
     elif embedding_dim is not None:
         out["embedding_dim"] = int(embedding_dim)
+    if embedding_normalize is not None:
+        embedding = dict(out.get("embedding") or {})
+        embedding["normalize"] = bool(embedding_normalize)
+        out["embedding"] = embedding
     return out
 
 
@@ -405,6 +416,7 @@ def main() -> int:
         db_path=db_path,
         backend=args.embedding_backend,
         embedding_dim=args.embedding_dim,
+        embedding_normalize=args.embedding_normalize,
     )
 
     queries = [q for q in load_query_payload(args.queries_json) if q]
@@ -482,6 +494,7 @@ def main() -> int:
         "top_k": int(args.top_k),
         "config_path": str(args.config_path.resolve()) if args.config_path else None,
         "embedding_backend": args.embedding_backend,
+        "embedding_normalize": args.embedding_normalize,
         "namespace": args.namespace,
         "include_global": bool(args.include_global),
         "ogcf_meta": ogcf_meta or {},

@@ -89,6 +89,19 @@ Production-style shadow eval:
 - It uses stored embeddings as-is by default because the OGCF experiments found unnormalized geometry more stable and interpretable for bridge detection.
 - First smoke run against `memory_experiment_180_best.db` succeeded, but all generated probes landed in `XSEQ_MEMORY_REFRESH`. That does not invalidate the architecture; it means the stress DB/generated probes are already severe before canonical or OGCF has room to produce visible policy flips.
 - Next Hermes validation should provide a mixed real query set with clean support, mild stale clutter, bridge/conflict, and duplicate-pressure cases, preferably against a copied DB.
+- `eval/build_rich_gemma_shadow_fixture.py` now builds a small Gemma-backed fixture with exact support, duplicate pressure, stale/current relations, diverse domains, and bridge-like cross-domain memories.
+- The normalized Gemma fixture exercised canonical/retrieval behavior but produced no OGCF bridge clusters because stored vectors had unit norm. The raw-Gemma fixture produced a real bridge cluster across five domains and made OGCF change policy distribution.
+
+Raw-Gemma rich fixture result:
+
+| Mode | Policy distribution | Main signal |
+|---|---|---|
+| base | 9 protect, 2 verified refresh, 1 XSEQ | mixed retrieval conditions |
+| canonical | 3 protect, 8 verified refresh, 1 XSEQ | duplicate pressure and canonical support changed 8/12 cases |
+| OGCF | 4 protect, 7 verified refresh, 1 XSEQ | bridge-cluster affected ratio changed 5/12 cases |
+| combined | 1 protect, 10 verified refresh, 1 XSEQ | OGCF changed 2 cases beyond canonical |
+
+The raw fixture still has `bridge_overload_score=0.0`; the active OGCF signal came from bridge-cluster membership/affected-ratio, not loop interaction z-score. That is the next calibration target.
 
 ## Technological Value
 
@@ -137,6 +150,11 @@ This makes the architecture relevant for local agents, personal memory systems, 
    - confirm policy distribution is not collapsed,
    - inspect where canonical reduces risk and where OGCF raises risk,
    - repeat with `--normalize-embeddings` only as an ablation.
+
+7. Calibrate OGCF affected-cluster pressure:
+   - separate bridge-cluster membership from true loop overload,
+   - avoid escalating unrelated queries that merely touch a bridge cluster,
+   - preserve escalation for queries directly about bridge routing, OGCF geometry, stale/current interaction, or cross-domain selector policy.
 
 ## Current Publication State
 
