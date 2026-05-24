@@ -40,6 +40,7 @@ class OGCFSignalProvider:
                 "ogcf_risk_region_count": 0,
                 "ogcf_cluster_count": 0,
                 "ogcf_affected_memory_ratio": 0.0,
+                "ogcf_weighted_affected_memory_ratio": 0.0,
             }
 
         max_z = float(self.meta.get("max_interaction_z", 0.0))
@@ -64,12 +65,32 @@ class OGCFSignalProvider:
         # Map memory_id -> cluster_id from meta if available
         memory_cluster_map: dict[str, int] = dict(self.meta.get("memory_cluster_map", {}))
         affected = 0
-        for row in rows:
+        weighted_affected = 0.0
+        total_weight = 0.0
+        top_score = max(
+            0.0,
+            max((float(row.get("score") or row.get("cosine") or 0.0) for row in rows), default=0.0),
+        )
+        for rank, row in enumerate(rows, start=1):
+            score = max(0.0, float(row.get("score") or row.get("cosine") or 0.0))
+            score_weight = score / top_score if top_score > 1e-12 else 1.0
+            lexical_weight = max(
+                0.0,
+                float(row.get("text_match_score") or 0.0),
+                float(row.get("claim_scope_score") or 0.0),
+                float(row.get("answer_type_score") or 0.0),
+            )
+            rank_weight = 1.0 / (1.0 + 0.18 * max(0, rank - 1))
+            relevance_weight = max(0.05, min(1.0, 0.55 * score_weight + 0.45 * lexical_weight))
+            weight = rank_weight * relevance_weight
+            total_weight += weight
             mid = str(row.get("id") or row.get("memory_id") or "")
             cid = memory_cluster_map.get(mid, -1)
             if cid in risk_cluster_ids:
                 affected += 1
+                weighted_affected += weight
         affected_ratio = affected / max(1, len(rows))
+        weighted_affected_ratio = weighted_affected / max(total_weight, 1e-12)
 
         # Risk region count above threshold
         risk_count = sum(1 for r in risk_regions if r.get("interaction_z", 0.0) >= 2.0)
@@ -81,6 +102,7 @@ class OGCFSignalProvider:
             "ogcf_risk_region_count": risk_count,
             "ogcf_cluster_count": len(cluster_summary),
             "ogcf_affected_memory_ratio": round(affected_ratio, 6),
+            "ogcf_weighted_affected_memory_ratio": round(weighted_affected_ratio, 6),
         }
 
     def selector_features(
@@ -97,22 +119,30 @@ class OGCFSignalProvider:
         signals = self.signals_for_retrieval_rows(rows)
         bridge_score = signals["ogcf_bridge_overload_score"]
         affected_ratio = signals["ogcf_affected_memory_ratio"]
+        weighted_affected_ratio = signals.get("ogcf_weighted_affected_memory_ratio", affected_ratio)
+        risk_region_count = int(signals.get("ogcf_risk_region_count", 0) or 0)
+        if bridge_score <= 0.0 and risk_region_count <= 0:
+            effective_affected_ratio = 0.0 if weighted_affected_ratio < 0.55 else weighted_affected_ratio
+        else:
+            effective_affected_ratio = max(weighted_affected_ratio, affected_ratio * bridge_score)
 
         # Adjust stale pressure estimate using bridge overload
         # If bridge_score is high and affected memories are retrieved,
         # the memory graph has structural instability
-        adjusted_stale_ratio = min(1.0, base_stale_ratio + 0.25 * affected_ratio * bridge_score)
+        adjusted_stale_ratio = min(1.0, base_stale_ratio + 0.25 * effective_affected_ratio * bridge_score)
         adjusted_contradiction_peak = max(
             base_contradiction_peak,
             bridge_score * 0.5,  # bridge overload contributes to conflict signal
         )
 
         # CSD ratio boost from bridge overload
-        csd_ratio_boost = 0.3 * bridge_score + 0.2 * affected_ratio
+        csd_ratio_boost = 0.3 * bridge_score + 0.2 * effective_affected_ratio
 
         features = {
             "ogcf_bridge_overload_score": bridge_score,
             "ogcf_affected_memory_ratio": affected_ratio,
+            "ogcf_weighted_affected_memory_ratio": weighted_affected_ratio,
+            "ogcf_effective_affected_memory_ratio": round(effective_affected_ratio, 6),
             "adjusted_stale_ratio": round(adjusted_stale_ratio, 6),
             "adjusted_contradiction_peak": round(adjusted_contradiction_peak, 6),
             "csd_ratio_boost": round(csd_ratio_boost, 6),

@@ -103,6 +103,14 @@ Raw-Gemma rich fixture result:
 
 The raw fixture still has `bridge_overload_score=0.0`; the active OGCF signal came from bridge-cluster membership/affected-ratio, not loop interaction z-score. That is the next calibration target.
 
+OGCF affected-pressure calibration:
+
+- Bridge-cluster membership now reports raw, relevance-weighted, and effective affected-memory ratios.
+- True loop overload still bypasses the membership gate and can raise memory-bad-rate directly.
+- Bridge-cluster-only pressure is gated by relevance so weak incidental bridge membership does not add feature pressure.
+- On the raw-Gemma fixture, OGCF-only deltas dropped from 5/12 to 2/12, and combined-vs-canonical extra deltas dropped from 2/12 to 0/12.
+- `eval/ogcf_affected_pressure_calibration_regression.py` protects this behavior.
+
 ## Technological Value
 
 The promising direction is a small, local, auditable controller for agent memory. Instead of retraining or scaling a large model, the system improves behavior by controlling memory operations:
@@ -155,6 +163,12 @@ This makes the architecture relevant for local agents, personal memory systems, 
    - separate bridge-cluster membership from true loop overload,
    - avoid escalating unrelated queries that merely touch a bridge cluster,
    - preserve escalation for queries directly about bridge routing, OGCF geometry, stale/current interaction, or cross-domain selector policy.
+
+8. Next, add query/evidence intent awareness to OGCF pressure:
+   - keep the current relevance-weighted gate as the safety baseline,
+   - distinguish bridge-maintenance questions from ordinary fact questions,
+   - let high-relevance bridge geometry queries escalate even when loop overload is absent,
+   - keep clean calendar/profile/procedure retrieval protected unless true loop overload is present.
 
 ## Current Publication State
 

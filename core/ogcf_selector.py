@@ -29,6 +29,10 @@ def augment_selector_features(
         base_stale_ratio=base_diagnostics.get("stale_ratio", 0.0) if base_diagnostics else 0.0,
         base_contradiction_peak=base_diagnostics.get("contradiction_peak", 0.0) if base_diagnostics else 0.0,
     )
+    effective_affected_ratio = float(
+        ogcf_feats.get("ogcf_effective_affected_memory_ratio", ogcf_feats.get("ogcf_affected_memory_ratio", 0.0))
+        or 0.0
+    )
 
     # Adjust features
     adjusted_memory_bad_rate = min(
@@ -37,7 +41,7 @@ def augment_selector_features(
     )
     adjusted_probe_drop = min(
         0.98,
-        features.probe_drop + 0.10 * ogcf_feats["ogcf_affected_memory_ratio"],
+        features.probe_drop + 0.10 * effective_affected_ratio,
     )
     adjusted_csd_ratio = min(
         3.5,
