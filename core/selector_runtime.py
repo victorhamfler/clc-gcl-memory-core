@@ -90,6 +90,22 @@ def selector_features_from_retrieval_context(
     retrieval_scores = [float(row.get("score") or row.get("cosine") or 0.0) for row in rows]
     text_match_scores = [float(row.get("text_match_score") or 0.0) for row in rows]
     claim_scope_scores = [float(row.get("claim_scope_score") or row.get("text_match_score") or 0.0) for row in rows]
+    canonical_support_counts = [max(1, int(row.get("canonical_support_count") or 1)) for row in rows]
+    canonical_supported_keeper_rows = sum(
+        1
+        for row, support_count in zip(rows, canonical_support_counts)
+        if support_count > 1 and bool(row.get("canonical_is_keeper", True))
+    )
+    canonical_nonkeeper_rows = sum(
+        1
+        for row in rows
+        if not bool(row.get("canonical_is_keeper", True))
+    )
+    canonical_max_support_count = max(canonical_support_counts or [1])
+    canonical_support_strength = min(1.0, canonical_max_support_count / 10.0)
+    canonical_supported_keeper_ratio = canonical_supported_keeper_rows / total
+    canonical_duplicate_pressure = canonical_nonkeeper_rows / total
+    canonical_confidence_signal = canonical_support_strength * canonical_supported_keeper_ratio
 
     stale_rows = 0
     current_rows = 0
@@ -212,6 +228,13 @@ def selector_features_from_retrieval_context(
     stale_pressure = max(stale_ratio, stale_strength, contradiction_peak)
     current_pressure = max(current_ratio, current_strength)
     stale_current_conflict = min(stale_pressure, current_pressure)
+    clean_canonical_support = (
+        contradiction_peak <= 0.0
+        and stale_pressure <= 0.20
+        and canonical_duplicate_pressure <= 0.20
+    )
+    canonical_confidence_credit = 0.08 * canonical_confidence_signal if clean_canonical_support else 0.0
+    canonical_duplicate_penalty = 0.12 * canonical_duplicate_pressure
     memory_bad_rate = max(
         0.0,
         min(
@@ -223,6 +246,7 @@ def selector_features_from_retrieval_context(
             + 0.20 * stale_current_conflict,
         ),
     )
+    memory_bad_rate = max(0.0, min(0.98, memory_bad_rate + canonical_duplicate_penalty - canonical_confidence_credit))
     probe_drop = max(
         0.0,
         min(
@@ -232,6 +256,15 @@ def selector_features_from_retrieval_context(
             + 0.18 * stale_ratio
             + 0.18 * stale_current_conflict
             + 0.08 * reliability_gap,
+        ),
+    )
+    probe_drop = max(
+        0.0,
+        min(
+            0.98,
+            probe_drop
+            + 0.05 * canonical_duplicate_pressure
+            - (0.03 * canonical_confidence_signal if clean_canonical_support else 0.0),
         ),
     )
     csd_ratio = max(
@@ -245,6 +278,7 @@ def selector_features_from_retrieval_context(
             + 0.2 * reliability_gap,
         ),
     )
+    csd_ratio = max(0.4, min(3.5, csd_ratio + 0.10 * canonical_duplicate_pressure))
     hard = bool((stale_pressure >= 0.35 or contradiction_peak >= 0.5 or stale_rows >= 2) and not irrelevant_stale_cluster)
     condition_l = str(condition_name or "").lower()
     effective_condition = condition_name
@@ -273,6 +307,15 @@ def selector_features_from_retrieval_context(
         "avg_source_reliability": round(avg_source_reliability, 6),
         "avg_domain_reliability": round(avg_domain_reliability, 6),
         "avg_retrieval_score": round(avg_retrieval_score, 6),
+        "canonical_max_support_count": canonical_max_support_count,
+        "canonical_supported_keeper_rows": canonical_supported_keeper_rows,
+        "canonical_supported_keeper_ratio": round(canonical_supported_keeper_ratio, 6),
+        "canonical_nonkeeper_rows": canonical_nonkeeper_rows,
+        "canonical_duplicate_pressure": round(canonical_duplicate_pressure, 6),
+        "canonical_support_strength": round(canonical_support_strength, 6),
+        "canonical_confidence_signal": round(canonical_confidence_signal, 6),
+        "canonical_confidence_credit": round(canonical_confidence_credit, 6),
+        "canonical_duplicate_penalty": round(canonical_duplicate_penalty, 6),
         "top_score": round(top_score, 6),
         "top_authority_state": top_authority_state,
         "top_stale_rank": top_stale_rank,

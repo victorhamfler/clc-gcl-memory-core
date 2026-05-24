@@ -64,13 +64,17 @@ The pipeline:
 1. reads one outcome log;
 2. mines retrieval-signal candidates;
 3. mines evidence-state candidates;
-4. runs the unified selector architecture gate with those mined candidates;
-5. writes one top-level JSON report and one Markdown report.
+4. classifies candidate promotion readiness;
+5. builds a report-only semantic candidate memory;
+6. runs the unified selector architecture gate with those mined candidates;
+7. writes one top-level JSON report and one Markdown report.
 
 It also writes sub-artifacts next to the top-level report:
 
 - retrieval candidate JSON and Markdown;
 - evidence candidate JSON and Markdown;
+- promotion-readiness JSON and Markdown;
+- semantic-memory JSON and Markdown;
 - unified architecture gate JSON and Markdown.
 
 ## Required Outcome Log Shape
@@ -194,6 +198,8 @@ The run is successful if:
 - `required_summary.log_exists` is true;
 - `required_summary.retrieval_mining_ok` is true;
 - `required_summary.evidence_mining_ok` is true;
+- `required_summary.promotion_readiness_ok` is true;
+- `required_summary.semantic_memory_ok` is true;
 - `required_summary.architecture_gate_ok` is true.
 
 Candidate count can be zero for one family if no relevant failures happened. That is acceptable.
@@ -211,9 +217,13 @@ Please write a Markdown report and, if possible, a JSON summary containing:
 - top-level pipeline report path;
 - retrieval candidate artifact path;
 - evidence candidate artifact path;
+- promotion-readiness artifact path;
+- semantic-memory artifact path;
 - architecture gate report path;
 - candidate counts;
 - candidate terms proposed;
+- readiness counts for `ready`, `hold`, `reject`, and `held_out`;
+- semantic cluster counts for `semantic_ready`, `semantic_hold`, `reject`, and `held_out`;
 - whether the candidates look synthetic, too broad, or plausibly useful;
 - any failures, stack traces, or missing dependency issues.
 
@@ -237,6 +247,39 @@ architecture gate: PASS
 ```
 
 This proves the plumbing works. The next question is whether real Hermes logs produce candidates worth studying.
+
+## Promotion Readiness Layer
+
+The pipeline now includes:
+
+```text
+eval/candidate_promotion_readiness.py
+```
+
+This report is advisory only. Hermes should treat:
+
+- `ready` as worth discussing for promotion;
+- `hold` as requiring more cross-session evidence;
+- `reject` as not worth promoting;
+- `held_out` as evidence that must remain blocked from promotion.
+
+Do not edit `config.yaml` automatically from a readiness report.
+
+## Semantic Candidate Memory Layer
+
+The pipeline now also includes:
+
+```text
+eval/candidate_semantic_memory.py
+```
+
+This layer groups compatible candidate terms into semantic clusters. It uses the fast hash embedding backend by default, and can be run separately with the configured embedding backend for deeper Gemma-based analysis:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\candidate_semantic_memory.py --readiness PATH_TO_PROMOTION_READINESS.json --embedding-backend config
+```
+
+The semantic-memory report is also advisory only. Treat `semantic_ready` as a cluster worth reviewing, not as approval to edit runtime config.
 
 ## Follow-Up From First Hermes Run
 

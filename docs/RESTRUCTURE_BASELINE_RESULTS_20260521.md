@@ -1117,3 +1117,163 @@ held-out terms: live
 ```
 
 Live-feedback judgment: the architecture has now completed a real closed loop from live ask/feedback events to candidate mining and gated validation. Candidate promotion should still wait for repeated evidence across more sessions.
+
+## Candidate Promotion Readiness Evaluator
+
+The next selector-side improvement added a report-only maturity evaluator:
+
+- `eval/candidate_promotion_readiness.py`
+- `eval/candidate_promotion_readiness_regression.py`
+- `test_corpora/candidate_readiness_retrieval_a.json`
+- `test_corpora/candidate_readiness_evidence_a.json`
+- `test_corpora/candidate_readiness_evidence_b.json`
+
+The evaluator aggregates retrieval-signal and evidence-state candidate artifacts across logs/sessions and classifies candidates as:
+
+- `ready`: enough support across enough source logs and distinct queries;
+- `hold`: plausible but under-supported;
+- `reject`: generic/noisy term;
+- `held_out`: evidence preserved, promotion blocked.
+
+It is intentionally advisory. It does not write runtime config and does not promote candidates by itself.
+
+### Focused Regression
+
+Command:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\candidate_promotion_readiness_regression.py
+```
+
+Result:
+
+```text
+PASS
+```
+
+Regression coverage:
+
+- repeated `drink` support across two fixture logs becomes `ready`;
+- single-session `server` support remains `hold`;
+- ambiguous `live` remains `held_out`;
+- single-session retrieval marker `report_template_note` remains `hold`.
+
+### Pipeline Integration
+
+`eval/selector_candidate_pipeline_from_log.py` now runs the readiness evaluator after mining candidates and before the unified architecture gate.
+
+Validation command:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\selector_candidate_pipeline_from_log.py --log ..\experiments\memory_outcome_contract_workflow.jsonl --out-json ..\experiments\selector_candidate_pipeline_readiness_integration_results.json --out-md ..\experiments\selector_candidate_pipeline_readiness_integration_report.md
+```
+
+Result:
+
+```text
+PASS
+promotion_readiness_counts: hold=6
+```
+
+### Hermes Real Artifact Readiness
+
+Command:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\candidate_promotion_readiness.py --candidate C:\Users\victo\Documents\GitHub\experiments\selector_candidate_pipeline_hermes_real_results_evidence_candidates.json --candidate C:\Users\victo\Documents\GitHub\experiments\selector_candidate_pipeline_hermes_real_results_retrieval_candidates.json --out-json ..\experiments\candidate_promotion_readiness_hermes_real_results.json --out-md ..\experiments\candidate_promotion_readiness_hermes_real_report.md
+```
+
+Result:
+
+```text
+PASS
+held_out=1, hold=4, reject=1
+```
+
+Interpretation:
+
+- `live` stayed held out;
+- `configuration`, `drink`, `morning`, and `server` stayed on hold because they have only one log and one query of support;
+- `exact` was rejected as too generic.
+
+Readiness judgment: the architecture now has a cross-artifact maturity layer. This is the first step toward a neural-symbolic adaptive memory brain where mined language patterns can accumulate evidence before becoming configurable or learned controller features.
+
+## Candidate Semantic Memory
+
+The next step added a report-only semantic memory over promotion-readiness artifacts:
+
+- `eval/candidate_semantic_memory.py`
+- `eval/candidate_semantic_memory_regression.py`
+- `test_corpora/candidate_semantic_readiness_a.json`
+- `test_corpora/candidate_semantic_readiness_b.json`
+
+This is the first implemented bridge from exact candidate terms toward neural-symbolic controller features. It groups compatible candidates by controller surface and term similarity, using the repository embedding interface with a fast hash default and optional configured embedding backend.
+
+The semantic memory remains advisory:
+
+- it does not write runtime config;
+- it does not promote candidates;
+- it does not cluster rejected or held-out candidates into normal hold/ready clusters.
+
+### Focused Regression
+
+Command:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\candidate_semantic_memory_regression.py
+```
+
+Result:
+
+```text
+PASS
+```
+
+Regression coverage:
+
+- `drink` and `morning drink` cluster together;
+- the combined cluster becomes `semantic_ready` because support, source-log diversity, and query diversity are sufficient;
+- unrelated `server` does not enter the drink cluster;
+- held-out `live` does not cluster with normal hold candidates.
+
+### Pipeline Integration
+
+`eval/selector_candidate_pipeline_from_log.py` now writes semantic-memory artifacts:
+
+```text
+*_semantic_memory.json
+*_semantic_memory.md
+```
+
+Validation command:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\selector_candidate_pipeline_from_log.py --log ..\experiments\memory_outcome_contract_workflow.jsonl --out-json ..\experiments\selector_candidate_pipeline_semantic_memory_integration_results.json --out-md ..\experiments\selector_candidate_pipeline_semantic_memory_integration_report.md
+```
+
+Result:
+
+```text
+PASS
+promotion_readiness_counts: hold=6
+semantic_memory_counts: semantic_hold=6
+```
+
+### Hermes Real Artifact Semantic Memory
+
+Command:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\candidate_semantic_memory.py --readiness ..\experiments\candidate_promotion_readiness_hermes_real_results.json --out-json ..\experiments\candidate_semantic_memory_hermes_real_results.json --out-md ..\experiments\candidate_semantic_memory_hermes_real_report.md
+```
+
+Result:
+
+```text
+PASS
+held_out=1, reject=1, semantic_hold=4
+```
+
+Interpretation:
+
+The current real Hermes evidence still does not justify promotion. The value is architectural: the selector can now accumulate and cluster candidate concepts across runs before asking any promotion gate to consider them.

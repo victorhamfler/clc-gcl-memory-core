@@ -84,6 +84,7 @@ def create_pipeline(root: Path, db_path: Path | None = None) -> MemoryPipeline:
         answer_type_config=config.get("answer_type"),
         retrieval_signal_config=config.get("retrieval_signals"),
         evidence_state_config=config.get("evidence_states"),
+        canonical_memory_config=config.get("canonical_memory"),
         llm_config=config.get("llm"),
         clc_thresholds=config.get("thresholds"),
     )
@@ -162,6 +163,7 @@ def pipeline_config_view(pipeline: MemoryPipeline) -> dict[str, Any]:
         },
         "retrieval_signals": pipeline.retrieval_signal_config,
         "evidence_states": pipeline.evidence_state_config,
+        "canonical_memory": pipeline.canonical_memory_config,
         "llm": sanitized_llm_config(pipeline.llm_config),
     }
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any
@@ -47,6 +48,15 @@ DEFAULT_RETRIEVAL_WEIGHTS = {
     "claim_scope": 0.14,
     "answer_type": 0.16,
 }
+DEFAULT_CANONICAL_MEMORY_CONFIG = {
+    "enabled": False,
+    "support_weight": 0.08,
+    "duplicate_penalty": 0.18,
+    "support_reference_count": 10.0,
+    "lexical_backfill_enabled": True,
+    "lexical_backfill_min_affinity": 0.75,
+    "lexical_backfill_max_additions": 20.0,
+}
 VALID_MEMORY_TYPES = {"preference", "design_rule", "procedure", "semantic_note", "error_memory"}
 
 
@@ -68,6 +78,7 @@ class MemoryPipeline:
         answer_type_config: dict[str, Any] | None = None,
         retrieval_signal_config: dict[str, Any] | None = None,
         evidence_state_config: dict[str, Any] | None = None,
+        canonical_memory_config: dict[str, Any] | None = None,
         llm_config: dict[str, Any] | None = None,
         clc_thresholds: dict[str, Any] | None = None,
     ):
@@ -86,6 +97,7 @@ class MemoryPipeline:
         )
         self.retrieval_signal_config = self.retrieval_signals.signal_config
         self.evidence_state_config = normalize_evidence_state_config(evidence_state_config)
+        self.canonical_memory_config = self._normalize_canonical_memory_config(canonical_memory_config)
         self.llm_config = dict(llm_config or {})
         self.recall_engine = RecallEngine(self.db, top_k=top_k)
         self.csd = CSDLayer(self.db)
@@ -325,6 +337,12 @@ class MemoryPipeline:
         authority_intent = self._authority_query_intent(query_l)
         if authority_intent:
             items = self._with_authoritative_replacements(items, embedding)
+        items = self._with_canonical_lexical_backfill(
+            items,
+            query,
+            embedding,
+            namespaces=self._namespace_scope(memory_namespace, include_global=include_global),
+        )
         candidate_ids = [item.memory_id for item in items]
         authority_by_memory = self._authority_status_for_candidates(candidate_ids)
         contradiction_by_memory = self.db.contradiction_summary_for_memories(candidate_ids)
@@ -333,6 +351,10 @@ class MemoryPipeline:
         reliability = self.db.feedback_reliability_for_candidates(candidate_ids)
         supersession_relations = self.db.supersession_summary_for_candidates(candidate_ids)
         summary_relations = self.db.summary_relation_summary_for_candidates(candidate_ids)
+        canonical_by_memory = self._canonical_support_for_candidates(
+            candidate_ids,
+            namespaces=self._namespace_scope(memory_namespace, include_global=include_global),
+        )
         source_info_by_memory = {
             item.memory_id: self.db.get_memory_source(item.memory_id)
             for item in items
@@ -403,6 +425,8 @@ class MemoryPipeline:
                     correction_chain_score *= correction_relevance
                 supersession_score = max(-1.0, min(1.0, heuristic_supersession_score + relation_supersession_score))
             w = self.retrieval_weights
+            canonical_info = canonical_by_memory.get(item.memory_id, {})
+            canonical_adjustment = self._canonical_score_adjustment(item.memory_id, canonical_info)
             score = (
                 w["vector"] * item.score
                 + w["importance"] * item.importance
@@ -421,6 +445,7 @@ class MemoryPipeline:
                 + w["intent"] * intent_match
                 + w["correction_chain"] * correction_chain_score
                 + w["answer_type"] * answer_type_match
+                + canonical_adjustment["score_adjustment"]
                 - broad_generic_penalty
                 - scope_deflection_penalty
             )
@@ -446,6 +471,14 @@ class MemoryPipeline:
                     "text_match_score": round(text_match, 6),
                     "claim_scope_score": round(claim_scope_match, 6),
                     "answer_type_score": round(answer_type_match, 6),
+                    "canonical_claim_key": canonical_info.get("claim_key"),
+                    "canonical_keeper_memory_id": canonical_info.get("keeper_memory_id"),
+                    "canonical_support_count": int(canonical_info.get("support_count") or 1),
+                    "canonical_duplicate_count": int(canonical_info.get("duplicate_count") or 0),
+                    "canonical_is_keeper": bool(canonical_info.get("is_keeper", True)),
+                    "canonical_support_bonus": round(canonical_adjustment["support_bonus"], 6),
+                    "canonical_duplicate_penalty": round(canonical_adjustment["duplicate_penalty"], 6),
+                    "canonical_score_adjustment": round(canonical_adjustment["score_adjustment"], 6),
                     "broad_generic_penalty": round(broad_generic_penalty, 6),
                     "scope_deflection_penalty": round(scope_deflection_penalty, 6),
                     "correction_relevance_score": round(correction_relevance, 6),
@@ -2033,6 +2066,83 @@ class MemoryPipeline:
         additions.sort(key=lambda item: item[0], reverse=True)
         return [*items, *(item for _affinity, item in additions[: max(0, int(limit) - len(items))])]
 
+    def _with_canonical_lexical_backfill(
+        self,
+        items: list[RecallItem],
+        query: str,
+        query_embedding: list[float],
+        namespaces: list[str] | None = None,
+    ) -> list[RecallItem]:
+        config = self.canonical_memory_config
+        if not config.get("enabled") or not config.get("lexical_backfill_enabled"):
+            return items
+        min_affinity = float(config.get("lexical_backfill_min_affinity") or 0.75)
+        max_additions = max(0, int(float(config.get("lexical_backfill_max_additions") or 0)))
+        if max_additions <= 0:
+            return items
+        seen = {item.memory_id for item in items}
+        groups: dict[str, list[dict[str, Any]]] = {}
+        affinities: dict[str, float] = {}
+        for row in self.db.list_memory_vectors(include_deprecated=False, namespaces=namespaces):
+            text = str(row.get("text") or "")
+            key = self._canonical_text_key(text)
+            if not key:
+                continue
+            affinity = self._canonical_lexical_affinity(query, text)
+            if affinity < min_affinity:
+                continue
+            groups.setdefault(key, []).append(row)
+            affinities[key] = max(affinities.get(key, 0.0), affinity)
+        additions: list[tuple[float, RecallItem]] = []
+        for key, group in groups.items():
+            keeper = max(
+                group,
+                key=lambda row: (
+                    float(row.get("confidence") or 0.0) * float(row.get("importance") or 0.0),
+                    str(row.get("created_at") or ""),
+                    str(row.get("id") or ""),
+                ),
+            )
+            memory_id = str(keeper.get("id") or "")
+            if not memory_id or memory_id in seen:
+                continue
+            vector_score = cosine(query_embedding, keeper.get("embedding") or [])
+            lexical_score = affinities.get(key, 0.0)
+            recall_score = max(float(vector_score), min(1.0, lexical_score))
+            additions.append(
+                (
+                    lexical_score,
+                    RecallItem(
+                        memory_id=memory_id,
+                        domain_id=keeper.get("domain_id"),
+                        text=str(keeper.get("text") or ""),
+                        memory_type=str(keeper.get("memory_type") or "semantic_note"),
+                        score=recall_score,
+                        importance=float(keeper.get("importance") or 0.0),
+                        stability=float(keeper.get("stability") or 0.0),
+                        csd_score=float(keeper.get("csd_score") or 0.0),
+                        clc_state=keeper.get("clc_state"),
+                        namespace=normalize_namespace(keeper.get("namespace")),
+                        deprecated=bool(keeper.get("deprecated")),
+                    ),
+                )
+            )
+        if not additions:
+            return items
+        additions.sort(key=lambda item: item[0], reverse=True)
+        return [*items, *(item for _affinity, item in additions[:max_additions])]
+
+    def _canonical_lexical_affinity(self, query: str, text: str) -> float:
+        query_key = self._canonical_text_key(query)
+        text_key = self._canonical_text_key(text)
+        if not query_key or not text_key:
+            return 0.0
+        if query_key == text_key:
+            return 1.0
+        if query_key in text_key or text_key in query_key:
+            return 0.92
+        return self._text_affinity(query, text)
+
     def _with_authoritative_replacements(self, items: list[RecallItem], query_embedding: list[float]) -> list[RecallItem]:
         seed_ids = [item.memory_id for item in items if item.memory_id]
         if not seed_ids:
@@ -2187,6 +2297,145 @@ class MemoryPipeline:
             except (TypeError, ValueError):
                 continue
         return normalized
+
+    @staticmethod
+    def _normalize_canonical_memory_config(config: dict[str, Any] | None) -> dict[str, Any]:
+        normalized = dict(DEFAULT_CANONICAL_MEMORY_CONFIG)
+        for key, value in (config or {}).items():
+            if key not in normalized:
+                continue
+            if key == "enabled":
+                normalized[key] = bool(value)
+                continue
+            try:
+                normalized[key] = float(value)
+            except (TypeError, ValueError):
+                continue
+        normalized["support_weight"] = max(0.0, float(normalized["support_weight"]))
+        normalized["duplicate_penalty"] = max(0.0, float(normalized["duplicate_penalty"]))
+        normalized["support_reference_count"] = max(1.0, float(normalized["support_reference_count"]))
+        return normalized
+
+    def _canonical_support_for_candidates(
+        self,
+        memory_ids: list[str],
+        namespaces: list[str] | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        if not self.canonical_memory_config.get("enabled"):
+            return {}
+        ids = [str(memory_id).strip() for memory_id in memory_ids if str(memory_id or "").strip()]
+        if not ids:
+            return {}
+        placeholders = ",".join("?" for _ in ids)
+        candidate_rows = self.db.conn.execute(
+            f"""
+            SELECT id, text
+            FROM memories
+            WHERE id IN ({placeholders}) AND COALESCE(deprecated, 0)=0
+            """,
+            ids,
+        ).fetchall()
+        candidate_keys = {
+            self._canonical_text_key(row["text"])
+            for row in candidate_rows
+            if str(row["text"] or "").strip()
+        }
+        existing_infos: dict[str, dict[str, Any]] = {}
+        for row in candidate_rows:
+            memory_id = str(row["id"] or "")
+            key = self._canonical_text_key(row["text"])
+            if memory_id and key:
+                existing_infos[memory_id] = {
+                    "claim_key": key,
+                    "keeper_memory_id": memory_id,
+                    "support_count": 1,
+                    "duplicate_count": 0,
+                    "support_memory_ids": [memory_id],
+                    "domain_count": 1,
+                    "namespace_count": 1,
+                    "is_keeper": True,
+                }
+        if not candidate_keys:
+            return {}
+        groups: dict[str, list[dict[str, Any]]] = {key: [] for key in candidate_keys}
+        normalized_namespaces = [normalize_namespace(ns) for ns in namespaces or []]
+        namespace_clause = ""
+        params: list[Any] = []
+        if normalized_namespaces:
+            placeholders = ",".join("?" for _ in normalized_namespaces)
+            namespace_clause = f" AND COALESCE(namespace, 'global') IN ({placeholders})"
+            params.extend(normalized_namespaces)
+        rows = self.db.conn.execute(
+            f"""
+            SELECT id, text, domain_id, namespace, importance, confidence, created_at
+            FROM memories
+            WHERE COALESCE(deprecated, 0)=0
+            {namespace_clause}
+            """,
+            params,
+        ).fetchall()
+        for row in rows:
+            key = self._canonical_text_key(row["text"])
+            if key not in groups:
+                continue
+            groups[key].append(
+                {
+                    "id": row["id"],
+                    "domain_id": row["domain_id"],
+                    "namespace": row["namespace"],
+                    "importance": float(row["importance"] or 0.0),
+                    "confidence": float(row["confidence"] or 0.0),
+                    "created_at": str(row["created_at"] or ""),
+                }
+            )
+        out: dict[str, dict[str, Any]] = dict(existing_infos)
+        for key, group in groups.items():
+            if not group:
+                continue
+            keeper = max(
+                group,
+                key=lambda row: (
+                    float(row["confidence"]) * float(row["importance"]),
+                    str(row["created_at"]),
+                    str(row["id"]),
+                ),
+            )
+            support_ids = [str(row["id"]) for row in group]
+            info = {
+                "claim_key": key,
+                "keeper_memory_id": str(keeper["id"]),
+                "support_count": len(group),
+                "duplicate_count": max(0, len(group) - 1),
+                "support_memory_ids": support_ids,
+                "domain_count": len({str(row.get("domain_id") or "") for row in group}),
+                "namespace_count": len({str(row.get("namespace") or "global") for row in group}),
+            }
+            for memory_id in support_ids:
+                out[memory_id] = {**info, "is_keeper": memory_id == keeper["id"]}
+        return out
+
+    def _canonical_score_adjustment(self, memory_id: str, canonical_info: dict[str, Any]) -> dict[str, float]:
+        if not self.canonical_memory_config.get("enabled") or not canonical_info:
+            return {"support_bonus": 0.0, "duplicate_penalty": 0.0, "score_adjustment": 0.0}
+        support_count = max(1, int(canonical_info.get("support_count") or 1))
+        if support_count <= 1:
+            return {"support_bonus": 0.0, "duplicate_penalty": 0.0, "score_adjustment": 0.0}
+        reference = float(self.canonical_memory_config["support_reference_count"])
+        support_strength = min(1.0, math.log1p(float(support_count)) / max(math.log1p(reference), 1e-12))
+        support_bonus = float(self.canonical_memory_config["support_weight"]) * support_strength
+        duplicate_penalty = 0.0
+        if str(memory_id) != str(canonical_info.get("keeper_memory_id") or ""):
+            duplicate_penalty = float(self.canonical_memory_config["duplicate_penalty"]) * support_strength
+            support_bonus *= 0.25
+        return {
+            "support_bonus": support_bonus,
+            "duplicate_penalty": duplicate_penalty,
+            "score_adjustment": support_bonus - duplicate_penalty,
+        }
+
+    @staticmethod
+    def _canonical_text_key(text: Any) -> str:
+        return " ".join(str(text or "").strip().lower().split())
 
     def _append_log(self, payload: dict[str, Any]) -> None:
         with self.log_path.open("a", encoding="utf-8") as f:

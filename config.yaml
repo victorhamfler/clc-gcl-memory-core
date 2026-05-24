@@ -59,6 +59,15 @@ retrieval_weights:
   claim_scope: 0.14
   answer_type: 0.16
 
+canonical_memory:
+  enabled: true
+  support_weight: 0.08
+  duplicate_penalty: 0.18
+  support_reference_count: 10
+  lexical_backfill_enabled: true
+  lexical_backfill_min_affinity: 0.75
+  lexical_backfill_max_additions: 20
+
 selector:
   mode: learned
   k: 3

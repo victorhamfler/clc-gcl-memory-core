@@ -1,0 +1,116 @@
+{
+  "schema": "candidate_promotion_readiness/v1",
+  "description": "Fixture readiness artifact for semantic candidate memory regression.",
+  "thresholds": {
+    "ready_support": 3,
+    "ready_source_logs": 2,
+    "ready_distinct_queries": 2
+  },
+  "artifact_count": 1,
+  "artifacts": [
+    {
+      "path": "fixture/session_a_candidates.json",
+      "schema": "evidence_state_candidates/v1",
+      "source_log": "fixture/session_a.jsonl",
+      "candidate_count": 1
+    }
+  ],
+  "candidate_count": 3,
+  "recommendation_counts": {
+    "held_out": 1,
+    "hold": 2
+  },
+  "candidates": [
+    {
+      "key": "evidence:sensitive_lookup:terms:drink",
+      "kind": "evidence",
+      "section": "sensitive_lookup",
+      "field": "terms",
+      "term": "drink",
+      "recommendation": "hold",
+      "support": 2,
+      "distinct_source_logs": 1,
+      "distinct_queries": 2,
+      "labels": [
+        "sensitive_lookup"
+      ],
+      "source_logs": [
+        "fixture/session_a.jsonl"
+      ],
+      "artifact_paths": [
+        "fixture/session_a_candidates.json"
+      ],
+      "quality_flags": [
+        "low_log_diversity"
+      ],
+      "examples": [
+        {
+          "query": "what drink does victor prefer",
+          "label": "sensitive_lookup"
+        },
+        {
+          "query": "which private drink is exact",
+          "label": "needs_exact_evidence"
+        }
+      ]
+    },
+    {
+      "key": "evidence:sensitive_lookup:terms:server",
+      "kind": "evidence",
+      "section": "sensitive_lookup",
+      "field": "terms",
+      "term": "server",
+      "recommendation": "hold",
+      "support": 1,
+      "distinct_source_logs": 1,
+      "distinct_queries": 1,
+      "labels": [
+        "sensitive_lookup"
+      ],
+      "source_logs": [
+        "fixture/session_a.jsonl"
+      ],
+      "artifact_paths": [
+        "fixture/session_a_candidates.json"
+      ],
+      "quality_flags": [
+        "low_support"
+      ],
+      "examples": [
+        {
+          "query": "what server is live",
+          "label": "sensitive_lookup"
+        }
+      ]
+    },
+    {
+      "key": "evidence:held_out_sensitive_lookup:terms:live",
+      "kind": "evidence",
+      "section": "held_out_sensitive_lookup",
+      "field": "terms",
+      "term": "live",
+      "recommendation": "held_out",
+      "support": 1,
+      "distinct_source_logs": 1,
+      "distinct_queries": 1,
+      "labels": [
+        "sensitive_lookup"
+      ],
+      "source_logs": [
+        "fixture/session_a.jsonl"
+      ],
+      "artifact_paths": [
+        "fixture/session_a_candidates.json"
+      ],
+      "quality_flags": [
+        "held_out"
+      ],
+      "examples": [
+        {
+          "query": "what server is live",
+          "label": "sensitive_lookup"
+        }
+      ]
+    }
+  ]
+}

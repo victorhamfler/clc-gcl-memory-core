@@ -30,6 +30,26 @@ into:
 typed modules + configurable policies + logged outcomes + guarded adaptive updates
 ```
 
+## Neural-Symbolic Adaptive Memory Brain Direction
+
+The selected development direction is a neural-symbolic controller, not a purely term-based rule system and not a frontier-scale model.
+
+The architecture should use symbolic mechanisms where auditability and safety matter, and learned mechanisms where the system needs language generalization:
+
+- symbolic contracts for memory state, candidate artifacts, promotion gates, held-out terms, and rollback;
+- configurable controller surfaces for retrieval signals, evidence states, claim scope, answer type, and CSD/G-CL thresholds;
+- outcome-log mining to propose new controller knowledge;
+- promotion-readiness evaluation to decide whether repeated evidence is strong enough for promotion;
+- later semantic clustering or small local learned routers to group candidate phrases by meaning instead of exact terms.
+
+This gives the system a realistic path from:
+
+```text
+single hardcoded term -> mined candidate term -> repeated candidate pattern -> semantic cluster -> guarded learned controller feature
+```
+
+The important principle is that the neural/learned part should propose or score controller features, while the symbolic gate decides whether the learned behavior is safe enough to affect memory decisions.
+
 ## Current Architectural Problem
 
 The useful mechanisms are real, but too many of them now live inside large mixed-responsibility files:
@@ -320,14 +340,277 @@ The current combined checkpoint is:
 
 This gate should pass before selector-side candidate promotion, handoff to the memory-program session, or repository upload.
 
+The selector candidate pipeline now also produces a report-only promotion-readiness artifact:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\selector_candidate_pipeline_from_log.py --log <outcome-log.jsonl>
+```
+
+The readiness layer aggregates mined candidate artifacts and classifies each candidate as:
+
+- `ready`: repeated support across enough source logs and distinct queries;
+- `hold`: plausible but not mature enough;
+- `reject`: generic/noisy term;
+- `held_out`: intentionally preserved as evidence but blocked from promotion.
+
+This is the first controller-level maturity evaluator. It does not promote config automatically.
+
 ## Immediate Next Step
 
-Prepare a handover for the memory-program session after reviewing the remaining shared contracts.
+Use the promotion-readiness reports from real Hermes runs to start building a cross-session candidate memory.
 
-The handover should focus on integration boundaries rather than asking the memory session to change selector internals:
+The next selector-side development should avoid adding more term lists by hand. Instead, it should:
 
-- how to call the unified selector architecture gate;
-- how outcome logs should supply linked `ask` and `feedback` events;
-- which candidate artifact formats the selector side now accepts;
-- what not to promote without a passing gate;
-- which shared contracts should stay stable during the broader memory-program restructure.
+- collect readiness reports from multiple real logs;
+- identify repeated held/ready candidates across sessions;
+- cluster semantically similar candidates with the local embedding model when available;
+- produce a guarded semantic-candidate artifact before modifying runtime config.
+
+The memory-program session does not need to change selector internals for this step. It only needs to keep producing linked `ask` and `feedback` outcome logs with enough raw retrieval fields for mining.
+
+## Current Neural-Symbolic Step
+
+The selector side now has a report-only semantic candidate memory:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\candidate_semantic_memory.py --readiness <promotion-readiness.json>
+```
+
+The one-command pipeline also writes semantic-memory artifacts next to the readiness artifacts:
+
+```text
+*_semantic_memory.json
+*_semantic_memory.md
+```
+
+This is the first implementation of the cross-session candidate-memory idea. It clusters candidates by compatible controller surface, lexical/embedding similarity, support, source-log diversity, and query diversity. It still does not alter runtime config.
+
+The next development after this should be a multi-run memory bank:
+
+- collect semantic-memory reports from multiple Hermes sessions;
+- compare which clusters recur naturally over time;
+- test the configured Gemma embedding backend on candidate clustering;
+- only then propose semantic cluster artifacts for promotion-gate evaluation.
+
+## OGCF Memory Maintenance Branch
+
+Hermes' OGCF tests should be incorporated as a complementary memory-maintenance branch, not as a replacement for the selector roadmap.
+
+The correct integration pattern is the same conservative pattern used for selector candidates:
+
+```text
+OGCF geometry / dedup evidence -> dry-run maintenance candidates -> gate -> Hermes validation -> optional runtime integration
+```
+
+The first selector-side port is:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\ogcf_maintenance_candidate_gate.py
+```
+
+This gate validates:
+
+- the OGCF maintenance candidate generator compiles;
+- the regression fixture finds exact duplicate, semantic duplicate, and stale-version candidates;
+- the candidate artifact declares `mutates_db: false`;
+- a real DB sample can produce dry-run candidates without changing memory rows.
+
+Runtime memory mutation is still out of scope until the dry-run candidates have been reviewed and benchmarked.
+
+## Canonical Memory View Layer
+
+The OGCF duplicate-origin diagnostics showed that `memory_experiment_180_best.db` is a stress-test DB, not a clean diverse memory benchmark:
+
+- `6955` active memory rows;
+- `192` exact-distinct texts;
+- `6763` extra exact-duplicate rows;
+- most duplicate pressure came from generated Hermes escalation/policy test namespaces.
+
+The next architecture layer is now implemented as a non-destructive canonical view:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\canonical_memory_view_eval.py
+..\.venv-torch\Scripts\python.exe .\eval\canonical_memory_view_regression.py
+```
+
+This layer turns repeated rows into canonical claims with support/provenance metadata:
+
+- one canonical text/keeper memory per exact claim;
+- support count and all supporting memory IDs;
+- duplicate memory IDs;
+- domain, namespace, and source counts;
+- first-seen and last-seen timestamps;
+- semantic edges marked as either clean paraphrases or conflict/update signals.
+
+The key policy decision is that exact dedup should become canonicalization, not blind deletion. Repeated rows usually do not add new text content, but they can carry useful evidence: support count, source provenance, namespace spread, and time range. Semantic dedup remains review-first because near-duplicate claims can encode corrections or opposite facts.
+
+The next selector-side integration should consume this canonical view as a retrieval/OGCF feature source:
+
+- reduce duplicate pressure in retrieval ranking;
+- expose `support_count` as confidence evidence;
+- penalize duplicate-dominated bridge clusters;
+- route `semantic_conflict_or_update` edges into stale/correction guards instead of merge actions.
+
+## Canonical Retrieval Scoring
+
+The first retrieval-side canonical integration is implemented behind the `canonical_memory` config section:
+
+```yaml
+canonical_memory:
+  enabled: true
+  support_weight: 0.08
+  duplicate_penalty: 0.18
+  support_reference_count: 10
+  lexical_backfill_enabled: true
+  lexical_backfill_min_affinity: 0.75
+  lexical_backfill_max_additions: 20
+```
+
+The retrieval pipeline now attaches these fields to each retrieved row when enabled:
+
+- `canonical_claim_key`
+- `canonical_keeper_memory_id`
+- `canonical_support_count`
+- `canonical_duplicate_count`
+- `canonical_is_keeper`
+- `canonical_support_bonus`
+- `canonical_duplicate_penalty`
+- `canonical_score_adjustment`
+
+The scoring rule is intentionally conservative:
+
+- exact-claim keepers receive a bounded support bonus;
+- redundant non-keeper duplicate rows receive a stronger duplicate penalty;
+- duplicate rows remain retrievable if requested, but should no longer dominate the top ranks only because the same text was inserted many times.
+
+Regression:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\canonical_retrieval_scoring_regression.py
+```
+
+The next improvement should test whether retrieval recall needs a canonical lexical backfill. A live exact-text probe against the stress DB did not surface the old duplicate rows in top vector results, so canonical scoring is working, but the recall candidate pool may still miss exact claims when the embedding index is noisy or document chunks dominate.
+
+Canonical lexical backfill is now implemented before final retrieval scoring. It scans the active namespace scope for exact or strong lexical claim matches, chooses the canonical keeper for each repeated exact claim, and injects only those keepers into the candidate pool. This recovers important exact claims without reintroducing duplicate flooding.
+
+Regression:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\canonical_lexical_backfill_regression.py
+```
+
+The regression verifies:
+
+- an exact claim can be missed by vector top-k when many vector-near distractors exist;
+- canonical lexical backfill recovers the exact canonical keeper;
+- recovered keeper ranks first after scoring;
+- support metadata attaches correctly;
+- cross-namespace support is excluded from scoped retrieval.
+
+Namespace isolation remains intentional. A default global query will not search generated `agent:*` stress-test namespaces. When the exact stress-test namespace is requested, the backfill recovers the matching claim and keeps support scoped to that namespace.
+
+## Canonical Selector Signals
+
+The selector now consumes canonical retrieval metadata through `selector_features_from_retrieval_context()`.
+
+New diagnostics:
+
+- `canonical_max_support_count`
+- `canonical_supported_keeper_rows`
+- `canonical_supported_keeper_ratio`
+- `canonical_nonkeeper_rows`
+- `canonical_duplicate_pressure`
+- `canonical_support_strength`
+- `canonical_confidence_signal`
+- `canonical_confidence_credit`
+- `canonical_duplicate_penalty`
+
+The feature shaping is deliberately small:
+
+- clean canonical keeper support can slightly reduce `memory_bad_rate` and `probe_drop`;
+- duplicate non-keeper clutter increases `memory_bad_rate`, `probe_drop`, and `csd_ratio`;
+- stale or conflict-heavy contexts do not receive the clean support credit, even when they have repeated support.
+
+Regression:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\canonical_selector_features_regression.py
+```
+
+This is the first full selector path for canonical memory:
+
+```text
+canonical view -> retrieval keeper/backfill/scoring -> selector diagnostics/features
+```
+
+## Canonical + OGCF Combined Eval
+
+The canonical branch and OGCF branch are now tested together with a four-mode eval:
+
+- canonical off, OGCF off;
+- canonical on, OGCF off;
+- canonical off, OGCF on;
+- canonical on, OGCF on.
+
+Regression:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\canonical_ogcf_combined_eval.py
+```
+
+The combined eval verifies:
+
+- canonical lexical backfill recovers an exact claim missed by vector-only retrieval;
+- support metadata attaches to the recovered canonical keeper;
+- duplicate clutter becomes visible to selector diagnostics instead of being silently erased;
+- OGCF bridge overload still increases selector risk after canonical support is present;
+- stale/current conflict contexts do not receive canonical confidence credit;
+- the exact-unique shadow DB strongly reduces OGCF maintenance noise compared with the duplicate-heavy stress DB.
+
+Current interpretation:
+
+```text
+canonical memory = claim support/provenance and duplicate-pressure control
+OGCF = geometry-level bridge/composition risk detector
+selector = controller that combines both into conservative action choice
+```
+
+This means the two methods should stay combined, not treated as competing alternatives. Canonical memory cleans and structures local evidence; OGCF remains useful for graph-level failure modes that are not visible from exact duplicate counts alone.
+
+The next best step after this checkpoint is a real answer-quality and agent-loop eval: run representative memory questions through retrieval with canonical/OGCF diagnostics enabled, then score whether answers choose the correct current claim, cite support/provenance, avoid stale claims, and surface bridge/conflict warnings when needed.
+
+## Canonical + OGCF Answer Quality Eval
+
+The first answer-level eval for the combined architecture is now implemented:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\canonical_ogcf_answer_quality_eval.py
+```
+
+This eval creates isolated temporary memory databases and tests:
+
+- canonical off vs canonical on for an exact-miss answer case;
+- canonical support metadata in answer evidence;
+- current/stale correction handling through the real `ask()` path;
+- stale context preservation for auditability;
+- OGCF bridge-risk augmentation over the answer retrieval context.
+
+The key result is that canonical-on answers the exact-miss launch-window question correctly, while canonical-off answers from a vector-near distractor. This proves the canonical layer has user-visible answer-quality value, not only better internal ranking.
+
+Current combined architecture:
+
+```text
+canonical lexical backfill -> canonical support/provenance scoring -> answer resolver
+                                     |
+                                     v
+                         selector diagnostics/features
+                                     |
+                                     v
+                         OGCF bridge-risk augmentation
+```
+
+The next best development step is to turn this eval into a Hermes handoff / longer agent-loop benchmark:
+
+- run the same canonical-off/on and OGCF-off/on comparisons over real Hermes working logs;
+- collect answer correctness, stale avoidance, support citation, duplicate pressure, bridge warning, and selector-policy metrics;
+- add at least one multi-day or multi-session replay so support/provenance and duplicate pressure can evolve naturally.

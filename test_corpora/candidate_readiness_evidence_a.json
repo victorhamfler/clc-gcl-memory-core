@@ -1,0 +1,64 @@
+{
+  "schema": "evidence_state_candidates/v1",
+  "description": "Fixture evidence candidates for promotion-readiness regression.",
+  "source_log": "fixture/session_a.jsonl",
+  "min_support": 1,
+  "ask_event_count": 3,
+  "feedback_event_count": 3,
+  "candidate_count": 1,
+  "candidates": [
+    {
+      "id": "fixture_sensitive_lookup_terms",
+      "section": "sensitive_lookup",
+      "terms": [
+        "drink",
+        "server"
+      ],
+      "support": 3,
+      "notes": "Drink has repeated support across sessions; server does not."
+    }
+  ],
+  "support": {
+    "stale_language": {},
+    "correction_language": {},
+    "sensitive_lookup": {
+      "drink": 2,
+      "server": 1
+    },
+    "held_out_sensitive_lookup": {
+      "live": 1
+    }
+  },
+  "examples": {
+    "sensitive_lookup:drink": [
+      {
+        "query": "what drink does victor prefer",
+        "source": "profile.md",
+        "label": "sensitive_lookup",
+        "linked_operation_id": "ask-a-2"
+      },
+      {
+        "query": "which morning drink is private",
+        "source": "profile.md",
+        "label": "needs_exact_evidence",
+        "linked_operation_id": "ask-a-3"
+      }
+    ],
+    "sensitive_lookup:server": [
+      {
+        "query": "what server is live",
+        "source": "ops.md",
+        "label": "sensitive_lookup",
+        "linked_operation_id": "ask-a-4"
+      }
+    ],
+    "held_out_sensitive_lookup:live": [
+      {
+        "query": "what server is live",
+        "source": "ops.md",
+        "label": "sensitive_lookup",
+        "linked_operation_id": "ask-a-4"
+      }
+    ]
+  }
+}

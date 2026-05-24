@@ -73,6 +73,10 @@ def build_artifact_paths(out_json: Path, out_md: Path) -> dict[str, str]:
         "retrieval_candidates_markdown": str(out_md.with_name(out_md.stem + "_retrieval_candidates.md")),
         "evidence_candidates_json": str(out_json.with_name(out_json.stem + "_evidence_candidates.json")),
         "evidence_candidates_markdown": str(out_md.with_name(out_md.stem + "_evidence_candidates.md")),
+        "promotion_readiness_json": str(out_json.with_name(out_json.stem + "_promotion_readiness.json")),
+        "promotion_readiness_markdown": str(out_md.with_name(out_md.stem + "_promotion_readiness.md")),
+        "semantic_memory_json": str(out_json.with_name(out_json.stem + "_semantic_memory.json")),
+        "semantic_memory_markdown": str(out_md.with_name(out_md.stem + "_semantic_memory.md")),
         "architecture_gate_json": str(out_json.with_name(out_json.stem + "_architecture_gate.json")),
         "architecture_gate_markdown": str(out_md.with_name(out_md.stem + "_architecture_gate.md")),
     }
@@ -81,11 +85,17 @@ def build_artifact_paths(out_json: Path, out_md: Path) -> dict[str, str]:
 def build_report(log_path: Path, steps: list[dict[str, Any]], artifacts: dict[str, str]) -> dict[str, Any]:
     retrieval_candidates = read_json(Path(artifacts["retrieval_candidates_json"]))
     evidence_candidates = read_json(Path(artifacts["evidence_candidates_json"]))
+    promotion_readiness = read_json(Path(artifacts["promotion_readiness_json"]))
+    semantic_memory = read_json(Path(artifacts["semantic_memory_json"]))
     architecture_gate = read_json(Path(artifacts["architecture_gate_json"]))
     required_summary = {
         "log_exists": log_path.exists(),
         "retrieval_mining_ok": bool(retrieval_candidates and retrieval_candidates.get("schema") == "retrieval_signal_candidates/v1"),
         "evidence_mining_ok": bool(evidence_candidates and evidence_candidates.get("schema") == "evidence_state_candidates/v1"),
+        "promotion_readiness_ok": bool(
+            promotion_readiness and promotion_readiness.get("schema") == "candidate_promotion_readiness/v1"
+        ),
+        "semantic_memory_ok": bool(semantic_memory and semantic_memory.get("schema") == "candidate_semantic_memory/v1"),
         "architecture_gate_ok": bool(architecture_gate and architecture_gate.get("ok")),
     }
     return {
@@ -95,6 +105,8 @@ def build_report(log_path: Path, steps: list[dict[str, Any]], artifacts: dict[st
         "artifacts": artifacts,
         "retrieval_candidate_count": retrieval_candidates.get("candidate_count") if retrieval_candidates else None,
         "evidence_candidate_count": evidence_candidates.get("candidate_count") if evidence_candidates else None,
+        "promotion_readiness_counts": promotion_readiness.get("recommendation_counts") if promotion_readiness else None,
+        "semantic_memory_counts": semantic_memory.get("cluster_recommendation_counts") if semantic_memory else None,
         "architecture_gate_summary": architecture_gate.get("required_summary") if architecture_gate else None,
         "steps": steps,
     }
@@ -121,6 +133,18 @@ def write_markdown(report: dict[str, Any], out_md: Path) -> None:
             "",
             f"- Retrieval-signal candidate sections: `{report['retrieval_candidate_count']}`",
             f"- Evidence-state candidate sections: `{report['evidence_candidate_count']}`",
+            "",
+            "## Promotion Readiness",
+            "",
+            "```json",
+            json.dumps(report["promotion_readiness_counts"], indent=2),
+            "```",
+            "",
+            "## Semantic Candidate Memory",
+            "",
+            "```json",
+            json.dumps(report["semantic_memory_counts"], indent=2),
+            "```",
             "",
             "## Architecture Gate Summary",
             "",
@@ -171,6 +195,8 @@ def main() -> int:
                 "py_compile",
                 str(ROOT / "eval" / "mine_retrieval_signal_candidates.py"),
                 str(ROOT / "eval" / "mine_evidence_state_candidates.py"),
+                str(ROOT / "eval" / "candidate_promotion_readiness.py"),
+                str(ROOT / "eval" / "candidate_semantic_memory.py"),
                 str(ROOT / "eval" / "selector_architecture_gate.py"),
                 str(ROOT / "eval" / "selector_candidate_pipeline_from_log.py"),
             ],
@@ -222,6 +248,34 @@ def main() -> int:
                     ],
                 ),
                 run_step(
+                    "candidate_promotion_readiness",
+                    [
+                        python,
+                        str(ROOT / "eval" / "candidate_promotion_readiness.py"),
+                        "--candidate",
+                        artifacts["retrieval_candidates_json"],
+                        "--candidate",
+                        artifacts["evidence_candidates_json"],
+                        "--out-json",
+                        artifacts["promotion_readiness_json"],
+                        "--out-md",
+                        artifacts["promotion_readiness_markdown"],
+                    ],
+                ),
+                run_step(
+                    "candidate_semantic_memory",
+                    [
+                        python,
+                        str(ROOT / "eval" / "candidate_semantic_memory.py"),
+                        "--readiness",
+                        artifacts["promotion_readiness_json"],
+                        "--out-json",
+                        artifacts["semantic_memory_json"],
+                        "--out-md",
+                        artifacts["semantic_memory_markdown"],
+                    ],
+                ),
+                run_step(
                     "selector_architecture_gate",
                     [
                         python,
@@ -254,6 +308,8 @@ def main() -> int:
                 "required_summary": report["required_summary"],
                 "retrieval_candidate_count": report["retrieval_candidate_count"],
                 "evidence_candidate_count": report["evidence_candidate_count"],
+                "promotion_readiness_counts": report["promotion_readiness_counts"],
+                "semantic_memory_counts": report["semantic_memory_counts"],
                 "json": str(out_json),
                 "markdown": str(out_md),
             },

@@ -1,0 +1,53 @@
+{
+  "schema": "candidate_promotion_readiness/v1",
+  "description": "Second fixture readiness artifact for semantic candidate memory regression.",
+  "thresholds": {
+    "ready_support": 3,
+    "ready_source_logs": 2,
+    "ready_distinct_queries": 2
+  },
+  "artifact_count": 1,
+  "artifacts": [
+    {
+      "path": "fixture/session_b_candidates.json",
+      "schema": "evidence_state_candidates/v1",
+      "source_log": "fixture/session_b.jsonl",
+      "candidate_count": 1
+    }
+  ],
+  "candidate_count": 1,
+  "recommendation_counts": {
+    "hold": 1
+  },
+  "candidates": [
+    {
+      "key": "evidence:sensitive_lookup:terms:morning drink",
+      "kind": "evidence",
+      "section": "sensitive_lookup",
+      "field": "terms",
+      "term": "morning drink",
+      "recommendation": "hold",
+      "support": 1,
+      "distinct_source_logs": 1,
+      "distinct_queries": 1,
+      "labels": [
+        "needs_exact_evidence"
+      ],
+      "source_logs": [
+        "fixture/session_b.jsonl"
+      ],
+      "artifact_paths": [
+        "fixture/session_b_candidates.json"
+      ],
+      "quality_flags": [
+        "low_support"
+      ],
+      "examples": [
+        {
+          "query": "tell me the exact morning drink preference",
+          "label": "needs_exact_evidence"
+        }
+      ]
+    }
+  ]
+}

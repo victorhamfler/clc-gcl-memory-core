@@ -1,0 +1,39 @@
+{
+  "schema": "retrieval_signal_candidates/v1",
+  "description": "Fixture candidate artifact for promotion-readiness regression.",
+  "source_log": "fixture/session_a.jsonl",
+  "min_support": 1,
+  "ask_event_count": 2,
+  "feedback_event_count": 1,
+  "candidate_count": 1,
+  "candidates": [
+    {
+      "id": "fixture_broad_generic_marker",
+      "section": "broad_generic",
+      "source_contains": [
+        "report_template_note"
+      ],
+      "text_prefixes": [],
+      "support": 1,
+      "notes": "Single-session retrieval marker should remain on hold."
+    }
+  ],
+  "support": {
+    "broad_sources": {
+      "report_template_note": 1
+    },
+    "broad_prefixes": {},
+    "scope_query_terms": {},
+    "scope_markers": {}
+  },
+  "examples": {
+    "broad_source:report_template_note": [
+      {
+        "query": "what is the server approval policy",
+        "source": "report_template_note.md",
+        "label": "bad_source",
+        "linked_operation_id": "ask-a-1"
+      }
+    ]
+  }
+}

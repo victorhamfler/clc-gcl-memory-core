@@ -1,0 +1,38 @@
+{
+  "schema": "evidence_state_candidates/v1",
+  "description": "Second fixture evidence artifact for promotion-readiness regression.",
+  "source_log": "fixture/session_b.jsonl",
+  "min_support": 1,
+  "ask_event_count": 1,
+  "feedback_event_count": 1,
+  "candidate_count": 1,
+  "candidates": [
+    {
+      "id": "fixture_sensitive_lookup_terms",
+      "section": "sensitive_lookup",
+      "terms": [
+        "drink"
+      ],
+      "support": 1,
+      "notes": "Second-session support makes drink promotion-ready."
+    }
+  ],
+  "support": {
+    "stale_language": {},
+    "correction_language": {},
+    "sensitive_lookup": {
+      "drink": 1
+    },
+    "held_out_sensitive_lookup": {}
+  },
+  "examples": {
+    "sensitive_lookup:drink": [
+      {
+        "query": "tell me the exact private drink preference",
+        "source": "profile.md",
+        "label": "needs_exact_evidence",
+        "linked_operation_id": "ask-b-1"
+      }
+    ]
+  }
+}
