@@ -1,0 +1,105 @@
+{
+  "schema": "answer_feedback_controller_signals/v1",
+  "description": "Synthetic answer-feedback signals fixture A.",
+  "ok": true,
+  "source_log": "test_corpora/answer_feedback_run_a.jsonl",
+  "event_count": 6,
+  "answer_feedback_count": 3,
+  "signal_count": 3,
+  "checks": {
+    "log_exists": true,
+    "has_answer_feedback": true,
+    "all_answer_feedback_linked": true,
+    "has_positive_answer_signal": true,
+    "has_negative_answer_signal": true,
+    "bridge_signal_has_ogcf": true,
+    "missing_support_signal_present": true
+  },
+  "label_counts": {
+    "answer_bridge_warning_useful": 1,
+    "answer_correct": 1,
+    "answer_missing_support": 1
+  },
+  "family_counts": {
+    "answer_quality": 1,
+    "bridge_warning_quality": 1,
+    "missing_support_refusal": 1
+  },
+  "recommendation_counts": {
+    "holdout_ready": 3
+  },
+  "signals": [
+    {
+      "id": "answer_signal_a_correct",
+      "family": "answer_quality",
+      "label": "answer_correct",
+      "rating": 1.0,
+      "recommendation": "holdout_ready",
+      "feedback_operation_id": "op_a_feedback_correct",
+      "linked_operation_id": "op_a_ask_correct",
+      "query": "What should Hermes cite in answers?",
+      "answer_preview": "Hermes should cite evidence ids and say when support is weak.",
+      "selected_memory_ids": ["mem_a_cite"],
+      "selected_rows": [],
+      "selector_policy": "periodic_baseline",
+      "selector_action": "PROTECT_PERIODIC",
+      "ogcf_meta_present": false,
+      "ogcf_diagnostics": {},
+      "diagnostic_summary": {
+        "memory_bad_rate": 0.18,
+        "probe_drop": 0.04,
+        "csd_ratio": 0.75
+      }
+    },
+    {
+      "id": "answer_signal_a_bridge",
+      "family": "bridge_warning_quality",
+      "label": "answer_bridge_warning_useful",
+      "rating": 1.0,
+      "recommendation": "holdout_ready",
+      "feedback_operation_id": "op_a_feedback_bridge",
+      "linked_operation_id": "op_a_ask_bridge",
+      "query": "How do weather uncertainty and selector refresh interact across clusters?",
+      "answer_preview": "The answer disclosed bridge risk and cited supporting memory.",
+      "selected_memory_ids": ["mem_a_bridge"],
+      "selected_rows": [],
+      "selector_policy": "periodic_baseline",
+      "selector_action": "PROTECT_PERIODIC",
+      "ogcf_meta_present": true,
+      "ogcf_diagnostics": {
+        "ogcf_bridge_overload_score": 0.91,
+        "ogcf_effective_affected_memory_ratio": 0.87,
+        "ogcf_intent": "bridge_geometry_query"
+      },
+      "diagnostic_summary": {
+        "memory_bad_rate": 0.18,
+        "probe_drop": 0.04,
+        "csd_ratio": 0.75,
+        "ogcf_bridge_overload_score": 0.91,
+        "ogcf_effective_affected_memory_ratio": 0.87
+      }
+    },
+    {
+      "id": "answer_signal_a_missing",
+      "family": "missing_support_refusal",
+      "label": "answer_missing_support",
+      "rating": -0.75,
+      "recommendation": "holdout_ready",
+      "feedback_operation_id": "op_a_feedback_missing",
+      "linked_operation_id": "op_a_ask_missing",
+      "query": "What private launch code should Hermes use?",
+      "answer_preview": "I do not have enough memory evidence to answer that yet.",
+      "selected_memory_ids": [],
+      "selected_rows": [],
+      "selector_policy": "periodic_baseline",
+      "selector_action": "PROTECT_PERIODIC",
+      "ogcf_meta_present": false,
+      "ogcf_diagnostics": {},
+      "diagnostic_summary": {
+        "memory_bad_rate": 0.18,
+        "probe_drop": 0.04,
+        "csd_ratio": 0.75
+      }
+    }
+  ]
+}

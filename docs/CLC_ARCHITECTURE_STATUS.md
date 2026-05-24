@@ -122,6 +122,17 @@ OGCF query/evidence intent gate:
 - True loop overload still bypasses the intent gate.
 - `eval/ogcf_intent_gate_regression.py` protects the three important cases: ordinary lookup suppression, explicit geometry escalation, and true-loop bypass.
 - `eval/ogcf_intent_config_regression.py` proves new bridge terms and gate behavior can be changed through config without editing source code.
+- `eval/mine_ogcf_intent_candidates.py` now mines dry-run `ogcf_intent_candidates/v1` artifacts from linked ask/feedback logs. Current local logs have no OGCF-specific feedback labels yet, so they produce zero candidates; Hermes needs to add these labels in future runs.
+- The memory-session OGCF outcome workflow confirms the linked label loop works end to end. The selector-side miner now filters generic workflow terms before candidate emission, so controlled signals like `meshlink`, `manifolddrift`, `pruneflow`, and `lunar` remain while terms such as `note`, `memo`, `evidence`, `reviewed`, and `pressure` are suppressed.
+- The memory-session neural-symbolic outcome workflow now emits answer-level feedback, answer holdout candidates, and non-empty OGCF diagnostics. `eval/answer_feedback_signal_eval.py` consumes this log into report-only `answer_feedback_controller_signals/v1` artifacts for future resolver/controller learning.
+- `eval/answer_feedback_memory_bank.py` now aggregates multiple answer-feedback signal artifacts into a report-only `answer_feedback_memory_bank/v1`. The first local multi-run test found ready clusters for supported answer quality, useful bridge warnings with OGCF metadata, and missing-support refusal behavior.
+- `eval/answer_feedback_bank_guard.py` now guards those ready clusters before any future resolver or answer-warning behavior change. It verifies bridge-warning clusters have OGCF diagnostics, supported-answer clusters have selected evidence, missing-support clusters do not contain selected memories or positive feedback, mixed-outcome clusters are not plain-ready, and the bank remains report-only.
+- `eval/answer_behavior_proposal_eval.py` now converts guarded answer-feedback memory-bank clusters into report-only `answer_behavior_proposals/v1` artifacts. The first proposal artifact suggests three testable behavior candidates: evidence-backed supported answers, OGCF bridge-risk warnings when supported, and missing-support refusal preservation.
+- `eval/answer_behavior_proposal_guard.py` now checks those proposals before any resolver implementation. It confirms the proposals are report-only, evidence-backed answers require selected evidence, bridge-warning proposals require OGCF and ordinary-lookup suppression guards, and missing-support refusal proposals do not encourage hallucinated answers from weak raw candidates.
+- `eval/answer_behavior_shadow_eval.py` now simulates those guarded-ready answer behaviors over controlled answer cases before any resolver change. The first shadow pass covers evidence-backed supported answers, OGCF bridge-risk warnings, ordinary bridge-word suppression, missing-support refusal preservation, and stale-conflict disclosure. Current local result: 5/5 cases passed, with no runtime or config mutation.
+- `eval/answer_behavior_real_log_shadow_replay.py` now replays the same guarded-ready answer behavior over linked ask/answer-feedback logs. The first replay passed 3/3 linked answer cases from the neural-symbolic workflow: supported answer, useful OGCF bridge warning, and missing-support refusal.
+- `eval/answer_behavior_real_log_fixture.py` now creates a linked ask/answer-feedback fixture for the missing answer-behavior safety labels. Combined replay now passes 8/8 cases across supported answers, useful bridge warnings, bridge-warning noise suppression, missing-support refusal, stale-answer disclosure, conflict-not-disclosed disclosure, bad citation, and wrong-scope labels. The fixture is still report-only and exists to validate the log contract before Hermes produces more natural examples.
+- `core/answer_behavior_shadow.py` now implements the first configurable resolver-shadow mode. `POST /ask` can include `resolver_shadow` when requested or when `resolver_shadow.enabled` is set in config. It emits report-only proposed actions and annotations beside the current answer, but does not change answer text, resolver ranking, runtime config, selector policy, or memory rows. Current regression passes 7/7 cases.
 - On the raw-Gemma fixture, the intent gate kept ordinary fact queries protected while letting bridge synthesis and OGCF geometry questions escalate; combined-vs-canonical now has one targeted extra delta.
 
 ## Technological Value
@@ -175,6 +186,10 @@ This makes the architecture relevant for local agents, personal memory systems, 
 7. Replace the configurable symbolic OGCF intent classifier with a learned neural-symbolic controller:
    - collect query/evidence/decision/outcome rows from Hermes,
    - mine candidate bridge/geometry/maintenance terms and score shifts into a candidate artifact,
+   - label OGCF false positives explicitly when ordinary factual queries should remain protected,
+   - filter or reject generic terms before readiness evaluation,
+   - parse answer-level feedback into holdout/controller signals before training resolver behavior,
+   - aggregate answer-feedback signals across runs before promoting resolver or warning behavior,
    - train or calibrate a small local intent scorer against guard labels,
    - keep the current config-backed classifier as the transparent fallback.
 

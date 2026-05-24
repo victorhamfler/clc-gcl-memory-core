@@ -392,6 +392,235 @@ The next development after this should be a multi-run memory bank:
 - test the configured Gemma embedding backend on candidate clustering;
 - only then propose semantic cluster artifacts for promotion-gate evaluation.
 
+## OGCF Intent Candidate Mining
+
+The OGCF intent gate has moved from hardcoded terms to a config-backed controller surface:
+
+```yaml
+ogcf_intent:
+  bridge_terms: ...
+  geometry_terms: ...
+  maintenance_terms: ...
+  ordinary_fact_terms: ...
+  scores: ...
+  gate: ...
+```
+
+The selector side now has a dry-run miner for this surface:
+
+```powershell
+py .\eval\mine_ogcf_intent_candidates.py --log <outcome-log.jsonl>
+```
+
+It writes an `ogcf_intent_candidates/v1` artifact with proposed additions for:
+
+- `bridge_terms`
+- `geometry_terms`
+- `maintenance_terms`
+- `ordinary_fact_terms`
+
+Regression:
+
+```powershell
+py .\eval\ogcf_intent_candidate_miner_regression.py
+```
+
+The current local `logs/memory_outcomes.jsonl` has hundreds of ask/feedback rows but no OGCF-specific labels, so the miner correctly produces zero real candidates. The memory-session controlled workflow now proves the linked label path can produce dry-run candidates for bridge, geometry, maintenance, and ordinary-suppression terms. The selector-side miner filters generic workflow terms before emitting candidates, so the controlled artifact keeps only the intended synthetic terms and does not propose filler vocabulary such as notes, memos, evidence, reviews, or pressure.
+
+This means the next cross-session task is not to promote new terms yet. The memory-program session and Hermes need to produce explicit OGCF labels during real work:
+
+- positive bridge labels: `bridge_relevant`, `cross_domain_bridge`, `ogcf_bridge`;
+- positive geometry labels: `ogcf_geometry`, `bridge_geometry`, `loop_overload`;
+- positive maintenance labels: `memory_maintenance`, `dedup`, `duplicate`, `bridge_maintenance`;
+- suppression labels: `ogcf_false_positive`, `bridge_irrelevant`, `ordinary_lookup`, `no_ogcf_pressure`.
+
+This keeps the roadmap consistent:
+
+```text
+config-backed symbolic gate -> labeled outcomes -> mined candidate artifact -> promotion/readiness gate -> later learned scorer
+```
+
+## Answer-Level Feedback Signals
+
+The memory session now supports answer-level feedback that is log-only and separate from memory-row retrieval feedback. This gives the roadmap a second supervision stream:
+
+```text
+memory-row feedback -> retrieval/selector evidence quality
+answer-level feedback -> resolver/answer/controller quality
+```
+
+The selector side consumes this with:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\answer_feedback_signal_eval.py --log <outcome-log.jsonl>
+```
+
+It writes an `answer_feedback_controller_signals/v1` artifact. The current controlled workflow produces three `holdout_ready` signals:
+
+- ordinary answer correctness;
+- useful bridge-warning answer with non-empty OGCF diagnostics;
+- missing-support refusal behavior.
+
+This is report-only. It does not promote resolver weights, selector policy, or runtime config. The next learning step should be a multi-run answer-feedback memory bank that aggregates these signals across real Hermes sessions before any resolver scoring changes.
+
+That first bank now exists:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\answer_feedback_memory_bank.py --signals <answer-feedback-signals.json> --signals <another-run.json>
+```
+
+It writes an `answer_feedback_memory_bank/v1` artifact. Local validation with one generated workflow artifact plus a second fixture artifact produced ready clusters for:
+
+- supported answer quality;
+- useful bridge warnings with OGCF metadata;
+- missing-support refusal behavior.
+
+This is the first answer-side equivalent of semantic candidate memory. It is still report-only. A later learned resolver or bridge-warning scorer should only use clusters that recur across real sessions and pass answer-quality guard tests.
+
+The first answer-bank guard now exists:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\answer_feedback_bank_guard.py --bank <answer-feedback-memory-bank.json>
+```
+
+It writes an `answer_feedback_bank_guard/v1` artifact and verifies:
+
+- bridge-warning ready clusters include OGCF metadata for all examples;
+- supported-answer ready clusters include selected evidence;
+- missing-support refusal clusters have no selected memories and negative feedback;
+- mixed positive/negative clusters are not marked plain `ready`;
+- the memory bank does not contain runtime mutation or config-promotion fields.
+
+Current local guarded bank result: three ready clusters, zero issues, all guard checks passed.
+
+The next report-only layer now exists:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\answer_behavior_proposal_eval.py --bank <answer-feedback-memory-bank.json> --guard <answer-feedback-bank-guard.json>
+```
+
+It writes an `answer_behavior_proposals/v1` artifact. Current local proposals are:
+
+- require evidence-backed supported answers;
+- emit an OGCF bridge-risk warning only when bridge diagnostics and evidence support it;
+- preserve refusal or insufficient-support language when no selected memory supports the query.
+
+This artifact still does not alter resolver behavior. The next step should be a proposal guard/eval that tests these proposed behaviors against answer-quality cases before any memory-session resolver implementation is attempted.
+
+That proposal guard now exists:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\answer_behavior_proposal_guard.py --proposals <answer-behavior-proposals.json>
+```
+
+It writes an `answer_behavior_proposal_guard/v1` artifact and checks:
+
+- proposals are report-only and cannot mutate config/runtime state;
+- supported-answer proposals require selected evidence and citation/evidence language;
+- bridge-warning proposals require OGCF diagnostics, selected evidence, ordinary-fact suppression, and negative-feedback suppressibility;
+- missing-support proposals require no selected memories, negative feedback, refusal language, and protection for valid supported answers.
+
+Current local guarded proposal result: three guarded-ready proposals, zero issues.
+
+The shadow answer-behavior eval now exists:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\answer_behavior_shadow_eval.py --proposals ..\experiments\answer_behavior_proposals_results.json --guard ..\experiments\answer_behavior_proposal_guard_results.json
+```
+
+It writes `answer_behavior_shadow_eval/v1` and simulates guarded-ready behavior over controlled answer cases without changing `serve.py`, resolver code, runtime config, or learned artifacts. Current local result: 5/5 cases passed.
+
+The shadow cases verify:
+
+- supported answers require selected evidence;
+- OGCF bridge warnings require support and diagnostics;
+- ordinary factual queries containing bridge-like words suppress bridge warnings;
+- unsupported private-code questions preserve missing-support refusal;
+- stale/current supported answers disclose stale conflict.
+
+The next selector-side step should be a real-log shadow replay or configurable resolver-shadow mode. Runtime resolver behavior should still not be changed until the memory-program session can validate the same behavior on real Hermes answer logs.
+
+The first real-log answer-behavior shadow replay now exists:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\answer_behavior_real_log_shadow_replay.py --log ..\experiments\neural_symbolic_outcome_holdout_workflow.jsonl
+```
+
+It writes `answer_behavior_real_log_shadow_replay/v1` and checks linked `ask` plus answer-scope `feedback` rows. Current result: 3/3 replayed answer cases passed.
+
+Covered by the current real-log replay:
+
+- `answer_correct`: evidence-backed answer action was proposed;
+- `answer_bridge_warning_useful`: evidence-backed answer plus OGCF bridge warning were proposed;
+- `answer_missing_support`: missing-support refusal preservation was proposed.
+
+Not yet covered by real logs:
+
+- noisy bridge-warning suppression with `answer_bridge_warning_noise`;
+- stale/conflict disclosure with `answer_stale` or `answer_conflict_not_disclosed`;
+- bad citation or wrong-scope answer recovery.
+
+The missing-label fixture now exists:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\answer_behavior_real_log_fixture.py
+```
+
+It writes:
+
+```text
+..\experiments\answer_behavior_real_log_missing_cases.jsonl
+```
+
+The combined replay command is:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\answer_behavior_real_log_shadow_replay.py --log ..\experiments\neural_symbolic_outcome_holdout_workflow.jsonl --log ..\experiments\answer_behavior_real_log_missing_cases.jsonl --out-json ..\experiments\answer_behavior_real_log_shadow_replay_full_coverage_results.json --out-md ..\experiments\answer_behavior_real_log_shadow_replay_full_coverage_report.md
+```
+
+Current result: 8/8 replayed answer cases passed.
+
+Covered labels:
+
+- `answer_correct`;
+- `answer_bridge_warning_useful`;
+- `answer_bridge_warning_noise`;
+- `answer_missing_support`;
+- `answer_stale`;
+- `answer_conflict_not_disclosed`;
+- `answer_bad_citation`;
+- `answer_wrong_scope`.
+
+This means the answer-behavior proposal stack now has controlled-case coverage and linked-log coverage.
+
+The first configurable resolver-shadow mode now exists:
+
+```yaml
+resolver_shadow:
+  enabled: false
+  include_in_outcome_log: false
+  bridge_warning_score_threshold: 0.70
+  bridge_warning_effective_ratio_threshold: 0.50
+```
+
+Runtime behavior:
+
+- default config leaves the user-facing API unchanged;
+- `POST /ask` can include `include_resolver_shadow: true` to return a `resolver_shadow` object beside the normal answer;
+- setting `resolver_shadow.enabled: true` enables the field by default;
+- setting `resolver_shadow.include_in_outcome_log: true` logs the shadow object with ask events;
+- shadow mode is report-only and declares `mutates_answer: false`, `mutates_config: false`.
+
+Regression:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\resolver_shadow_mode_regression.py
+```
+
+Current result: 7/7 cases passed.
+
+The next step should be Hermes validation with `include_resolver_shadow: true` during normal work. The memory session should compare shadow annotations with real answer-level feedback before making any user-facing resolver changes.
+
 ## OGCF Memory Maintenance Branch
 
 Hermes' OGCF tests should be incorporated as a complementary memory-maintenance branch, not as a replacement for the selector roadmap.

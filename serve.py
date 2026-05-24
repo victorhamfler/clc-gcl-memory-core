@@ -14,7 +14,9 @@ from core.config import load_config, resolve_project_path
 from core.consolidation import consolidation_plan, create_consolidation_summaries
 from core.learning import learn_from_document, learn_from_text
 from core.maintenance import improvement_plan, memory_review, record_memory_improvement, weak_memories
+from core.ogcf_selector import augment_selector_features
 from core.outcome_log import OutcomeLogger
+from core.answer_behavior_shadow import normalize_resolver_shadow_config, resolver_shadow_actions
 from core.runtime import create_pipeline, pipeline_config_view, pipeline_stats
 from core.selector_runtime import (
     apply_retrieval_explanation_guard,
@@ -33,11 +35,50 @@ FEEDBACK_RATINGS = {
     "good": 1.0,
     "ok": 0.25,
     "neutral": 0.0,
+    "bridge_relevant": 1.0,
+    "cross_domain_bridge": 1.0,
+    "ogcf_bridge": 1.0,
+    "ogcf_geometry": 1.0,
+    "bridge_geometry": 1.0,
+    "loop_overload": 1.0,
+    "memory_maintenance": 1.0,
+    "dedup": 1.0,
+    "duplicate": 1.0,
+    "bridge_maintenance": 1.0,
     "missing_source": -0.5,
     "wrong_domain": -0.75,
     "stale": -0.75,
+    "ogcf_false_positive": -1.0,
+    "bridge_irrelevant": -0.75,
+    "ordinary_lookup": -0.75,
+    "ordinary_fact": -0.75,
+    "unrelated_bridge": -0.75,
+    "no_ogcf_pressure": -0.75,
+    "answer_correct": 1.0,
+    "answer_good_citation": 1.0,
+    "answer_bridge_warning_useful": 1.0,
+    "answer_stale": -0.75,
+    "answer_wrong_scope": -0.75,
+    "answer_missing_support": -0.75,
+    "answer_overconfident": -0.75,
+    "answer_bad_citation": -0.75,
+    "answer_conflict_not_disclosed": -1.0,
+    "answer_bridge_warning_noise": -0.5,
     "wrong": -1.0,
     "bad": -1.0,
+}
+
+ANSWER_FEEDBACK_LABELS = {
+    "answer_correct",
+    "answer_stale",
+    "answer_wrong_scope",
+    "answer_missing_support",
+    "answer_overconfident",
+    "answer_good_citation",
+    "answer_bad_citation",
+    "answer_conflict_not_disclosed",
+    "answer_bridge_warning_useful",
+    "answer_bridge_warning_noise",
 }
 
 
@@ -51,6 +92,10 @@ def label_from_rating(rating: float) -> str:
     if rating <= -0.75:
         return "stale"
     return "negative"
+
+
+def is_answer_feedback_label(label: str) -> bool:
+    return label in ANSWER_FEEDBACK_LABELS or label.startswith("answer_")
 
 
 class MemoryApi:
@@ -74,7 +119,11 @@ class MemoryApi:
         return pipeline_stats(self.pipeline)
 
     def config(self) -> dict[str, Any]:
-        return {**pipeline_config_view(self.pipeline), "selector": selector_config_view(self.root, self.root_config)}
+        return {
+            **pipeline_config_view(self.pipeline),
+            "selector": selector_config_view(self.root, self.root_config),
+            "resolver_shadow": normalize_resolver_shadow_config(self.root_config.get("resolver_shadow")),
+        }
 
     def _record_outcome(
         self,
@@ -128,11 +177,25 @@ class MemoryApi:
                 label_cost=float(payload.get("label_cost", 0.0002) or 0.0002),
                 budget_pressure=float(payload.get("budget_pressure", 0.2) or 0.2),
             )
+            ogcf_meta = payload.get("ogcf_meta")
+            ogcf_meta_present = isinstance(ogcf_meta, dict) and bool(ogcf_meta)
+            if ogcf_meta_present:
+                features, diagnostics = augment_selector_features(
+                    features,
+                    rows,
+                    ogcf_meta,
+                    diagnostics,
+                    query=str(payload.get("query") or ""),
+                    ogcf_intent_config=self.root_config.get("ogcf_intent")
+                    if isinstance(self.root_config.get("ogcf_intent"), dict)
+                    else None,
+                )
             selector = build_policy_selector(self.root, self.root_config)
             decision = selector.select(features)
             decision = apply_retrieval_policy_guard(decision, features, diagnostics)
             return {
                 "ok": True,
+                "ogcf_meta_present": ogcf_meta_present,
                 "decision": {
                     "policy": decision.policy,
                     "action": decision.action,
@@ -160,8 +223,52 @@ class MemoryApi:
                 label_cost=float(payload.get("label_cost", 0.0002) or 0.0002),
                 budget_pressure=float(payload.get("budget_pressure", 0.2) or 0.2),
             )
-            return features, {"diagnostics": diagnostics, "retrieval_context": retrieval_rows}
+            ogcf_meta = payload.get("ogcf_meta")
+            ogcf_meta_present = isinstance(ogcf_meta, dict) and bool(ogcf_meta)
+            if ogcf_meta_present:
+                features, diagnostics = augment_selector_features(
+                    features,
+                    retrieval_rows,
+                    ogcf_meta,
+                    diagnostics,
+                    query=str(payload.get("query") or ""),
+                    ogcf_intent_config=self.root_config.get("ogcf_intent")
+                    if isinstance(self.root_config.get("ogcf_intent"), dict)
+                    else None,
+                )
+            return features, {
+                "diagnostics": diagnostics,
+                "retrieval_context": retrieval_rows,
+                "ogcf_meta_present": ogcf_meta_present,
+            }
         return selector_features_from_payload(payload), None
+
+    def _resolver_shadow_config(self) -> dict[str, Any]:
+        raw = self.root_config.get("resolver_shadow")
+        return normalize_resolver_shadow_config(raw if isinstance(raw, dict) else None)
+
+    def _include_resolver_shadow(self, payload: dict[str, Any], cfg: dict[str, Any]) -> bool:
+        if "include_resolver_shadow" in payload:
+            return bool(payload.get("include_resolver_shadow"))
+        return bool(cfg.get("enabled"))
+
+    def _resolver_shadow_payload(
+        self,
+        *,
+        query: str,
+        asked: dict[str, Any],
+        selector_snapshot: dict[str, Any],
+        cfg: dict[str, Any],
+    ) -> dict[str, Any]:
+        return resolver_shadow_actions(
+            query=query,
+            answer=str(asked.get("answer") or ""),
+            evidence=asked.get("evidence") or [],
+            stale_context=asked.get("stale_context") or [],
+            selector_snapshot=selector_snapshot,
+            conflict=bool(asked.get("conflict")),
+            config=cfg,
+        )
 
     def selector_decide(self, payload: dict[str, Any]) -> dict[str, Any]:
         selector = build_policy_selector(self.root, self.root_config)
@@ -212,6 +319,7 @@ class MemoryApi:
                 "selector_context": {
                     "diagnostics": context.get("diagnostics") if context else None,
                     "retrieval_context": self._evidence_brief(context.get("retrieval_context") if context else [], limit=10),
+                    "ogcf_meta_present": context.get("ogcf_meta_present") if context else False,
                 },
             },
         )
@@ -594,6 +702,18 @@ class MemoryApi:
             "namespace_warning": namespace_warning,
         }
         selector_snapshot = self._selector_snapshot_from_rows(asked.get("raw_results") or [], payload)
+        resolver_shadow_cfg = self._resolver_shadow_config()
+        resolver_shadow = None
+        if self._include_resolver_shadow(payload, resolver_shadow_cfg):
+            resolver_shadow = self._resolver_shadow_payload(
+                query=query,
+                asked=asked,
+                selector_snapshot=selector_snapshot,
+                cfg={**resolver_shadow_cfg, "enabled": True},
+            )
+            response["resolver_shadow"] = resolver_shadow
+        logged_selector_snapshot = selector_snapshot
+        log_resolver_shadow = resolver_shadow if resolver_shadow_cfg.get("include_in_outcome_log") else None
         log_status = self._record_outcome(
             "ask",
             {
@@ -620,7 +740,8 @@ class MemoryApi:
                     "source_context": self._evidence_brief(asked.get("source_context") or [], limit=10),
                     "stale_context": self._evidence_brief(asked.get("stale_context") or [], limit=10),
                 },
-                "selector_snapshot": selector_snapshot,
+                "selector_snapshot": logged_selector_snapshot,
+                **({"resolver_shadow": log_resolver_shadow} if log_resolver_shadow else {}),
             },
         )
         response["operation_id"] = log_status["operation_id"]
@@ -641,8 +762,6 @@ class MemoryApi:
     def feedback(self, payload: dict[str, Any]) -> dict[str, Any]:
         memory_id = str(payload.get("memory_id") or "").strip()
         label = str(payload.get("label") or "").strip().lower()
-        if not memory_id:
-            raise ValueError("POST /feedback requires JSON field 'memory_id'")
         rating = payload.get("rating")
         if not label and rating is None:
             raise ValueError("POST /feedback requires JSON field 'label' or numeric 'rating'")
@@ -656,24 +775,53 @@ class MemoryApi:
         linked_operation_id = str(
             payload.get("linked_operation_id") or payload.get("operation_id") or payload.get("outcome_id") or ""
         ).strip() or None
+        requested_scope = str(
+            payload.get("feedback_scope") or payload.get("target_type") or payload.get("scope") or ""
+        ).strip().lower()
+        answer_level = requested_scope in {"answer", "response"} or is_answer_feedback_label(label)
+        if not memory_id and not answer_level:
+            raise ValueError("POST /feedback requires JSON field 'memory_id' for memory-level feedback")
+        if answer_level and not linked_operation_id:
+            raise ValueError("POST /feedback answer-level feedback requires linked operation_id")
         feedback_metadata = dict(metadata or {})
         if linked_operation_id:
             feedback_metadata["linked_operation_id"] = linked_operation_id
-        feedback = self.pipeline.db.add_retrieval_feedback(
-            memory_id=memory_id,
-            label=label,
-            query=str(payload.get("query") or "").strip() or None,
-            rating=float(rating),
-            rank=payload.get("rank"),
-            retrieval_score=payload.get("retrieval_score"),
-            notes=str(payload.get("notes") or "").strip() or None,
-            metadata=feedback_metadata,
-        )
+        feedback_scope = "answer" if answer_level and not memory_id else "memory"
+        if feedback_scope == "memory":
+            feedback = self.pipeline.db.add_retrieval_feedback(
+                memory_id=memory_id,
+                label=label,
+                query=str(payload.get("query") or "").strip() or None,
+                rating=float(rating),
+                rank=payload.get("rank"),
+                retrieval_score=payload.get("retrieval_score"),
+                notes=str(payload.get("notes") or "").strip() or None,
+                metadata=feedback_metadata,
+            )
+            feedback["feedback_scope"] = "memory"
+        else:
+            selected_memory_ids = payload.get("selected_memory_ids")
+            if selected_memory_ids is not None and not isinstance(selected_memory_ids, list):
+                raise ValueError("'selected_memory_ids' must be a JSON array when provided")
+            feedback = {
+                "id": None,
+                "memory_id": None,
+                "feedback_scope": "answer",
+                "label": label,
+                "query": str(payload.get("query") or "").strip() or None,
+                "rating": float(rating),
+                "rank": None,
+                "retrieval_score": None,
+                "notes": str(payload.get("notes") or "").strip() or None,
+                "metadata": feedback_metadata,
+                "selected_memory_ids": selected_memory_ids or [],
+            }
         log_status = self._record_outcome(
             "feedback",
             {
                 "request": {
                     "memory_id": memory_id,
+                    "feedback_scope": feedback_scope,
                     "label": label,
                     "rating": float(rating),
                     "query": payload.get("query"),
@@ -681,11 +829,16 @@ class MemoryApi:
                     "retrieval_score": payload.get("retrieval_score"),
                     "notes": payload.get("notes"),
                     "linked_operation_id": linked_operation_id,
+                    "selected_memory_ids": payload.get("selected_memory_ids"),
+                    "answer": payload.get("answer"),
+                    "answer_summary": payload.get("answer_summary"),
                 },
                 "feedback": feedback,
             },
             linked_operation_id=linked_operation_id,
         )
+        if feedback_scope == "answer":
+            feedback["id"] = log_status["operation_id"]
         return {
             "ok": True,
             "operation_id": log_status["operation_id"],

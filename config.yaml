@@ -97,6 +97,13 @@ selector:
   label_cost_ceiling: 0.00025
   high_budget_pressure: 0.9
 
+resolver_shadow:
+  enabled: false
+  include_in_outcome_log: false
+  bridge_warning_score_threshold: 0.70
+  bridge_warning_effective_ratio_threshold: 0.50
+  refusal_markers: do not have enough,not enough memory evidence,insufficient,cannot answer,no memory evidence,not have memory evidence
+
 claim_scope:
   stopwords: about,check,checks,current,currently,does,for,from,help,helps,latest,prefer,prefers,preference,remember,should,that,the,use,what,when,where,which,who,with,victor,hermes,project
   slot_aliases:
