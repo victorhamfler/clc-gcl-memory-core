@@ -19,6 +19,7 @@ The active architecture combines:
 - A retrieval-feature bridge that can derive selector features from live retrieved evidence rows.
 - Retrieval-aware guardrails that use live retrieval diagnostics to protect clean contexts, suppress query-irrelevant stale clutter, and force verified refresh for real stale/current conflict.
 - Source-version grouping by source file, so unrelated files inside `agent_memory_v1` / `agent_memory_v2` do not mark each other stale.
+- Canonical memory support signals and OGCF bridge-overload geometry can now both feed the selector feature layer.
 
 ## Best Current Selector
 
@@ -73,6 +74,22 @@ Retrieval calibration harness:
 
 The important finding is that the architecture can learn from real agent outcome logs without damaging known memory-boundary behavior, but only with conflict-safe admission, retrieval-aware guardrails, and guard tests that include query-irrelevant stale clutter.
 
+Canonical + OGCF checkpoint:
+
+| Eval | Result | Main signal |
+|---|---:|---|
+| `canonical_ogcf_combined_eval.py` | pass | canonical support and OGCF bridge risk can be composed |
+| `canonical_ogcf_answer_quality_eval.py` | pass | answer quality cases preserve expected behavior |
+| `clc_policy_feature_signal_regression.py` | pass | feature-risk boundaries remain stable |
+| `canonical_ogcf_policy_distribution_regression.py` | pass | canonical can protect clean support, OGCF can override bridge risk, duplicate pressure blocks protection |
+
+Production-style shadow eval:
+
+- `eval/canonical_ogcf_production_shadow_eval.py` runs a read-only four-mode comparison over a real or copied DB: base, canonical, OGCF, and combined.
+- It uses stored embeddings as-is by default because the OGCF experiments found unnormalized geometry more stable and interpretable for bridge detection.
+- First smoke run against `memory_experiment_180_best.db` succeeded, but all generated probes landed in `XSEQ_MEMORY_REFRESH`. That does not invalidate the architecture; it means the stress DB/generated probes are already severe before canonical or OGCF has room to produce visible policy flips.
+- Next Hermes validation should provide a mixed real query set with clean support, mild stale clutter, bridge/conflict, and duplicate-pressure cases, preferably against a copied DB.
+
 ## Technological Value
 
 The promising direction is a small, local, auditable controller for agent memory. Instead of retraining or scaling a large model, the system improves behavior by controlling memory operations:
@@ -114,6 +131,12 @@ This makes the architecture relevant for local agents, personal memory systems, 
    - vector-only retrieval,
    - full-context stuffing,
    - small LLM reranker.
+
+6. Run the production shadow harness on real Hermes query logs:
+   - use `py eval/canonical_ogcf_production_shadow_eval.py --db-path <copied-db> --queries-json <mixed-query-file> --query-limit 40 --ogcf-sample-limit 384 --top-k 8`,
+   - confirm policy distribution is not collapsed,
+   - inspect where canonical reduces risk and where OGCF raises risk,
+   - repeat with `--normalize-embeddings` only as an ablation.
 
 ## Current Publication State
 
