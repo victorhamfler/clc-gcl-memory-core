@@ -614,3 +614,41 @@ The next best development step is to turn this eval into a Hermes handoff / long
 - run the same canonical-off/on and OGCF-off/on comparisons over real Hermes working logs;
 - collect answer correctness, stale avoidance, support citation, duplicate pressure, bridge warning, and selector-policy metrics;
 - add at least one multi-day or multi-session replay so support/provenance and duplicate pressure can evolve naturally.
+
+## Hermes Agent-Loop Result And Selector Fix
+
+Hermes ran the canonical + OGCF handoff against commit `2cea5e6`.
+
+Result:
+
+- baseline evals passed: `4/4`;
+- canonical support effects were measurable;
+- OGCF feature augmentation was wired correctly;
+- two retrieval failures were judged by Hermes as synthetic hash-embedding artifacts;
+- the real blocker was selector policy collapse: all `18` queries in all `4` modes returned `XSEQ_MEMORY_REFRESH`.
+
+The blocker was in `CLCPolicySelector.select()`: it still mostly followed condition labels such as `hard_budget144` and did not branch on measured `memory_bad_rate`, `probe_drop`, or `csd_ratio`.
+
+The selector now has a conservative feature-aware branch:
+
+- cost and budget guards still protect first;
+- condition-only calls with no measured memory signals preserve the old default behavior;
+- clean measured contexts can choose `PROTECT_PERIODIC`;
+- moderate memory risk chooses `LONG_SEVERE_VERIFIED_REFRESH`;
+- severe short-stream risk chooses `XSEQ_MEMORY_REFRESH`;
+- severe long-stream risk chooses verified refresh rather than XSEQ.
+
+Regression:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\clc_policy_feature_signal_regression.py
+```
+
+This regression is now part of the required Hermes baseline before rerunning the agent-loop benchmark.
+
+Next test:
+
+- push the selector fix;
+- have Hermes pull the new commit;
+- rerun the same `hermes_canonical_ogcf_agent_loop_test.py`;
+- confirm policy distribution is no longer all XSEQ and that canonical/OGCF signal changes produce policy changes.

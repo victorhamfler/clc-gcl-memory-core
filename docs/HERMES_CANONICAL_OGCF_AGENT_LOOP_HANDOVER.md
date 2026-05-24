@@ -76,6 +76,7 @@ On Windows PowerShell:
 ```powershell
 ..\.venv-torch\Scripts\python.exe .\eval\canonical_ogcf_combined_eval.py
 ..\.venv-torch\Scripts\python.exe .\eval\canonical_ogcf_answer_quality_eval.py
+..\.venv-torch\Scripts\python.exe .\eval\clc_policy_feature_signal_regression.py
 ..\.venv-torch\Scripts\python.exe .\eval\canonical_selector_features_regression.py
 ..\.venv-torch\Scripts\python.exe .\eval\canonical_lexical_backfill_regression.py
 ```
@@ -85,6 +86,7 @@ On WSL/Linux, use the available Python interpreter:
 ```bash
 python eval/canonical_ogcf_combined_eval.py
 python eval/canonical_ogcf_answer_quality_eval.py
+python eval/clc_policy_feature_signal_regression.py
 python eval/canonical_selector_features_regression.py
 python eval/canonical_lexical_backfill_regression.py
 ```
@@ -293,6 +295,7 @@ Use this top-level shape:
   "baseline_evals": {
     "canonical_ogcf_combined_eval": true,
     "canonical_ogcf_answer_quality_eval": true,
+    "clc_policy_feature_signal_regression": true,
     "canonical_selector_features_regression": true,
     "canonical_lexical_backfill_regression": true
   },

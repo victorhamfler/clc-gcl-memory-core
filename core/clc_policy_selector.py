@@ -110,19 +110,86 @@ class CLCPolicySelector:
                 reason="budget_pressure_high",
                 confidence=0.80,
             )
+        has_memory_signals = (
+            abs(f.memory_bad_rate) > 1e-12
+            or abs(f.probe_drop) > 1e-12
+            or abs(f.csd_ratio) > 1e-12
+        )
+        severe_memory_risk = has_memory_signals and (
+            f.memory_bad_rate >= 0.55
+            or f.probe_drop >= 0.16
+            or f.csd_ratio >= 1.25
+        )
+        moderate_memory_risk = has_memory_signals and (
+            f.memory_bad_rate >= 0.23
+            or f.probe_drop >= 0.075
+            or f.csd_ratio >= 0.88
+        )
+        clean_memory_context = has_memory_signals and (
+            f.memory_bad_rate <= 0.17
+            and f.probe_drop <= 0.04
+            and f.csd_ratio <= 0.80
+        )
+        low_memory_risk = has_memory_signals and (
+            f.memory_bad_rate <= 0.22
+            and f.probe_drop <= 0.06
+            and f.csd_ratio <= 0.82
+        )
         if f.long_stream:
+            if severe_memory_risk:
+                return CLCPolicyDecision(
+                    policy=POLICY_LONG_SEVERE,
+                    action="LONG_SEVERE_VERIFIED_REFRESH",
+                    reason="long_stream_feature_risk_verified_refresh",
+                    confidence=0.76,
+                )
             return CLCPolicyDecision(
                 policy=POLICY_PERIODIC,
                 action="PROTECT_PERIODIC",
                 reason="long_stream_periodic_won_fresh_validation",
                 confidence=0.74,
             )
-        if f.hard:
+        if severe_memory_risk:
             return CLCPolicyDecision(
                 policy=POLICY_XSEQ_MEMORY,
                 action="XSEQ_MEMORY_REFRESH",
-                reason="short_hard_stream_memory_positive",
+                reason="feature_risk_xseq_memory_refresh",
+                confidence=0.78,
+            )
+        if moderate_memory_risk:
+            return CLCPolicyDecision(
+                policy=POLICY_LONG_SEVERE,
+                action="LONG_SEVERE_VERIFIED_REFRESH",
+                reason="feature_risk_verified_refresh",
+                confidence=0.74,
+            )
+        if f.hard:
+            if not has_memory_signals:
+                return CLCPolicyDecision(
+                    policy=POLICY_XSEQ_MEMORY,
+                    action="XSEQ_MEMORY_REFRESH",
+                    reason="short_hard_stream_memory_positive",
+                    confidence=0.72,
+                )
+            if clean_memory_context:
+                return CLCPolicyDecision(
+                    policy=POLICY_PERIODIC,
+                    action="PROTECT_PERIODIC",
+                    reason="hard_condition_but_clean_memory_protect",
+                    confidence=0.76,
+                )
+            return CLCPolicyDecision(
+                policy=POLICY_LONG_SEVERE,
+                action="LONG_SEVERE_VERIFIED_REFRESH",
+                reason="hard_condition_verified_refresh",
                 confidence=0.72,
+            )
+        if low_memory_risk:
+            return CLCPolicyDecision(
+                policy=POLICY_PERIODIC,
+                action="PROTECT_PERIODIC",
+                reason="short_clean_memory_protect",
+                confidence=0.76,
             )
         return CLCPolicyDecision(
             policy=POLICY_LONG_SEVERE,
