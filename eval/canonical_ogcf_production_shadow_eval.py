@@ -41,6 +41,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--db-path", type=Path, default=DEFAULT_DB)
     parser.add_argument("--config-path", type=Path, default=ROOT / "config.yaml")
+    parser.add_argument(
+        "--embedding-backend",
+        choices=("auto", "config", "hash"),
+        default="auto",
+        help="Embedding runtime for query retrieval. Auto uses DB runtime_state when possible.",
+    )
+    parser.add_argument("--embedding-dim", type=int, default=None)
     parser.add_argument("--queries-json", type=Path, default=None)
     parser.add_argument("--out-json", type=Path, default=DEFAULT_OUT_JSON)
     parser.add_argument("--out-md", type=Path, default=DEFAULT_OUT_MD)
@@ -62,6 +69,34 @@ def canonical_config(enabled: bool) -> dict[str, Any]:
     cfg = dict(DEFAULT_CANONICAL_MEMORY_CONFIG)
     cfg["enabled"] = enabled
     return cfg
+
+
+def db_embedding_signature(db_path: Path) -> dict[str, Any] | None:
+    db = MemoryDB(db_path)
+    try:
+        signature = db.get_runtime_state("embedding_signature")
+    finally:
+        db.close()
+    return signature if isinstance(signature, dict) else None
+
+
+def apply_embedding_override(
+    config: dict[str, Any],
+    *,
+    db_path: Path,
+    backend: str,
+    embedding_dim: int | None,
+) -> dict[str, Any]:
+    out = copy.deepcopy(config)
+    selected = str(backend or "auto").lower()
+    signature = db_embedding_signature(db_path) if selected == "auto" else None
+    if selected == "hash" or (selected == "auto" and signature and signature.get("backend") == "hash"):
+        dim = int(embedding_dim or (signature or {}).get("embedding_dim") or out.get("embedding_dim") or 128)
+        out["embedding_dim"] = dim
+        out["embedding"] = {"backend": "hash", "dim": dim}
+    elif embedding_dim is not None:
+        out["embedding_dim"] = int(embedding_dim)
+    return out
 
 
 def strip_canonical(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -365,6 +400,12 @@ def main() -> int:
     if not db_path.exists():
         raise FileNotFoundError(db_path)
     config = load_config(args.config_path.parent) if args.config_path.exists() else load_config(ROOT)
+    config = apply_embedding_override(
+        config,
+        db_path=db_path,
+        backend=args.embedding_backend,
+        embedding_dim=args.embedding_dim,
+    )
 
     queries = [q for q in load_query_payload(args.queries_json) if q]
     if not queries:
@@ -440,6 +481,7 @@ def main() -> int:
         "db_path": str(db_path),
         "top_k": int(args.top_k),
         "config_path": str(args.config_path.resolve()) if args.config_path else None,
+        "embedding_backend": args.embedding_backend,
         "namespace": args.namespace,
         "include_global": bool(args.include_global),
         "ogcf_meta": ogcf_meta or {},
