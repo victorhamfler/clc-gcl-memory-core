@@ -98,8 +98,8 @@ Raw-Gemma rich fixture result:
 |---|---|---|
 | base | 9 protect, 2 verified refresh, 1 XSEQ | mixed retrieval conditions |
 | canonical | 3 protect, 8 verified refresh, 1 XSEQ | duplicate pressure and canonical support changed 8/12 cases |
-| OGCF | 4 protect, 7 verified refresh, 1 XSEQ | bridge-cluster affected ratio changed 5/12 cases |
-| combined | 1 protect, 10 verified refresh, 1 XSEQ | OGCF changed 2 cases beyond canonical |
+| OGCF | 6 protect, 5 verified refresh, 1 XSEQ | intent-aware bridge pressure changed 3/12 cases |
+| combined | 2 protect, 9 verified refresh, 1 XSEQ | OGCF changed 1 case beyond canonical |
 
 The raw fixture still has `bridge_overload_score=0.0`; the active OGCF signal came from bridge-cluster membership/affected-ratio, not loop interaction z-score. That is the next calibration target.
 
@@ -110,6 +110,16 @@ OGCF affected-pressure calibration:
 - Bridge-cluster-only pressure is gated by relevance so weak incidental bridge membership does not add feature pressure.
 - On the raw-Gemma fixture, OGCF-only deltas dropped from 5/12 to 2/12, and combined-vs-canonical extra deltas dropped from 2/12 to 0/12.
 - `eval/ogcf_affected_pressure_calibration_regression.py` protects this behavior.
+
+OGCF query/evidence intent gate:
+
+- `core/ogcf_intent.py` classifies whether a query is an ordinary fact lookup, memory-maintenance question, cross-domain bridge synthesis, or explicit OGCF geometry query.
+- The selector now passes query text into OGCF feature augmentation when available.
+- Weak passive bridge-cluster membership stays gated for ordinary calendar/profile/procedure questions.
+- Explicit bridge/OGCF geometry questions can use bridge-cluster pressure even when there is no true loop-overload z-score.
+- True loop overload still bypasses the intent gate.
+- `eval/ogcf_intent_gate_regression.py` protects the three important cases: ordinary lookup suppression, explicit geometry escalation, and true-loop bypass.
+- On the raw-Gemma fixture, the intent gate kept ordinary fact queries protected while letting bridge synthesis and OGCF geometry questions escalate; combined-vs-canonical now has one targeted extra delta.
 
 ## Technological Value
 
@@ -159,16 +169,16 @@ This makes the architecture relevant for local agents, personal memory systems, 
    - inspect where canonical reduces risk and where OGCF raises risk,
    - repeat with `--normalize-embeddings` only as an ablation.
 
-7. Calibrate OGCF affected-cluster pressure:
-   - separate bridge-cluster membership from true loop overload,
-   - avoid escalating unrelated queries that merely touch a bridge cluster,
-   - preserve escalation for queries directly about bridge routing, OGCF geometry, stale/current interaction, or cross-domain selector policy.
+7. Replace the first symbolic OGCF intent classifier with a configurable or learned neural-symbolic controller:
+   - move intent labels and trigger terms into config,
+   - collect query/evidence/decision/outcome rows from Hermes,
+   - train or calibrate a small local intent scorer against guard labels,
+   - keep the current symbolic classifier as the transparent fallback.
 
-8. Next, add query/evidence intent awareness to OGCF pressure:
-   - keep the current relevance-weighted gate as the safety baseline,
-   - distinguish bridge-maintenance questions from ordinary fact questions,
-   - let high-relevance bridge geometry queries escalate even when loop overload is absent,
-   - keep clean calendar/profile/procedure retrieval protected unless true loop overload is present.
+8. Run the production shadow harness on real Hermes query logs with the new intent diagnostics:
+   - inspect `ogcf_intent`, `ogcf_intent_score`, and `ogcf_effective_affected_memory_ratio`,
+   - confirm ordinary factual queries are protected,
+   - confirm bridge-maintenance and OGCF geometry queries receive pressure only when retrieved evidence supports it.
 
 ## Current Publication State
 

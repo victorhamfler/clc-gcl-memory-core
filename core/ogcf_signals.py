@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.ogcf_intent import classify_ogcf_intent
+
 
 class OGCFSignalProvider:
     """Compute OGCF-derived signals from retrieval context.
@@ -110,6 +112,7 @@ class OGCFSignalProvider:
         rows: list[dict[str, Any]],
         base_stale_ratio: float = 0.0,
         base_contradiction_peak: float = 0.0,
+        query: str | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Compute OGCF-augmented selector features.
 
@@ -121,8 +124,14 @@ class OGCFSignalProvider:
         affected_ratio = signals["ogcf_affected_memory_ratio"]
         weighted_affected_ratio = signals.get("ogcf_weighted_affected_memory_ratio", affected_ratio)
         risk_region_count = int(signals.get("ogcf_risk_region_count", 0) or 0)
+        intent = classify_ogcf_intent(query, rows)
         if bridge_score <= 0.0 and risk_region_count <= 0:
-            effective_affected_ratio = 0.0 if weighted_affected_ratio < 0.55 else weighted_affected_ratio
+            if intent.score >= 0.75:
+                effective_affected_ratio = max(weighted_affected_ratio, affected_ratio * 0.75)
+            elif intent.score >= 0.55:
+                effective_affected_ratio = weighted_affected_ratio if weighted_affected_ratio >= 0.35 else 0.0
+            else:
+                effective_affected_ratio = 0.0 if weighted_affected_ratio < 0.55 else weighted_affected_ratio
         else:
             effective_affected_ratio = max(weighted_affected_ratio, affected_ratio * bridge_score)
 
@@ -143,6 +152,9 @@ class OGCFSignalProvider:
             "ogcf_affected_memory_ratio": affected_ratio,
             "ogcf_weighted_affected_memory_ratio": weighted_affected_ratio,
             "ogcf_effective_affected_memory_ratio": round(effective_affected_ratio, 6),
+            "ogcf_intent": intent.intent,
+            "ogcf_intent_score": round(intent.score, 6),
+            "ogcf_intent_reason": intent.reason,
             "adjusted_stale_ratio": round(adjusted_stale_ratio, 6),
             "adjusted_contradiction_peak": round(adjusted_contradiction_peak, 6),
             "csd_ratio_boost": round(csd_ratio_boost, 6),

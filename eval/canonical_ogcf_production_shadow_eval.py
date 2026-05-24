@@ -308,7 +308,13 @@ def run_mode(
         condition_name="standard_budget144",
     )
     if ogcf:
-        features, diagnostics = augment_selector_features(features, rows, ogcf_meta, diagnostics)
+        features, diagnostics = augment_selector_features(
+            features,
+            rows,
+            ogcf_meta,
+            diagnostics,
+            query=query,
+        )
     decision = CLCPolicySelector().select(features)
     return {
         "decision": asdict(decision),
