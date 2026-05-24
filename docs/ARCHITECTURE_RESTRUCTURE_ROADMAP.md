@@ -652,3 +652,33 @@ Next test:
 - have Hermes pull the new commit;
 - rerun the same `hermes_canonical_ogcf_agent_loop_test.py`;
 - confirm policy distribution is no longer all XSEQ and that canonical/OGCF signal changes produce policy changes.
+
+## Hermes Validation Of Selector Fix
+
+Hermes validated commit `bb49b00`.
+
+Result:
+
+- `clc_policy_feature_signal_regression`: `8/8` checks passed;
+- policy distribution no longer collapsed to all XSEQ;
+- canonical mode changed policy in `8/18` agent-loop queries;
+- canonical and combined modes produced `PROTECT_PERIODIC` for clean supported contexts and verified refresh for riskier contexts;
+- OGCF did not move policy in Hermes' copied agent-loop test because the test passed empty `ogcf_meta = {}`.
+
+The next improvement is therefore not another selector threshold change. The next test gap is non-empty OGCF metadata in the agent-loop harness.
+
+New regression:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\canonical_ogcf_policy_distribution_regression.py
+```
+
+This regression verifies that:
+
+- canonical clean support can protect;
+- duplicate pressure blocks clean protection;
+- non-empty OGCF bridge metadata pushes clean supported retrieval into verified refresh;
+- combined canonical + OGCF diagnostics remain visible;
+- policy distribution does not collapse to one action.
+
+Next Hermes run should use real or simulated non-empty OGCF metadata for bridge-risk cases instead of `{}`.

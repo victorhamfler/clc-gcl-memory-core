@@ -77,6 +77,7 @@ On Windows PowerShell:
 ..\.venv-torch\Scripts\python.exe .\eval\canonical_ogcf_combined_eval.py
 ..\.venv-torch\Scripts\python.exe .\eval\canonical_ogcf_answer_quality_eval.py
 ..\.venv-torch\Scripts\python.exe .\eval\clc_policy_feature_signal_regression.py
+..\.venv-torch\Scripts\python.exe .\eval\canonical_ogcf_policy_distribution_regression.py
 ..\.venv-torch\Scripts\python.exe .\eval\canonical_selector_features_regression.py
 ..\.venv-torch\Scripts\python.exe .\eval\canonical_lexical_backfill_regression.py
 ```
@@ -87,6 +88,7 @@ On WSL/Linux, use the available Python interpreter:
 python eval/canonical_ogcf_combined_eval.py
 python eval/canonical_ogcf_answer_quality_eval.py
 python eval/clc_policy_feature_signal_regression.py
+python eval/canonical_ogcf_policy_distribution_regression.py
 python eval/canonical_selector_features_regression.py
 python eval/canonical_lexical_backfill_regression.py
 ```
@@ -229,6 +231,8 @@ current_claim_selected
 
 Use retrieval contexts where many memories bridge unrelated domains or where prior OGCF tests showed bridge-heavy regions.
 
+Important: do not pass empty `ogcf_meta = {}` for this case. The OGCF mode must use either real OGCF metadata generated from a geometry review or a simulated non-empty bridge metadata object with `bridge_overload_score`, `max_interaction_z`, `bridge_clusters`, and `memory_cluster_map`.
+
 Expected behavior:
 
 - OGCF on should increase bridge/composition risk diagnostics;
@@ -296,6 +300,7 @@ Use this top-level shape:
     "canonical_ogcf_combined_eval": true,
     "canonical_ogcf_answer_quality_eval": true,
     "clc_policy_feature_signal_regression": true,
+    "canonical_ogcf_policy_distribution_regression": true,
     "canonical_selector_features_regression": true,
     "canonical_lexical_backfill_regression": true
   },
