@@ -17,6 +17,7 @@ def augment_selector_features(
     ogcf_meta: dict[str, Any] | None,
     base_diagnostics: dict[str, Any] | None = None,
     query: str | None = None,
+    ogcf_intent_config: dict[str, Any] | None = None,
 ) -> tuple[CLCPolicyFeatures, dict[str, Any]]:
     """Augment CLCPolicyFeatures with OGCF-derived signals.
 
@@ -24,7 +25,7 @@ def augment_selector_features(
     selector_features_from_retrieval_context() and adds OGCF geometry-based
     adjustments to memory_bad_rate, probe_drop, and csd_ratio.
     """
-    provider = OGCFSignalProvider(ogcf_meta)
+    provider = OGCFSignalProvider(ogcf_meta, intent_config=ogcf_intent_config)
     ogcf_feats, ogcf_diag = provider.selector_features(
         retrieval_rows,
         base_stale_ratio=base_diagnostics.get("stale_ratio", 0.0) if base_diagnostics else 0.0,
@@ -77,6 +78,7 @@ def select_with_ogcf(
     ogcf_meta: dict[str, Any] | None,
     base_diagnostics: dict[str, Any] | None = None,
     query: str | None = None,
+    ogcf_intent_config: dict[str, Any] | None = None,
 ) -> tuple[CLCPolicyDecision, dict[str, Any]]:
     """Run policy selection with OGCF-augmented features.
 
@@ -84,7 +86,12 @@ def select_with_ogcf(
     OGCF geometry signals before the decision.
     """
     aug_features, diagnostics = augment_selector_features(
-        features, retrieval_rows, ogcf_meta, base_diagnostics, query=query
+        features,
+        retrieval_rows,
+        ogcf_meta,
+        base_diagnostics,
+        query=query,
+        ogcf_intent_config=ogcf_intent_config,
     )
     decision = selector.select(aug_features)
     diagnostics["policy"] = decision.policy

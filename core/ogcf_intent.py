@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 
-BRIDGE_TERMS = {
+DEFAULT_BRIDGE_TERMS = {
     "bridge",
     "cross-domain",
     "cross domain",
@@ -17,7 +17,7 @@ BRIDGE_TERMS = {
     "policy",
     "synthesis",
 }
-GEOMETRY_TERMS = {
+DEFAULT_GEOMETRY_TERMS = {
     "ogcf",
     "geometry",
     "geometric",
@@ -31,7 +31,7 @@ GEOMETRY_TERMS = {
     "defect",
     "interaction",
 }
-MAINTENANCE_TERMS = {
+DEFAULT_MAINTENANCE_TERMS = {
     "cleanup",
     "clean up",
     "dedup",
@@ -45,7 +45,7 @@ MAINTENANCE_TERMS = {
     "supersede",
     "superseded",
 }
-ORDINARY_FACT_TERMS = {
+DEFAULT_ORDINARY_FACT_TERMS = {
     "what is",
     "what was",
     "what does",
@@ -61,6 +61,31 @@ ORDINARY_FACT_TERMS = {
     "codename",
     "weather checks",
 }
+DEFAULT_OGCF_INTENT_SCORES = {
+    "bridge_geometry_query": 1.0,
+    "cross_domain_geometry_synthesis": 0.88,
+    "cross_domain_bridge_synthesis": 0.78,
+    "memory_maintenance": 0.72,
+    "ordinary_fact_lookup": 0.18,
+    "bridge_evidence_context": 0.55,
+    "weak_geometry_context": 0.42,
+    "ordinary_context": 0.25,
+}
+DEFAULT_OGCF_INTENT_GATE = {
+    "high_intent_threshold": 0.75,
+    "medium_intent_threshold": 0.55,
+    "high_affected_multiplier": 0.75,
+    "medium_min_weighted_ratio": 0.35,
+    "low_min_weighted_ratio": 0.55,
+}
+DEFAULT_OGCF_INTENT_CONFIG = {
+    "bridge_terms": tuple(sorted(DEFAULT_BRIDGE_TERMS)),
+    "geometry_terms": tuple(sorted(DEFAULT_GEOMETRY_TERMS)),
+    "maintenance_terms": tuple(sorted(DEFAULT_MAINTENANCE_TERMS)),
+    "ordinary_fact_terms": tuple(sorted(DEFAULT_ORDINARY_FACT_TERMS)),
+    "scores": dict(DEFAULT_OGCF_INTENT_SCORES),
+    "gate": dict(DEFAULT_OGCF_INTENT_GATE),
+}
 
 
 @dataclass(frozen=True)
@@ -70,11 +95,66 @@ class OGCFIntentDecision:
     reason: str
 
 
+def parse_term_sequence(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, (list, tuple, set)):
+        return tuple(str(term).strip().lower() for term in value if str(term).strip())
+    raw = str(value or "")
+    for separator in ("|", ";"):
+        raw = raw.replace(separator, ",")
+    return tuple(term.strip().lower() for term in raw.split(",") if term.strip())
+
+
+def normalize_ogcf_intent_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
+    cfg = dict(config or {})
+
+    def terms(name: str, defaults: set[str]) -> tuple[str, ...]:
+        configured = parse_term_sequence(cfg.get(name))
+        if not configured:
+            return tuple(sorted(defaults))
+        return tuple(sorted(set(defaults) | set(configured)))
+
+    scores = dict(DEFAULT_OGCF_INTENT_SCORES)
+    raw_scores = cfg.get("scores")
+    if isinstance(raw_scores, dict):
+        for key, value in raw_scores.items():
+            if str(key) in scores:
+                scores[str(key)] = _float_value(value, scores[str(key)])
+
+    gate = dict(DEFAULT_OGCF_INTENT_GATE)
+    raw_gate = cfg.get("gate")
+    if isinstance(raw_gate, dict):
+        for key, value in raw_gate.items():
+            if str(key) in gate:
+                gate[str(key)] = _float_value(value, gate[str(key)])
+
+    return {
+        "bridge_terms": terms("bridge_terms", DEFAULT_BRIDGE_TERMS),
+        "geometry_terms": terms("geometry_terms", DEFAULT_GEOMETRY_TERMS),
+        "maintenance_terms": terms("maintenance_terms", DEFAULT_MAINTENANCE_TERMS),
+        "ordinary_fact_terms": terms("ordinary_fact_terms", DEFAULT_ORDINARY_FACT_TERMS),
+        "scores": scores,
+        "gate": gate,
+    }
+
+
+def _float_value(value: Any, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _contains_any(text: str, terms: set[str]) -> set[str]:
     return {term for term in terms if term in text}
 
 
-def classify_ogcf_intent(query: str | None = None, rows: list[dict[str, Any]] | None = None) -> OGCFIntentDecision:
+def classify_ogcf_intent(
+    query: str | None = None,
+    rows: list[dict[str, Any]] | None = None,
+    config: dict[str, Any] | None = None,
+) -> OGCFIntentDecision:
     """Classify whether OGCF bridge pressure is semantically relevant.
 
     This is intentionally symbolic and conservative. It is the current safe
@@ -91,53 +171,64 @@ def classify_ogcf_intent(query: str | None = None, rows: list[dict[str, Any]] | 
     )
     combined = f"{query_text} {row_text}".strip()
 
-    query_bridge_hits = _contains_any(query_text, BRIDGE_TERMS)
-    query_geometry_hits = _contains_any(query_text, GEOMETRY_TERMS)
-    query_maintenance_hits = _contains_any(query_text, MAINTENANCE_TERMS)
-    row_bridge_hits = _contains_any(row_text, BRIDGE_TERMS)
-    row_geometry_hits = _contains_any(row_text, GEOMETRY_TERMS)
-    ordinary_hits = _contains_any(query_text, ORDINARY_FACT_TERMS)
+    cfg = normalize_ogcf_intent_config(config)
+    bridge_terms = set(cfg["bridge_terms"])
+    geometry_terms = set(cfg["geometry_terms"])
+    maintenance_terms = set(cfg["maintenance_terms"])
+    ordinary_fact_terms = set(cfg["ordinary_fact_terms"])
+    scores = cfg["scores"]
+
+    query_bridge_hits = _contains_any(query_text, bridge_terms)
+    query_geometry_hits = _contains_any(query_text, geometry_terms)
+    query_maintenance_hits = _contains_any(query_text, maintenance_terms)
+    row_bridge_hits = _contains_any(row_text, bridge_terms)
+    row_geometry_hits = _contains_any(row_text, geometry_terms)
+    ordinary_hits = _contains_any(query_text, ordinary_fact_terms)
 
     if query_geometry_hits and (query_bridge_hits or "ogcf" in query_geometry_hits):
         return OGCFIntentDecision(
             intent="bridge_geometry_query",
-            score=1.0,
+            score=float(scores["bridge_geometry_query"]),
             reason=f"query_geometry:{','.join(sorted(query_geometry_hits))}",
         )
     if query_bridge_hits and (query_geometry_hits or row_geometry_hits):
         return OGCFIntentDecision(
             intent="cross_domain_geometry_synthesis",
-            score=0.88,
+            score=float(scores["cross_domain_geometry_synthesis"]),
             reason=f"query_bridge_with_geometry:{','.join(sorted(query_bridge_hits))}",
         )
     if query_bridge_hits:
         return OGCFIntentDecision(
             intent="cross_domain_bridge_synthesis",
-            score=0.78,
+            score=float(scores["cross_domain_bridge_synthesis"]),
             reason=f"query_bridge:{','.join(sorted(query_bridge_hits))}",
         )
     if query_maintenance_hits and (row_bridge_hits or row_geometry_hits):
         return OGCFIntentDecision(
             intent="memory_maintenance",
-            score=0.72,
+            score=float(scores["memory_maintenance"]),
             reason=f"maintenance_with_bridge_evidence:{','.join(sorted(query_maintenance_hits))}",
         )
     if ordinary_hits and not query_bridge_hits and not query_geometry_hits:
         return OGCFIntentDecision(
             intent="ordinary_fact_lookup",
-            score=0.18,
+            score=float(scores["ordinary_fact_lookup"]),
             reason=f"ordinary_query:{','.join(sorted(ordinary_hits))}",
         )
     if row_bridge_hits and row_geometry_hits:
         return OGCFIntentDecision(
             intent="bridge_evidence_context",
-            score=0.55,
+            score=float(scores["bridge_evidence_context"]),
             reason="retrieved_bridge_and_geometry_evidence",
         )
-    if _contains_any(combined, GEOMETRY_TERMS):
+    if _contains_any(combined, geometry_terms):
         return OGCFIntentDecision(
             intent="weak_geometry_context",
-            score=0.42,
+            score=float(scores["weak_geometry_context"]),
             reason="weak_geometry_terms",
         )
-    return OGCFIntentDecision(intent="ordinary_context", score=0.25, reason="default_low_ogcf_intent")
+    return OGCFIntentDecision(
+        intent="ordinary_context",
+        score=float(scores["ordinary_context"]),
+        reason="default_low_ogcf_intent",
+    )

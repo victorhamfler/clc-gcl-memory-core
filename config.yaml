@@ -68,6 +68,27 @@ canonical_memory:
   lexical_backfill_min_affinity: 0.75
   lexical_backfill_max_additions: 20
 
+ogcf_intent:
+  bridge_terms: bridge,cross-domain,cross domain,connect,connection,routing,router,selector refresh,refresh policy,policy,synthesis
+  geometry_terms: ogcf,geometry,geometric,embedding,embeddings,cluster,clusters,overload,loop,loops,defect,interaction
+  maintenance_terms: cleanup,clean up,dedup,duplicate,maintenance,stale,current,correct,correction,conflict,supersede,superseded
+  ordinary_fact_terms: what is,what was,what does,when is,where does,does victor,prefer,drink,calendar,scheduled,robot,routine,codename,weather checks
+  scores:
+    bridge_geometry_query: 1.0
+    cross_domain_geometry_synthesis: 0.88
+    cross_domain_bridge_synthesis: 0.78
+    memory_maintenance: 0.72
+    ordinary_fact_lookup: 0.18
+    bridge_evidence_context: 0.55
+    weak_geometry_context: 0.42
+    ordinary_context: 0.25
+  gate:
+    high_intent_threshold: 0.75
+    medium_intent_threshold: 0.55
+    high_affected_multiplier: 0.75
+    medium_min_weighted_ratio: 0.35
+    low_min_weighted_ratio: 0.55
+
 selector:
   mode: learned
   k: 3

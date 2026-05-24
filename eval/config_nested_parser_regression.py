@@ -35,6 +35,11 @@ claim_scope:
     synthetic_slot: compact,alias
   excluded_terms:
     synthetic_slot: distractor
+ogcf_intent:
+  scores:
+    synthetic_intent: 0.42
+  gate:
+    high_intent_threshold: 0.77
 """
 
 
@@ -79,6 +84,15 @@ def main() -> int:
             set(nested_get(actual, "answer_type", "rules") or {})
         ),
         "actual_answer_type_not_flattened": "rules" not in actual and "owner_relation" not in actual,
+        "synthetic_ogcf_intent_nested": nested_get(
+            synthetic,
+            "ogcf_intent",
+            "gate",
+            "high_intent_threshold",
+        )
+        == 0.77,
+        "actual_ogcf_intent_nested": isinstance(nested_get(actual, "ogcf_intent", "gate"), dict)
+        and nested_get(actual, "ogcf_intent", "gate", "high_intent_threshold") == 0.75,
     }
     for name, ok in checks.items():
         if not ok:
@@ -90,6 +104,7 @@ def main() -> int:
         "failures": failures,
         "actual_claim_scope_keys": sorted((actual.get("claim_scope") or {}).keys()),
         "actual_answer_type_rules": sorted(((actual.get("answer_type") or {}).get("rules") or {}).keys()),
+        "actual_ogcf_intent_keys": sorted((actual.get("ogcf_intent") or {}).keys()),
     }
     OUT_JSON.parent.mkdir(parents=True, exist_ok=True)
     OUT_JSON.write_text(json.dumps(report, indent=2), encoding="utf-8")
@@ -138,6 +153,7 @@ def write_markdown(report: dict[str, Any]) -> None:
             "",
             f"- Claim-scope keys: `{', '.join(report['actual_claim_scope_keys'])}`",
             f"- Answer-type rules: `{', '.join(report['actual_answer_type_rules'])}`",
+            f"- OGCF intent keys: `{', '.join(report['actual_ogcf_intent_keys'])}`",
         ]
     )
     OUT_MD.write_text("\n".join(lines) + "\n", encoding="utf-8")

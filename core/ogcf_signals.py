@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.ogcf_intent import classify_ogcf_intent
+from core.ogcf_intent import classify_ogcf_intent, normalize_ogcf_intent_config
 
 
 class OGCFSignalProvider:
@@ -19,8 +19,13 @@ class OGCFSignalProvider:
     from a periodic background analysis.
     """
 
-    def __init__(self, ogcf_meta: dict[str, Any] | None = None):
+    def __init__(
+        self,
+        ogcf_meta: dict[str, Any] | None = None,
+        intent_config: dict[str, Any] | None = None,
+    ):
         self.meta = dict(ogcf_meta or {})
+        self.intent_config = normalize_ogcf_intent_config(intent_config)
 
     def update_meta(self, ogcf_meta: dict[str, Any]) -> None:
         """Replace the cached OGCF geometry metadata."""
@@ -124,14 +129,26 @@ class OGCFSignalProvider:
         affected_ratio = signals["ogcf_affected_memory_ratio"]
         weighted_affected_ratio = signals.get("ogcf_weighted_affected_memory_ratio", affected_ratio)
         risk_region_count = int(signals.get("ogcf_risk_region_count", 0) or 0)
-        intent = classify_ogcf_intent(query, rows)
+        intent = classify_ogcf_intent(query, rows, self.intent_config)
+        gate = self.intent_config["gate"]
         if bridge_score <= 0.0 and risk_region_count <= 0:
-            if intent.score >= 0.75:
-                effective_affected_ratio = max(weighted_affected_ratio, affected_ratio * 0.75)
-            elif intent.score >= 0.55:
-                effective_affected_ratio = weighted_affected_ratio if weighted_affected_ratio >= 0.35 else 0.0
+            if intent.score >= float(gate["high_intent_threshold"]):
+                effective_affected_ratio = max(
+                    weighted_affected_ratio,
+                    affected_ratio * float(gate["high_affected_multiplier"]),
+                )
+            elif intent.score >= float(gate["medium_intent_threshold"]):
+                effective_affected_ratio = (
+                    weighted_affected_ratio
+                    if weighted_affected_ratio >= float(gate["medium_min_weighted_ratio"])
+                    else 0.0
+                )
             else:
-                effective_affected_ratio = 0.0 if weighted_affected_ratio < 0.55 else weighted_affected_ratio
+                effective_affected_ratio = (
+                    0.0
+                    if weighted_affected_ratio < float(gate["low_min_weighted_ratio"])
+                    else weighted_affected_ratio
+                )
         else:
             effective_affected_ratio = max(weighted_affected_ratio, affected_ratio * bridge_score)
 

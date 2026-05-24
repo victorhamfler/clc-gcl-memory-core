@@ -295,6 +295,7 @@ def run_mode(
     canonical: bool,
     ogcf: bool,
     ogcf_meta: dict[str, Any] | None,
+    ogcf_intent_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     retrieved_rows = pipeline.retrieve(
         query,
@@ -314,6 +315,7 @@ def run_mode(
             ogcf_meta,
             diagnostics,
             query=query,
+            ogcf_intent_config=ogcf_intent_config,
         )
     decision = CLCPolicySelector().select(features)
     return {
@@ -444,6 +446,7 @@ def main() -> int:
 
     base_pipeline = run_pipeline(db_path, canonical_enabled=False, config=config)
     canonical_pipeline = run_pipeline(db_path, canonical_enabled=True, config=config)
+    ogcf_intent_config = config.get("ogcf_intent")
     try:
         results = []
         for query in queries:
@@ -457,6 +460,7 @@ def main() -> int:
                     canonical=False,
                     ogcf=False,
                     ogcf_meta=None,
+                    ogcf_intent_config=ogcf_intent_config,
                 ),
                 "canonical": run_mode(
                     canonical_pipeline,
@@ -467,6 +471,7 @@ def main() -> int:
                     canonical=True,
                     ogcf=False,
                     ogcf_meta=None,
+                    ogcf_intent_config=ogcf_intent_config,
                 ),
                 "ogcf": run_mode(
                     base_pipeline,
@@ -477,6 +482,7 @@ def main() -> int:
                     canonical=False,
                     ogcf=True,
                     ogcf_meta=ogcf_meta,
+                    ogcf_intent_config=ogcf_intent_config,
                 ),
                 "combined": run_mode(
                     canonical_pipeline,
@@ -487,6 +493,7 @@ def main() -> int:
                     canonical=True,
                     ogcf=True,
                     ogcf_meta=ogcf_meta,
+                    ogcf_intent_config=ogcf_intent_config,
                 ),
             }
             results.append({"query": query, "modes": modes})

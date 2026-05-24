@@ -114,11 +114,14 @@ OGCF affected-pressure calibration:
 OGCF query/evidence intent gate:
 
 - `core/ogcf_intent.py` classifies whether a query is an ordinary fact lookup, memory-maintenance question, cross-domain bridge synthesis, or explicit OGCF geometry query.
+- The first intent controller is now configurable through the `ogcf_intent` section in `config.yaml`.
+- Config includes bridge/geometry/maintenance/ordinary term vocabularies, intent scores, and affected-cluster gate thresholds.
 - The selector now passes query text into OGCF feature augmentation when available.
 - Weak passive bridge-cluster membership stays gated for ordinary calendar/profile/procedure questions.
 - Explicit bridge/OGCF geometry questions can use bridge-cluster pressure even when there is no true loop-overload z-score.
 - True loop overload still bypasses the intent gate.
 - `eval/ogcf_intent_gate_regression.py` protects the three important cases: ordinary lookup suppression, explicit geometry escalation, and true-loop bypass.
+- `eval/ogcf_intent_config_regression.py` proves new bridge terms and gate behavior can be changed through config without editing source code.
 - On the raw-Gemma fixture, the intent gate kept ordinary fact queries protected while letting bridge synthesis and OGCF geometry questions escalate; combined-vs-canonical now has one targeted extra delta.
 
 ## Technological Value
@@ -169,11 +172,11 @@ This makes the architecture relevant for local agents, personal memory systems, 
    - inspect where canonical reduces risk and where OGCF raises risk,
    - repeat with `--normalize-embeddings` only as an ablation.
 
-7. Replace the first symbolic OGCF intent classifier with a configurable or learned neural-symbolic controller:
-   - move intent labels and trigger terms into config,
+7. Replace the configurable symbolic OGCF intent classifier with a learned neural-symbolic controller:
    - collect query/evidence/decision/outcome rows from Hermes,
+   - mine candidate bridge/geometry/maintenance terms and score shifts into a candidate artifact,
    - train or calibrate a small local intent scorer against guard labels,
-   - keep the current symbolic classifier as the transparent fallback.
+   - keep the current config-backed classifier as the transparent fallback.
 
 8. Run the production shadow harness on real Hermes query logs with the new intent diagnostics:
    - inspect `ogcf_intent`, `ogcf_intent_score`, and `ogcf_effective_affected_memory_ratio`,
