@@ -104,6 +104,20 @@ resolver_shadow:
   bridge_warning_effective_ratio_threshold: 0.50
   refusal_markers: do not have enough,not enough memory evidence,insufficient,cannot answer,no memory evidence,not have memory evidence
 
+adaptive_behavior:
+  superfamilies:
+    supported_evidence: answer_correct,answer_good_citation,answer_bad_citation
+    ogcf_bridge_warning: answer_bridge_warning_useful,answer_bridge_warning_noise
+    missing_support: answer_missing_support,answer_overconfident
+    stale_conflict: answer_stale,answer_conflict_not_disclosed
+  shadow:
+    enabled: false
+    include_in_outcome_log: false
+    positive_threshold: 0.65
+    negative_threshold: 0.35
+    min_route_confidence: 0.35
+    require_promotion_guard: true
+
 claim_scope:
   stopwords: about,check,checks,current,currently,does,for,from,help,helps,latest,prefer,prefers,preference,remember,should,that,the,use,what,when,where,which,who,with,victor,hermes,project
   slot_aliases:

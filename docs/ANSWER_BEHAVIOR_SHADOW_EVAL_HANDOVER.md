@@ -16,6 +16,12 @@ The implementation is advisory only. It does not modify runtime config, resolver
 - `eval/answer_behavior_real_log_fixture.py`
 - `core/answer_behavior_shadow.py`
 - `eval/resolver_shadow_mode_regression.py`
+- `eval/answer_behavior_ogcf_bridge_worklog_fixture.py`
+- `eval/resolver_shadow_ogcf_bridge_worklog_regression.py`
+- `eval/resolver_shadow_threshold_calibration.py`
+- `eval/resolver_shadow_threshold_calibration_dataset_regression.py`
+- `eval/resolver_shadow_outcome_collector.py`
+- `eval/resolver_shadow_outcome_collector_regression.py`
 
 ## Inputs
 
@@ -59,6 +65,34 @@ The resolver-shadow mode regression writes:
 
 - `experiments/resolver_shadow_mode_regression_results.json`
 - `experiments/resolver_shadow_mode_regression_report.md`
+
+The OGCF bridge worklog fixture writes:
+
+- `experiments/answer_behavior_ogcf_bridge_worklog.jsonl`
+- `experiments/answer_behavior_ogcf_bridge_worklog_replay_results.json`
+- `experiments/answer_behavior_ogcf_bridge_worklog_replay_report.md`
+- `experiments/resolver_shadow_ogcf_bridge_worklog_regression_results.json`
+- `experiments/resolver_shadow_ogcf_bridge_worklog_regression_report.md`
+
+The threshold calibration writes:
+
+- `experiments/resolver_shadow_threshold_calibration_results.json`
+- `experiments/resolver_shadow_threshold_calibration_report.md`
+- `experiments/resolver_shadow_threshold_calibration_current_default_results.json`
+- `experiments/resolver_shadow_threshold_calibration_current_default_report.md`
+- `experiments/resolver_shadow_threshold_calibration_raw_log_compare_results.json`
+- `experiments/resolver_shadow_threshold_calibration_raw_log_compare_report.md`
+- `experiments/resolver_shadow_threshold_calibration_dataset_regression_results.json`
+- `experiments/resolver_shadow_threshold_calibration_dataset_regression_report.md`
+
+The outcome collector writes:
+
+- `experiments/resolver_shadow_outcome_dataset_results.json`
+- `experiments/resolver_shadow_outcome_dataset_report.md`
+- `experiments/resolver_shadow_outcome_dataset_strict_results.json`
+- `experiments/resolver_shadow_outcome_dataset_strict_report.md`
+- `experiments/resolver_shadow_outcome_collector_regression_results.json`
+- `experiments/resolver_shadow_outcome_collector_regression_report.md`
 
 Output schema:
 
@@ -184,6 +218,71 @@ Regression:
 ```
 
 Result: pass, 7/7 cases.
+
+After Hermes validation, a local OGCF bridge worklog was added to cover the remaining thin area without needing Hermes live runs:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\answer_behavior_ogcf_bridge_worklog_fixture.py
+..\.venv-torch\Scripts\python.exe .\eval\resolver_shadow_ogcf_bridge_worklog_regression.py
+```
+
+Result: pass, 8/8 direct runtime-shadow cases.
+
+The combined replay across Hermes-collected answer logs plus the new OGCF bridge worklog now passes 16/16 cases. The answer-feedback bank built from Hermes answer signals plus the OGCF bridge worklog now has three guarded-ready clusters and produces three guarded-ready proposals again:
+
+- supported answer quality;
+- bridge warning disclosure;
+- missing-support refusal.
+
+Threshold calibration was then added:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\resolver_shadow_threshold_calibration.py
+```
+
+The default calibration input is now the compact `resolver_shadow_outcome_dataset/v1` artifact when it exists. Raw ask/feedback logs can still be supplied explicitly with `--log` for traceability.
+
+Result:
+
+- 16 cases;
+- 37 perfect threshold candidates;
+- advisory strict candidate: bridge score `0.95`, effective affected-ratio `0.75`;
+- current default `0.70/0.50` also passes all 16 cases.
+
+No config change was made. Treat the strict candidate as evidence for future calibration, not as a promoted runtime setting.
+
+Dataset/raw-log parity was then added:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\resolver_shadow_threshold_calibration_dataset_regression.py
+```
+
+Result: pass. It confirms dataset calibration and raw-log calibration produce the same 16-case label counts and the same recommended candidate.
+
+The resolver-shadow outcome collector was then added:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\resolver_shadow_outcome_collector.py
+```
+
+Result:
+
+- schema: `resolver_shadow_outcome_dataset/v1`;
+- examples: 16;
+- skipped: 0;
+- bridge true positives: 4;
+- bridge true negatives: 3;
+- missing-support correct: 2;
+- stale-disclosure correct: 2;
+- supported-answer correct: 5.
+
+Regression:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\resolver_shadow_outcome_collector_regression.py
+```
+
+Result: pass. It validates both default thresholds and strict advisory thresholds over the same collected dataset.
 
 ## Interpretation
 

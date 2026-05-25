@@ -95,6 +95,15 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
     required_summary = {
         "retrieval_signal_gate_ok": bool(retrieval_gate and retrieval_gate.get("ok")),
         "evidence_state_gate_ok": bool(evidence_gate and evidence_gate.get("ok")),
+        "shadow_coverage_guard_ok": bool(
+            (step_json(steps, "canonical_ogcf_shadow_coverage_regression") or {}).get("ok")
+        ),
+        "gemma_shadow_regression_ok": bool(
+            (step_json(steps, "adaptive_context_gemma_shadow_regression") or {}).get("ok")
+        ),
+        "adaptive_behavior_shadow_runtime_ok": bool(
+            (step_json(steps, "adaptive_behavior_shadow_runtime_regression") or {}).get("ok")
+        ),
     }
     return {
         "ok": all(step["ok"] for step in steps) and all(required_summary.values()),
@@ -131,9 +140,11 @@ def write_markdown(report: dict[str, Any], out_md: Path) -> None:
     lines.append(json.dumps(report["retrieval_gate_summary"], indent=2))
     lines.extend(["```", "", "## Evidence State Gate", "", "```json"])
     lines.append(json.dumps(report["evidence_gate_summary"], indent=2))
+    lines.extend(["```", "", "## Shadow Guard Regressions", "", "| regression | pass |", "| --- | --- |"])
+    for key in ("shadow_coverage_guard_ok", "gemma_shadow_regression_ok", "adaptive_behavior_shadow_runtime_ok"):
+        lines.append(f"| `{key}` | `{report['required_summary'].get(key)}` |")
     lines.extend(
         [
-            "```",
             "",
             "## Step Results",
             "",
@@ -205,11 +216,19 @@ def main() -> int:
                 "py_compile",
                 str(ROOT / "core" / "retrieval_signals.py"),
                 str(ROOT / "core" / "evidence_states.py"),
+                str(ROOT / "core" / "adaptive_behavior.py"),
+                str(ROOT / "core" / "adaptive_behavior_shadow.py"),
+                str(ROOT / "core" / "controller_context.py"),
                 str(ROOT / "core" / "pipeline.py"),
                 str(ROOT / "core" / "resolver.py"),
                 str(ROOT / "core" / "runtime.py"),
                 str(ROOT / "eval" / "retrieval_signal_promotion_gate.py"),
                 str(ROOT / "eval" / "evidence_state_promotion_gate.py"),
+                str(ROOT / "eval" / "canonical_ogcf_production_shadow_eval.py"),
+                str(ROOT / "eval" / "canonical_ogcf_shadow_coverage_regression.py"),
+                str(ROOT / "eval" / "adaptive_context_gemma_shadow_eval.py"),
+                str(ROOT / "eval" / "adaptive_context_gemma_shadow_regression.py"),
+                str(ROOT / "eval" / "adaptive_behavior_shadow_runtime_regression.py"),
                 str(ROOT / "eval" / "selector_architecture_gate.py"),
             ],
         ),
@@ -246,6 +265,18 @@ def main() -> int:
                 "--seed",
                 str(args.seed),
             ],
+        ),
+        run_step(
+            "canonical_ogcf_shadow_coverage_regression",
+            [python, str(ROOT / "eval" / "canonical_ogcf_shadow_coverage_regression.py")],
+        ),
+        run_step(
+            "adaptive_context_gemma_shadow_regression",
+            [python, str(ROOT / "eval" / "adaptive_context_gemma_shadow_regression.py")],
+        ),
+        run_step(
+            "adaptive_behavior_shadow_runtime_regression",
+            [python, str(ROOT / "eval" / "adaptive_behavior_shadow_runtime_regression.py")],
         ),
     ]
 

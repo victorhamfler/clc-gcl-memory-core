@@ -108,9 +108,18 @@ def main() -> int:
             "feedback_logged": feedback.get("outcome_log_logged") is True,
             "three_events_written": [row["event_type"] for row in rows] == ["ask", "selector_explain", "feedback"],
             "ask_selector_snapshot": by_type["ask"]["payload"]["selector_snapshot"]["ok"] is True,
+            "ask_adaptive_context_schema": by_type["ask"]["payload"]["adaptive_memory_context"]["schema"] == "adaptive_memory_context/v1",
+            "ask_adaptive_context_snapshot_matches": (
+                by_type["ask"]["payload"]["adaptive_memory_context"]["selector_snapshot"]["decision"]
+                == by_type["ask"]["payload"]["selector_snapshot"]["decision"]
+            ),
+            "ask_adaptive_context_has_features": bool(by_type["ask"]["payload"]["adaptive_memory_context"]["features"]),
+            "ask_adaptive_context_has_retrieval": bool(by_type["ask"]["payload"]["adaptive_memory_context"]["retrieval_context"]),
             "feedback_linked_to_ask": by_type["feedback"]["linked_operation_id"] == asked["operation_id"],
             "feedback_metadata_linked": feedback["feedback"]["metadata"]["linked_operation_id"] == asked["operation_id"],
+            "selector_context_schema": by_type["selector_explain"]["payload"]["selector_context"]["schema"] == "adaptive_memory_context/v1",
             "selector_context_logged": bool(by_type["selector_explain"]["payload"]["selector_context"]["retrieval_context"]),
+            "selector_context_has_features": bool(by_type["selector_explain"]["payload"]["selector_context"]["features"]),
             "ask_raw_results_have_training_fields": all(
                 field in by_type["ask"]["payload"]["response"]["raw_results"][0]
                 for field in (

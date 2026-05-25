@@ -12,19 +12,18 @@ from core.agent_planner import plan_memory_actions
 from core.chunking import chunk_text
 from core.config import load_config, resolve_project_path
 from core.consolidation import consolidation_plan, create_consolidation_summaries
+from core.controller_context import build_adaptive_memory_context
 from core.learning import learn_from_document, learn_from_text
 from core.maintenance import improvement_plan, memory_review, record_memory_improvement, weak_memories
-from core.ogcf_selector import augment_selector_features
 from core.outcome_log import OutcomeLogger
+from core.adaptive_behavior import normalize_adaptive_behavior_config
+from core.adaptive_behavior_shadow import adaptive_behavior_shadow_advisories
 from core.answer_behavior_shadow import normalize_resolver_shadow_config, resolver_shadow_actions
 from core.runtime import create_pipeline, pipeline_config_view, pipeline_stats
 from core.selector_runtime import (
     apply_retrieval_explanation_guard,
-    apply_retrieval_policy_guard,
     build_policy_selector,
     selector_config_view,
-    selector_features_from_payload,
-    selector_features_from_retrieval_context,
 )
 
 
@@ -123,6 +122,7 @@ class MemoryApi:
             **pipeline_config_view(self.pipeline),
             "selector": selector_config_view(self.root, self.root_config),
             "resolver_shadow": normalize_resolver_shadow_config(self.root_config.get("resolver_shadow")),
+            "adaptive_behavior": normalize_adaptive_behavior_config(self.root_config.get("adaptive_behavior")),
         }
 
     def _record_outcome(
@@ -170,44 +170,27 @@ class MemoryApi:
         return out
 
     def _selector_snapshot_from_rows(self, rows: list[dict[str, Any]], payload: dict[str, Any]) -> dict[str, Any]:
-        try:
-            features, diagnostics = selector_features_from_retrieval_context(
-                rows,
-                condition_name=str(payload.get("condition_name") or "hard_budget144"),
-                label_cost=float(payload.get("label_cost", 0.0002) or 0.0002),
-                budget_pressure=float(payload.get("budget_pressure", 0.2) or 0.2),
-            )
-            ogcf_meta = payload.get("ogcf_meta")
-            ogcf_meta_present = isinstance(ogcf_meta, dict) and bool(ogcf_meta)
-            if ogcf_meta_present:
-                features, diagnostics = augment_selector_features(
-                    features,
-                    rows,
-                    ogcf_meta,
-                    diagnostics,
-                    query=str(payload.get("query") or ""),
-                    ogcf_intent_config=self.root_config.get("ogcf_intent")
-                    if isinstance(self.root_config.get("ogcf_intent"), dict)
-                    else None,
-                )
-            selector = build_policy_selector(self.root, self.root_config)
-            decision = selector.select(features)
-            decision = apply_retrieval_policy_guard(decision, features, diagnostics)
-            return {
-                "ok": True,
-                "ogcf_meta_present": ogcf_meta_present,
-                "decision": {
-                    "policy": decision.policy,
-                    "action": decision.action,
-                    "reason": decision.reason,
-                    "confidence": decision.confidence,
-                },
-                "diagnostics": diagnostics,
-            }
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+        return build_adaptive_memory_context(
+            root=self.root,
+            config=self.root_config,
+            payload=payload,
+            retrieval_rows=rows,
+            include_decision=True,
+        ).selector_snapshot()
 
-    def _selector_features_and_context(self, payload: dict[str, Any]) -> tuple[Any, dict[str, Any] | None]:
+    def _adaptive_context_log_payload(self, adaptive_context, *, limit: int = 10) -> dict[str, Any]:
+        snapshot = adaptive_context.selector_snapshot()
+        return {
+            "schema": "adaptive_memory_context/v1",
+            "ok": bool(adaptive_context.ok),
+            "selector_snapshot": snapshot,
+            "features": adaptive_context.feature_dict() if adaptive_context.ok else {},
+            "diagnostics": adaptive_context.diagnostics if adaptive_context.ok else {},
+            "retrieval_context": self._evidence_brief(adaptive_context.retrieval_context, limit=limit),
+            "ogcf_meta_present": bool(adaptive_context.ogcf_meta_present),
+        }
+
+    def _adaptive_context_from_payload(self, payload: dict[str, Any]):
         retrieval_rows = payload.get("retrieval_context")
         if not isinstance(retrieval_rows, list) and payload.get("query"):
             retrieval_rows = self.pipeline.retrieve(
@@ -216,32 +199,13 @@ class MemoryApi:
                 namespace=str(payload.get("namespace") or "").strip() or None,
                 include_global=bool(payload.get("include_global", True)),
             )
-        if isinstance(retrieval_rows, list):
-            features, diagnostics = selector_features_from_retrieval_context(
-                retrieval_rows,
-                condition_name=str(payload.get("condition_name") or "hard_budget144"),
-                label_cost=float(payload.get("label_cost", 0.0002) or 0.0002),
-                budget_pressure=float(payload.get("budget_pressure", 0.2) or 0.2),
-            )
-            ogcf_meta = payload.get("ogcf_meta")
-            ogcf_meta_present = isinstance(ogcf_meta, dict) and bool(ogcf_meta)
-            if ogcf_meta_present:
-                features, diagnostics = augment_selector_features(
-                    features,
-                    retrieval_rows,
-                    ogcf_meta,
-                    diagnostics,
-                    query=str(payload.get("query") or ""),
-                    ogcf_intent_config=self.root_config.get("ogcf_intent")
-                    if isinstance(self.root_config.get("ogcf_intent"), dict)
-                    else None,
-                )
-            return features, {
-                "diagnostics": diagnostics,
-                "retrieval_context": retrieval_rows,
-                "ogcf_meta_present": ogcf_meta_present,
-            }
-        return selector_features_from_payload(payload), None
+        return build_adaptive_memory_context(
+            root=self.root,
+            config=self.root_config,
+            payload=payload,
+            retrieval_rows=retrieval_rows if isinstance(retrieval_rows, list) else None,
+            include_decision=True,
+        )
 
     def _resolver_shadow_config(self) -> dict[str, Any]:
         raw = self.root_config.get("resolver_shadow")
@@ -270,12 +234,44 @@ class MemoryApi:
             config=cfg,
         )
 
+    def _adaptive_behavior_shadow_config(self) -> dict[str, Any]:
+        raw = self.root_config.get("adaptive_behavior")
+        return normalize_adaptive_behavior_config(raw if isinstance(raw, dict) else None)
+
+    def _include_adaptive_behavior_shadow(self, payload: dict[str, Any], cfg: dict[str, Any]) -> bool:
+        if "include_adaptive_behavior_shadow" in payload:
+            return bool(payload.get("include_adaptive_behavior_shadow"))
+        return bool((cfg.get("shadow") or {}).get("enabled"))
+
+    def _log_adaptive_behavior_shadow(self, payload: dict[str, Any], cfg: dict[str, Any]) -> bool:
+        if "log_adaptive_behavior_shadow" in payload:
+            return bool(payload.get("log_adaptive_behavior_shadow"))
+        return bool((cfg.get("shadow") or {}).get("include_in_outcome_log"))
+
+    def _adaptive_behavior_shadow_payload(
+        self,
+        *,
+        query: str,
+        asked: dict[str, Any],
+        adaptive_context,
+        resolver_shadow: dict[str, Any] | None,
+        cfg: dict[str, Any],
+    ) -> dict[str, Any]:
+        return adaptive_behavior_shadow_advisories(
+            query=query,
+            answer=str(asked.get("answer") or ""),
+            evidence=asked.get("evidence") or [],
+            stale_context=asked.get("stale_context") or [],
+            adaptive_context=adaptive_context,
+            resolver_shadow=resolver_shadow,
+            config=cfg,
+        )
+
     def selector_decide(self, payload: dict[str, Any]) -> dict[str, Any]:
-        selector = build_policy_selector(self.root, self.root_config)
-        features, context = self._selector_features_and_context(payload)
-        decision = selector.select(features)
-        if context:
-            decision = apply_retrieval_policy_guard(decision, features, context.get("diagnostics"))
+        adaptive_context = self._adaptive_context_from_payload(payload)
+        if not adaptive_context.ok:
+            return adaptive_context.selector_snapshot()
+        decision = adaptive_context.decision
         response = {
             "ok": True,
             "selector": selector_config_view(self.root, self.root_config),
@@ -286,24 +282,30 @@ class MemoryApi:
                 "confidence": decision.confidence,
             },
         }
-        if context:
-            response["selector_context"] = context
+        if adaptive_context.retrieval_context:
+            response["selector_context"] = adaptive_context.selector_context()
         return response
 
     def selector_explain(self, payload: dict[str, Any]) -> dict[str, Any]:
         selector = build_policy_selector(self.root, self.root_config)
-        features, context = self._selector_features_and_context(payload)
+        adaptive_context = self._adaptive_context_from_payload(payload)
+        if not adaptive_context.ok:
+            return adaptive_context.selector_snapshot()
         top_k = payload.get("top_k")
-        explanation = selector.explain(features, top_k=None if top_k is None else int(top_k))
-        if context:
-            explanation = apply_retrieval_explanation_guard(explanation, features, context.get("diagnostics"))
+        explanation = selector.explain(adaptive_context.features, top_k=None if top_k is None else int(top_k))
+        if adaptive_context.retrieval_context:
+            explanation = apply_retrieval_explanation_guard(
+                explanation,
+                adaptive_context.features,
+                adaptive_context.diagnostics,
+            )
         response = {
             "ok": True,
             "selector": selector_config_view(self.root, self.root_config),
             "explanation": explanation,
         }
-        if context:
-            response["selector_context"] = context
+        if adaptive_context.retrieval_context:
+            response["selector_context"] = adaptive_context.selector_context()
         log_status = self._record_outcome(
             "selector_explain",
             {
@@ -316,11 +318,7 @@ class MemoryApi:
                 },
                 "selector": response.get("selector"),
                 "explanation": explanation,
-                "selector_context": {
-                    "diagnostics": context.get("diagnostics") if context else None,
-                    "retrieval_context": self._evidence_brief(context.get("retrieval_context") if context else [], limit=10),
-                    "ogcf_meta_present": context.get("ogcf_meta_present") if context else False,
-                },
+                "selector_context": self._adaptive_context_log_payload(adaptive_context, limit=10),
             },
         )
         response["operation_id"] = log_status["operation_id"]
@@ -701,7 +699,14 @@ class MemoryApi:
             **asked,
             "namespace_warning": namespace_warning,
         }
-        selector_snapshot = self._selector_snapshot_from_rows(asked.get("raw_results") or [], payload)
+        adaptive_context = build_adaptive_memory_context(
+            root=self.root,
+            config=self.root_config,
+            payload={**payload, "query": query},
+            retrieval_rows=asked.get("raw_results") or [],
+            include_decision=True,
+        )
+        selector_snapshot = adaptive_context.selector_snapshot()
         resolver_shadow_cfg = self._resolver_shadow_config()
         resolver_shadow = None
         if self._include_resolver_shadow(payload, resolver_shadow_cfg):
@@ -712,8 +717,24 @@ class MemoryApi:
                 cfg={**resolver_shadow_cfg, "enabled": True},
             )
             response["resolver_shadow"] = resolver_shadow
+        adaptive_behavior_cfg = self._adaptive_behavior_shadow_config()
+        adaptive_behavior_shadow = None
+        if self._include_adaptive_behavior_shadow(payload, adaptive_behavior_cfg):
+            adaptive_behavior_shadow = self._adaptive_behavior_shadow_payload(
+                query=query,
+                asked=asked,
+                adaptive_context=adaptive_context,
+                resolver_shadow=resolver_shadow,
+                cfg=adaptive_behavior_cfg,
+            )
+            response["adaptive_behavior_shadow"] = adaptive_behavior_shadow
         logged_selector_snapshot = selector_snapshot
         log_resolver_shadow = resolver_shadow if resolver_shadow_cfg.get("include_in_outcome_log") else None
+        log_adaptive_behavior_shadow = (
+            adaptive_behavior_shadow
+            if adaptive_behavior_shadow and self._log_adaptive_behavior_shadow(payload, adaptive_behavior_cfg)
+            else None
+        )
         log_status = self._record_outcome(
             "ask",
             {
@@ -741,7 +762,9 @@ class MemoryApi:
                     "stale_context": self._evidence_brief(asked.get("stale_context") or [], limit=10),
                 },
                 "selector_snapshot": logged_selector_snapshot,
+                "adaptive_memory_context": self._adaptive_context_log_payload(adaptive_context, limit=10),
                 **({"resolver_shadow": log_resolver_shadow} if log_resolver_shadow else {}),
+                **({"adaptive_behavior_shadow": log_adaptive_behavior_shadow} if log_adaptive_behavior_shadow else {}),
             },
         )
         response["operation_id"] = log_status["operation_id"]

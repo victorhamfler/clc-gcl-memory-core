@@ -57,9 +57,39 @@ The useful mechanisms are real, but too many of them now live inside large mixed
 - `core/pipeline.py` contains ingestion, retrieval, reranking, session context, correction handling, source-version logic, answer-type scoring, claim-scope scoring, authority logic, and logging.
 - `core/resolver.py` contains evidence classification, evidence ranking, conflict detection, snippet selection, answer building, confidence estimation, and many query-intent helpers.
 - `core/clc_policy_selector.py` is small and auditable, but much of its "learned" behavior is still guarded kNN around fixed rules.
+- `serve.py` has accumulated controller orchestration for selector snapshots, OGCF feature augmentation, resolver-shadow attachment, and outcome logging.
 - Many thresholds and coefficients are hardcoded in code rather than described by configuration, calibration artifacts, or learned outcome models.
 
 The system is still valuable, but new behavior is increasingly being added as local patches instead of clean mechanisms.
+
+## Current Direction After Full Codebase Review
+
+The next roadmap target is a shared adaptive-memory controller context, not another isolated heuristic.
+
+The codebase now has several useful signal families:
+
+- canonical memory support/provenance and duplicate-pressure control;
+- OGCF geometry and bridge-risk diagnostics;
+- retrieval/evidence-state/claim-scope/answer-type signals;
+- selector policy decisions and retrieval guardrails;
+- resolver-shadow answer actions;
+- answer-level feedback and compact outcome datasets.
+
+The weakness is that these signals are still assembled in different places. The roadmap should move toward one reusable context object produced for every ask/retrieve/selector decision:
+
+```text
+query
+retrieved evidence
+canonical support/provenance
+evidence-state summary
+OGCF diagnostics
+selector features and guarded decision
+resolver-shadow actions
+answer feedback link
+outcome labels
+```
+
+This context is the bridge from the current symbolic/configurable system into the neural-symbolic adaptive memory brain. Later learned controllers should learn from this context, while symbolic gates continue deciding whether learned behavior is safe enough to affect runtime.
 
 ## What Must Be Preserved
 
@@ -621,6 +651,633 @@ Current result: 7/7 cases passed.
 
 The next step should be Hermes validation with `include_resolver_shadow: true` during normal work. The memory session should compare shadow annotations with real answer-level feedback before making any user-facing resolver changes.
 
+## Adaptive Memory Controller Context
+
+The first implementation of the shared context layer now exists:
+
+```text
+core/controller_context.py
+```
+
+It defines `adaptive_memory_context/v1` and centralizes:
+
+- retrieval-derived selector features;
+- canonical-memory diagnostics already attached to retrieval rows;
+- optional OGCF feature augmentation and intent-gated bridge pressure;
+- guarded selector decision creation;
+- selector snapshots consumed by `/ask`, `/selector_decide`, `/selector_explain`, resolver-shadow, and outcome logs.
+
+The API no longer owns this selector/OGCF orchestration directly. `serve.py` now calls the context builder and remains a thinner transport/logging layer.
+
+Outcome logging now writes this same context shape:
+
+- `ask` events keep the legacy `selector_snapshot` field for backward compatibility;
+- `ask` events also include `adaptive_memory_context` with schema, features, diagnostics, compact retrieval context, OGCF presence, and the selector snapshot;
+- `selector_explain` events write `selector_context` using the same `adaptive_memory_context/v1` shape;
+- answer feedback can link back to the ask operation id, so later datasets can join answer labels to the exact runtime context used at answer time.
+
+Regression:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\controller_context_regression.py
+..\.venv-torch\Scripts\python.exe .\eval\outcome_logging_regression.py
+```
+
+This regression verifies that the new context builder matches the previous direct selector + OGCF + retrieval-guard path, exposes the `adaptive_memory_context/v1` schema, preserves non-empty OGCF diagnostics, and still handles condition-only selector payloads.
+The outcome logging regression verifies the logged context schema, legacy selector snapshot parity, feature presence, retrieval-context presence, and linked answer/memory feedback.
+
+The resolver-shadow outcome collector now consumes this context directly:
+
+- if an `ask` event has `adaptive_memory_context`, the collector uses its `selector_snapshot` and diagnostics;
+- if an older log only has `selector_snapshot`, the collector falls back to the legacy path;
+- each collected example records `context_source` so later datasets can distinguish new-context examples from legacy examples;
+- raw-log threshold calibration uses the same context preference.
+
+Regression:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\resolver_shadow_outcome_context_regression.py
+..\.venv-torch\Scripts\python.exe .\eval\resolver_shadow_runtime_context_log_regression.py
+```
+
+Current result: pass. The regression proves adaptive-context logs and legacy selector-snapshot logs produce the same semantic resolver-shadow outcome fields.
+The runtime-context regression goes one step further: it creates a real `MemoryApi` ask log with `adaptive_memory_context`, writes linked answer-level feedback, and verifies the resolver-shadow collector produces a valid `answer_correct` outcome example with `context_source=adaptive_memory_context`.
+
+This is the architectural pivot for the next phase:
+
+```text
+runtime signals -> adaptive context -> report-only datasets -> calibrated/learned scorer -> symbolic promotion gate
+```
+
+The next learning work should consume context artifacts instead of bespoke eval-specific rows whenever possible.
+
+The first shared outcome table now exists:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_context_outcome_dataset.py --log <outcome-log.jsonl>
+```
+
+It writes:
+
+```text
+..\experiments\adaptive_context_outcome_dataset_results.json
+..\experiments\adaptive_context_outcome_dataset_report.md
+```
+
+Schema:
+
+```text
+adaptive_context_outcome_dataset/v1
+```
+
+This dataset joins linked ask/feedback rows and preserves:
+
+- feedback scope, label, rating, and outcome family;
+- query and answer preview;
+- selected memory ids;
+- selector policy/action/reason;
+- adaptive context features;
+- compact diagnostics for CSD, stale/conflict, canonical memory, and OGCF;
+- compact retrieval context;
+- optional resolver-shadow actions when they were logged;
+- context source, so migrated legacy examples and new adaptive-context examples remain distinguishable.
+
+Regression:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_context_outcome_dataset_regression.py
+```
+
+Current result: pass. The regression creates real runtime logs with both answer-level and memory-level linked feedback and verifies both become adaptive-context examples. The collector also runs on existing legacy and local outcome logs and currently produces 192 examples with no skipped rows.
+
+The first readiness guard for this shared dataset now exists:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_context_dataset_guard.py --dataset ..\experiments\adaptive_context_outcome_dataset_results.json
+```
+
+It writes:
+
+```text
+..\experiments\adaptive_context_dataset_guard_results.json
+..\experiments\adaptive_context_dataset_guard_report.md
+```
+
+Schema:
+
+```text
+adaptive_context_dataset_guard/v1
+```
+
+The guard separates structural safety from learning readiness:
+
+- `ok` means the dataset is report-only, linked, context-bearing, retrieval-bearing, and has no hard errors.
+- `readiness` says whether the examples are only useful for analysis, ready for runtime collection, or strong enough to become a promotion candidate.
+- capability checks report whether answer feedback, memory feedback, adaptive-context examples, and OGCF families are present.
+
+Current accumulated result: structurally safe with 192 examples and no errors, but `analysis_only` because all accumulated rows still come from legacy selector snapshots. The regression creates fresh runtime rows and proves adaptive-context answer + memory feedback can reach `ready_for_runtime_collection`. The next data task is therefore to collect more fresh `adaptive_memory_context/v1` logs with answer, memory, and OGCF labels before training or promoting any learned scorer.
+
+That fresh local collection fixture now exists:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_context_rich_runtime_fixture.py
+```
+
+It creates a temporary runtime DB, teaches diverse local memories, runs real `ask` calls through `adaptive_memory_context/v1`, writes linked answer-level and memory-level feedback, and then builds plus guards the resulting dataset.
+
+It writes:
+
+```text
+..\experiments\adaptive_context_rich_runtime_examples.jsonl
+..\experiments\adaptive_context_rich_runtime_dataset_results.json
+..\experiments\adaptive_context_rich_runtime_guard_results.json
+..\experiments\adaptive_context_rich_runtime_fixture_results.json
+```
+
+Current fresh result:
+
+- 48 examples;
+- 24 answer-feedback examples;
+- 24 memory-feedback examples;
+- all 48 from `adaptive_memory_context`;
+- OGCF positive and OGCF negative coverage;
+- guard readiness: `promotion_candidate`.
+
+Combining this fresh fixture with the existing legacy/local outcome logs gives 208 structurally clean examples:
+
+- 48 adaptive-context examples;
+- 192 legacy selector-snapshot examples;
+- 32 answer examples;
+- 208 memory examples;
+- guard readiness: `promotion_candidate`.
+
+This still should not auto-promote any runtime behavior. It means the next learned-control experiment can start as report-only training/evaluation against the combined dataset, with the fresh adaptive-context slice treated as the primary validation target and the legacy slice treated as historical support.
+
+The first report-only learned scorer now exists:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_context_tiny_scorer.py --dataset ..\experiments\adaptive_context_combined_dataset_results.json
+```
+
+It writes:
+
+```text
+..\experiments\adaptive_context_tiny_scorer_results.json
+..\experiments\adaptive_context_tiny_scorer_report.md
+```
+
+Schema:
+
+```text
+adaptive_context_tiny_scorer/v1
+```
+
+The scorer is a deterministic tiny logistic model over adaptive-context features, diagnostics, selector action/policy fields, and compact retrieval statistics. It compares against two baselines:
+
+- majority-class baseline;
+- symbolic retrieval-health baseline.
+
+Current combined result:
+
+- 240 labeled examples;
+- 97 positive and 143 negative outcomes;
+- combined 5-fold learned accuracy: 0.591873;
+- combined 5-fold majority accuracy: 0.595866;
+- combined 5-fold learned Brier: 0.284305;
+- combined 5-fold majority Brier: 0.404134;
+- adaptive-only learned accuracy: 0.895542;
+- adaptive-only majority accuracy: 0.562646;
+- adaptive-only learned Brier: 0.075683.
+
+Interpretation:
+
+- The fresh `adaptive_memory_context/v1` slice is learnable and beats baselines in accuracy and calibration.
+- Training only on legacy selector-snapshot rows transfers poorly to fresh adaptive-context rows, which proves the architecture should not treat legacy rows as equivalent training data.
+- Legacy rows remain useful as historical support and calibration pressure, but the learned controller should be promoted only from fresh adaptive-context examples.
+
+Protected by:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_context_tiny_scorer_regression.py
+```
+
+Current regression result: pass. It verifies the fresh adaptive-context dataset produces a report-only scorer where the learned model beats majority accuracy and symbolic-health Brier on the adaptive slice.
+
+The scorer now also runs a harder behavior-family holdout:
+
+```text
+adaptive_behavior_holdout
+```
+
+This trains while holding out each answer-behavior family in turn, then tests on that unseen family. Current fresh result:
+
+- weighted learned accuracy: 0.229167;
+- weighted learned Brier: 0.6288;
+- weighted symbolic-health accuracy: 0.520833;
+- weighted symbolic-health Brier: 0.265518;
+- scorer readiness: `blocked_behavior_generalization`.
+
+Interpretation:
+
+- The tiny scorer is learning the controlled fixture patterns, and it is useful as an analysis signal.
+- It is not yet a promotion-ready controller because it does not generalize to unseen behavior families.
+- Symbolic health remains the better fallback for out-of-family behavior.
+
+This changes the next development target: the learned controller should become a hybrid neural-symbolic controller that combines the tiny learned score with explicit behavior-family/answer-type signals, rather than replacing symbolic guards with a single polarity model.
+
+The first behavior-aware hybrid scorer now exists:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_context_behavior_aware_scorer.py --dataset ..\experiments\adaptive_context_rich_runtime_dataset_results.json
+```
+
+It writes:
+
+```text
+..\experiments\adaptive_context_behavior_aware_scorer_results.json
+..\experiments\adaptive_context_behavior_aware_scorer_report.md
+```
+
+Schema:
+
+```text
+adaptive_context_behavior_aware_scorer/v1
+```
+
+The scorer is deliberately conservative:
+
+- route by answer-behavior family;
+- use a family model only when that family has enough mixed evidence;
+- blend family learned scores with symbolic retrieval health;
+- fall back to symbolic health for unseen behavior families.
+
+Current behavior-holdout result:
+
+- hybrid weighted accuracy: 0.520833;
+- hybrid weighted Brier: 0.265518;
+- symbolic-health weighted accuracy: 0.520833;
+- symbolic-health weighted Brier: 0.265518;
+- readiness: `analysis_ready`.
+
+This does not yet improve beyond the symbolic fallback on unseen families, but it fixes the unsafe failure mode of the generic tiny scorer. It is now a safer architecture for the next stage: learned scoring can be admitted inside known behavior families while unseen behavior remains symbolic.
+
+Protected by:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_context_behavior_aware_scorer_regression.py
+```
+
+Current regression result: pass.
+
+The semantic behavior map is now configurable:
+
+```yaml
+adaptive_behavior:
+  superfamilies:
+    supported_evidence: answer_correct,answer_good_citation,answer_bad_citation
+    ogcf_bridge_warning: answer_bridge_warning_useful,answer_bridge_warning_noise
+    missing_support: answer_missing_support,answer_overconfident
+    stale_conflict: answer_stale,answer_conflict_not_disclosed
+```
+
+Core normalization lives in:
+
+```text
+core/adaptive_behavior.py
+```
+
+The scorer now loads this config by default and emits `adaptive_behavior_config/v1` in its report. The promotion-readiness guard now exists:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_context_semantic_behavior_guard.py --scorer ..\experiments\adaptive_context_semantic_behavior_scorer_results.json
+```
+
+It writes:
+
+```text
+..\experiments\adaptive_context_semantic_behavior_guard_results.json
+..\experiments\adaptive_context_semantic_behavior_guard_report.md
+```
+
+Schema:
+
+```text
+adaptive_context_semantic_behavior_guard/v1
+```
+
+The guard requires:
+
+- report-only scorer output;
+- `adaptive_behavior_config/v1` present;
+- behavior holdout present;
+- semantic hybrid accuracy greater than symbolic fallback;
+- semantic hybrid Brier lower than symbolic fallback.
+
+Current guard result:
+
+- readiness: `promotion_candidate`;
+- semantic accuracy: 0.583333;
+- symbolic accuracy: 0.520833;
+- semantic Brier: 0.233237;
+- symbolic Brier: 0.265518.
+
+Protected by:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_context_semantic_behavior_guard_regression.py
+```
+
+Current regression result: pass.
+
+This is still not an automatic runtime promotion. It means the semantic scorer is now a valid report-only candidate artifact for the next shadow-controller stage.
+
+The first semantic adaptive-behavior shadow-controller artifact now exists:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_context_semantic_shadow_controller.py --dataset ..\experiments\adaptive_context_rich_runtime_dataset_results.json --guard ..\experiments\adaptive_context_semantic_behavior_guard_results.json
+```
+
+It writes:
+
+```text
+..\experiments\adaptive_context_semantic_shadow_controller_results.json
+..\experiments\adaptive_context_semantic_shadow_controller_report.md
+```
+
+Schema:
+
+```text
+adaptive_context_semantic_shadow_controller/v1
+```
+
+The artifact is advisory only. It requires the semantic behavior guard to be `promotion_candidate`, loads the configurable `adaptive_behavior_config/v1`, trains semantic family routes on the adaptive-context dataset, and emits per-example shadow advisories:
+
+- `likely_helpful`;
+- `likely_harmful`;
+- `uncertain_keep_symbolic`.
+
+Current result:
+
+- readiness: `shadow_candidate`;
+- 48 adaptive examples;
+- advisory counts: 21 `likely_helpful`, 4 `likely_harmful`, 23 `uncertain_keep_symbolic`;
+- route counts: 6 `exact_family_model`, 42 `exact_family_prior_blend`;
+- shadow remains disabled by default in config;
+- no runtime/config mutation.
+
+Protected by:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_context_semantic_shadow_controller_regression.py
+```
+
+Current regression result: pass.
+
+This is the first full neural-symbolic controller chain:
+
+```text
+adaptive context -> outcome dataset -> semantic scorer -> promotion guard -> shadow-controller artifact
+```
+
+The next stage should test this shadow artifact on new live logs rather than promoting it directly.
+
+The first fresh live-style shadow validation now exists:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_context_semantic_shadow_live_style_eval.py
+```
+
+It generates a new local runtime log, builds an adaptive-context outcome dataset from that log, guards the dataset, trains the semantic shadow controller from the earlier rich fixture, and evaluates on the fresh live-style examples.
+
+It writes:
+
+```text
+..\experiments\adaptive_context_semantic_shadow_live_style_examples.jsonl
+..\experiments\adaptive_context_semantic_shadow_live_style_dataset_results.json
+..\experiments\adaptive_context_semantic_shadow_live_style_dataset_guard_results.json
+..\experiments\adaptive_context_semantic_shadow_live_style_eval_results.json
+```
+
+Schema:
+
+```text
+adaptive_context_semantic_shadow_live_style_eval/v1
+```
+
+Current result:
+
+- readiness: `live_style_shadow_candidate`;
+- 20 fresh adaptive-context examples;
+- 9 actioned advisories;
+- 11 `uncertain_keep_symbolic` advisories;
+- actioned precision: 1.0;
+- coverage: 0.45;
+- no runtime/config mutation.
+
+Protected by:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_context_semantic_shadow_live_style_regression.py
+```
+
+Current regression result: pass.
+
+This is stronger evidence than the internal fixture tests because the trained shadow controller is evaluated on newly generated logs with different wording and scenarios. It remains conservative: it only acts on high-confidence cases and leaves the rest to symbolic handling.
+
+The stricter multi-batch validation now exists:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_context_semantic_shadow_multibatch_eval.py
+```
+
+It creates three independent fresh live-style batches, each in a separate temporary runtime, builds/guards each adaptive-context dataset, and evaluates the same trained semantic shadow controller on each batch.
+
+It writes:
+
+```text
+..\experiments\adaptive_context_semantic_shadow_multibatch_eval_results.json
+..\experiments\adaptive_context_semantic_shadow_multibatch_eval_report.md
+..\experiments\adaptive_context_semantic_shadow_multibatch_<batch>*.json/jsonl/md
+```
+
+Schema:
+
+```text
+adaptive_context_semantic_shadow_multibatch_eval/v1
+```
+
+Current result:
+
+- readiness: `multibatch_shadow_candidate`;
+- 3 independent batches;
+- 48 total fresh adaptive-context examples;
+- 20 actioned advisories;
+- weighted actioned precision: 1.0;
+- weighted coverage: 0.416667;
+- no runtime/config mutation.
+
+Protected by:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_context_semantic_shadow_multibatch_regression.py
+```
+
+Current regression result: pass.
+
+This is the strongest current evidence for the adaptive memory brain direction: the semantic shadow controller stays conservative, high precision, and non-mutating across several fresh generated batches.
+
+The next behavior-signal improvement now exists:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_context_semantic_behavior_scorer.py --dataset ..\experiments\adaptive_context_rich_runtime_dataset_results.json
+```
+
+It writes:
+
+```text
+..\experiments\adaptive_context_semantic_behavior_scorer_results.json
+..\experiments\adaptive_context_semantic_behavior_scorer_report.md
+```
+
+Schema:
+
+```text
+adaptive_context_semantic_behavior_scorer/v1
+```
+
+This scorer maps exact behavior labels into broader semantic behavior superfamilies:
+
+- `supported_evidence`: supported answers, good citation, bad citation;
+- `ogcf_bridge_warning`: useful bridge warnings and bridge-warning noise;
+- `missing_support`: missing support;
+- `stale_conflict`: stale and undisclosed conflict.
+
+On the same exact-behavior holdout, semantic superfamily routing improves over symbolic health:
+
+- semantic hybrid weighted accuracy: 0.583333;
+- symbolic-health weighted accuracy: 0.520833;
+- semantic hybrid weighted Brier: 0.233237;
+- symbolic-health weighted Brier: 0.265518;
+- readiness: `analysis_ready`.
+
+This is the first evidence that the controller can generalize between related answer-behavior families instead of only memorizing exact labels or falling back to symbolic health.
+
+Protected by:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_context_semantic_behavior_scorer_regression.py
+```
+
+Current regression result: pass.
+
+Hermes validation passed, but it correctly identified one remaining coverage gap: natural live OGCF bridge-risk answer cases were still thin. Because Hermes was unavailable for the next iteration, the selector side added a local live-log-shaped OGCF bridge worklog fixture:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\answer_behavior_ogcf_bridge_worklog_fixture.py
+```
+
+It writes:
+
+```text
+..\experiments\answer_behavior_ogcf_bridge_worklog.jsonl
+```
+
+The new direct runtime-shadow regression is:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\resolver_shadow_ogcf_bridge_worklog_regression.py
+```
+
+Current result: 8/8 cases passed.
+
+The combined replay with Hermes-collected logs and the new local OGCF worklog is:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\answer_behavior_real_log_shadow_replay.py --log <hermes-neural-symbolic-log> --log <hermes-missing-cases-log> --log ..\experiments\answer_behavior_ogcf_bridge_worklog.jsonl
+```
+
+Current result: 16/16 cases passed.
+
+The balanced worklog also strengthens the answer-feedback learning path:
+
+- `answer_feedback_memory_bank_ogcf_bridge_results.json`: 11 signals, 5 clusters, 3 ready clusters;
+- `answer_feedback_bank_guard_ogcf_bridge_results.json`: pass, zero issues;
+- `answer_behavior_proposals_ogcf_bridge_results.json`: 3 proposals;
+- `answer_behavior_proposal_guard_ogcf_bridge_results.json`: pass, zero issues.
+
+This means the local controller can now be developed further without Hermes by generating scoped worklogs, as long as every generated worklog remains report-only and is validated by replay plus direct runtime-shadow regression.
+
+The first threshold calibration artifact now exists:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\resolver_shadow_threshold_calibration.py
+```
+
+By default, this now consumes the compact `resolver_shadow_outcome_dataset/v1` artifact when it exists. Raw ask/feedback log replay is still available with explicit `--log` arguments for traceability and parity checks.
+
+It writes:
+
+```text
+..\experiments\resolver_shadow_threshold_calibration_results.json
+..\experiments\resolver_shadow_threshold_calibration_report.md
+```
+
+Current result:
+
+- calibration cases: 16;
+- perfect threshold candidates: 37;
+- current default `0.70/0.50`: 0 failures;
+- advisory strict candidate `0.95/0.75`: 0 failures.
+
+No config was changed. The strict candidate is useful evidence, but the current defaults remain acceptable until more natural live logs exist. The next threshold decision should compare defaults and strict candidate on real `include_resolver_shadow: true` answer logs.
+
+Dataset/raw-log parity is protected by:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\resolver_shadow_threshold_calibration_dataset_regression.py
+```
+
+Current result: pass. The dataset-driven calibration and raw-log calibration have the same 16-case label counts and the same recommended candidate.
+
+The first resolver-shadow outcome collector now exists:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\resolver_shadow_outcome_collector.py
+```
+
+It writes:
+
+```text
+..\experiments\resolver_shadow_outcome_dataset_results.json
+..\experiments\resolver_shadow_outcome_dataset_report.md
+```
+
+Schema:
+
+```text
+resolver_shadow_outcome_dataset/v1
+```
+
+The dataset contains compact per-example rows with:
+
+- source log and linked operation ids;
+- answer label/family/rating;
+- selected evidence count and memory ids;
+- OGCF bridge score, effective affected ratio, and intent;
+- ordinary-fact and stale-conflict diagnostics;
+- shadow actions, expected actions, forbidden actions;
+- outcome bucket such as `bridge_warning_true_positive`, `bridge_warning_true_negative`, `missing_support_correct`, `stale_disclosure_correct`, and `supported_answer_correct`.
+
+Current result:
+
+- 16 examples;
+- 0 skipped;
+- default threshold dataset passes;
+- strict threshold dataset passes;
+- collector regression passes.
+
+This is now the preferred intermediate artifact for future calibration. Threshold sweeps consume this compact dataset by default, while later learned bridge-warning scorers should use it as their first training/evaluation table instead of repeatedly parsing full ask/feedback logs.
+
 ## OGCF Memory Maintenance Branch
 
 Hermes' OGCF tests should be incorporated as a complementary memory-maintenance branch, not as a replacement for the selector roadmap.
@@ -911,3 +1568,131 @@ This regression verifies that:
 - policy distribution does not collapse to one action.
 
 Next Hermes run should use real or simulated non-empty OGCF metadata for bridge-risk cases instead of `{}`.
+
+## Gemma-Backed Adaptive Shadow Gate
+
+The adaptive semantic shadow controller has now been validated on real local Gemma retrieval, not only generated hash/test-runtime fixtures.
+
+The new eval is:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_context_gemma_shadow_eval.py
+```
+
+It builds a report-only `adaptive_context_outcome_dataset/v1` holdout from the raw-Gemma canonical/OGCF fixture:
+
+- DB: `..\experiments\rich_gemma_raw_canonical_ogcf_fixture.db`;
+- namespace: `agent:rich-gemma-canonical-ogcf`;
+- embedding backend: `wsl_llama_cpp`;
+- embedding dimension: `768`;
+- adaptive-context examples: `24`;
+- all examples come from `adaptive_memory_context/v1`;
+- retrieval coverage is full.
+
+Current result:
+
+- readiness: `gemma_shadow_candidate`;
+- actioned advisories: `14`;
+- actioned precision: `1.0`;
+- coverage: `0.583333`;
+- runtime/config mutation: none.
+
+The regression is:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_context_gemma_shadow_regression.py
+```
+
+The production shadow harness also now has a retrieval-coverage guard:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\canonical_ogcf_shadow_coverage_regression.py
+```
+
+This prevents a bad namespace, empty DB, or broken query encoder from looking like a safe protect-all selector result. Low retrieval coverage now fails by default unless the caller explicitly passes `--allow-low-retrieval-coverage`.
+
+The unified selector architecture gate now includes both new regressions:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\selector_architecture_gate.py
+```
+
+Current required summary:
+
+```json
+{
+  "retrieval_signal_gate_ok": true,
+  "evidence_state_gate_ok": true,
+  "shadow_coverage_guard_ok": true,
+  "gemma_shadow_regression_ok": true
+}
+```
+
+This changes the roadmap status: the next step is no longer proving that the semantic shadow controller can survive Gemma retrieval. That is now protected.
+
+## Runtime Adaptive Behavior Shadow Surface
+
+The runtime report-only surface now exists on `POST /ask`.
+
+It is disabled by default:
+
+```yaml
+adaptive_behavior:
+  shadow:
+    enabled: false
+    include_in_outcome_log: false
+```
+
+An agent can request advisories for one ask call with:
+
+```json
+{
+  "include_adaptive_behavior_shadow": true
+}
+```
+
+It can also explicitly log those advisories for later feedback/outcome analysis:
+
+```json
+{
+  "include_adaptive_behavior_shadow": true,
+  "log_adaptive_behavior_shadow": true
+}
+```
+
+The response/log payload uses:
+
+```text
+adaptive_behavior_shadow/v1
+```
+
+It emits report-only semantic behavior-family advisories for:
+
+- `supported_evidence`;
+- `missing_support`;
+- `stale_conflict`;
+- `ogcf_bridge_warning` when OGCF diagnostics are present.
+
+The runtime surface does not change answer text, selector policy, retrieval rows, memory rows, or config. It exposes advisory, route, probability, behavior family, reasons, and compact diagnostics so later real feedback can be joined to the exact adaptive context used at answer time.
+
+Regression:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_behavior_shadow_runtime_regression.py
+```
+
+Current result: pass. It verifies the shadow is absent by default, present when requested, logged only when explicitly requested, report-only, and does not change the answer, evidence, or selector decision.
+
+The unified selector architecture gate now includes this runtime regression:
+
+```json
+{
+  "retrieval_signal_gate_ok": true,
+  "evidence_state_gate_ok": true,
+  "shadow_coverage_guard_ok": true,
+  "gemma_shadow_regression_ok": true,
+  "adaptive_behavior_shadow_runtime_ok": true
+}
+```
+
+The next development step should collect real agent ask/feedback logs with `include_adaptive_behavior_shadow=true` and `log_adaptive_behavior_shadow=true`, then build a calibration/replay artifact that compares shadow advisories against real answer-level and memory-level feedback. Promotion remains out of scope until that real-log calibration exists.

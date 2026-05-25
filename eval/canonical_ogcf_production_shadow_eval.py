@@ -62,6 +62,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ogcf-sample-limit", type=int, default=384)
     parser.add_argument("--namespace", default=None)
     parser.add_argument("--include-global", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--min-retrieval-coverage",
+        type=float,
+        default=0.8,
+        help="Minimum query fraction with at least one retrieved row in every mode.",
+    )
+    parser.add_argument(
+        "--allow-low-retrieval-coverage",
+        action="store_true",
+        help="Write a warning instead of failing when retrieval coverage is below the minimum.",
+    )
     parser.add_argument("--skip-ogcf", action="store_true")
     parser.add_argument(
         "--normalize-embeddings",
@@ -364,6 +375,56 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def retrieval_coverage_report(
+    results: list[dict[str, Any]],
+    *,
+    min_coverage: float,
+    allow_low_coverage: bool,
+) -> dict[str, Any]:
+    modes = ("base", "canonical", "ogcf", "combined")
+    total = max(1, len(results))
+    mode_coverage: dict[str, Any] = {}
+    zero_retrieval_queries: list[dict[str, Any]] = []
+    for mode in modes:
+        query_counts = [
+            int((item["modes"][mode].get("diagnostics") or {}).get("retrieval_count") or 0)
+            for item in results
+        ]
+        covered = sum(1 for count in query_counts if count > 0)
+        mode_coverage[mode] = {
+            "covered_queries": covered,
+            "query_count": len(results),
+            "coverage": round(covered / total, 6),
+            "min_retrieval_count": min(query_counts, default=0),
+            "avg_retrieval_count": round(sum(query_counts) / total, 6),
+        }
+    for item in results:
+        missing_modes = [
+            mode
+            for mode in modes
+            if int((item["modes"][mode].get("diagnostics") or {}).get("retrieval_count") or 0) <= 0
+        ]
+        if missing_modes:
+            zero_retrieval_queries.append(
+                {
+                    "query": item.get("query"),
+                    "missing_modes": missing_modes,
+                }
+            )
+    min_observed = min((row["coverage"] for row in mode_coverage.values()), default=0.0)
+    ok = min_observed >= float(min_coverage)
+    return {
+        "ok": ok or bool(allow_low_coverage),
+        "coverage_ok": ok,
+        "allowed_low_coverage": bool(allow_low_coverage),
+        "min_required_coverage": float(min_coverage),
+        "min_observed_coverage": round(min_observed, 6),
+        "mode_coverage": mode_coverage,
+        "zero_retrieval_query_count": len(zero_retrieval_queries),
+        "zero_retrieval_queries": zero_retrieval_queries[:20],
+    }
+
+
 def markdown_report(payload: dict[str, Any]) -> str:
     lines = [
         "# Canonical + OGCF Production Shadow Eval",
@@ -374,6 +435,8 @@ def markdown_report(payload: dict[str, Any]) -> str:
         f"OGCF vector count: {payload['ogcf_meta'].get('vector_count', 0)}",
         f"OGCF bridge overload score: {payload['ogcf_meta'].get('bridge_overload_score', 0.0)}",
         f"OGCF max interaction z: {payload['ogcf_meta'].get('max_interaction_z', 0.0)}",
+        f"Retrieval coverage ok: {payload['retrieval_coverage']['coverage_ok']}",
+        f"Minimum observed retrieval coverage: {payload['retrieval_coverage']['min_observed_coverage']}",
         "",
         "## Policy Distribution",
         "",
@@ -392,6 +455,12 @@ def markdown_report(payload: dict[str, Any]) -> str:
             "",
             "```json",
             json.dumps(payload["summary"]["policy_deltas"], indent=2),
+            "```",
+            "",
+            "## Retrieval Coverage",
+            "",
+            "```json",
+            json.dumps(payload["retrieval_coverage"], indent=2),
             "```",
             "",
             "## Query Details",
@@ -501,8 +570,14 @@ def main() -> int:
         base_pipeline.close()
         canonical_pipeline.close()
 
+    retrieval_coverage = retrieval_coverage_report(
+        results,
+        min_coverage=max(0.0, min(1.0, float(args.min_retrieval_coverage))),
+        allow_low_coverage=bool(args.allow_low_retrieval_coverage),
+    )
+
     payload = {
-        "ok": True,
+        "ok": bool(retrieval_coverage["ok"]),
         "db_path": str(db_path),
         "top_k": int(args.top_k),
         "config_path": str(args.config_path.resolve()) if args.config_path else None,
@@ -511,6 +586,7 @@ def main() -> int:
         "namespace": args.namespace,
         "include_global": bool(args.include_global),
         "ogcf_meta": ogcf_meta or {},
+        "retrieval_coverage": retrieval_coverage,
         "summary": summarize(results),
         "results": results,
     }
@@ -518,8 +594,19 @@ def main() -> int:
     args.out_md.parent.mkdir(parents=True, exist_ok=True)
     args.out_json.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     args.out_md.write_text(markdown_report(payload), encoding="utf-8")
-    print(json.dumps({"ok": True, "json": str(args.out_json), "markdown": str(args.out_md), "summary": payload["summary"]}, indent=2))
-    return 0
+    print(
+        json.dumps(
+            {
+                "ok": payload["ok"],
+                "json": str(args.out_json),
+                "markdown": str(args.out_md),
+                "retrieval_coverage": retrieval_coverage,
+                "summary": payload["summary"],
+            },
+            indent=2,
+        )
+    )
+    return 0 if payload["ok"] else 1
 
 
 if __name__ == "__main__":
