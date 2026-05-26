@@ -154,6 +154,15 @@ OGCF query/evidence intent gate:
 - `core/adaptive_behavior_shadow.py` now exposes the runtime report-only adaptive behavior shadow surface used by `POST /ask`. It is disabled by default and can be requested per call with `include_adaptive_behavior_shadow=true`; it can be logged with `log_adaptive_behavior_shadow=true`. It emits `adaptive_behavior_shadow/v1` decisions for semantic behavior families without changing answers, selector policy, memory rows, or config. `eval/adaptive_behavior_shadow_runtime_regression.py` protects the request/logging contract and confirms answer, evidence, and selector decisions remain unchanged.
 - `eval/selector_architecture_gate.py` now includes the Gemma shadow regression, retrieval-coverage guard regression, and runtime adaptive behavior shadow regression alongside the retrieval-signal and evidence-state gates. Current unified gate result: pass, with `retrieval_signal_gate_ok`, `evidence_state_gate_ok`, `shadow_coverage_guard_ok`, `gemma_shadow_regression_ok`, and `adaptive_behavior_shadow_runtime_ok` all true.
 - On the raw-Gemma fixture, the intent gate kept ordinary fact queries protected while letting bridge synthesis and OGCF geometry questions escalate; combined-vs-canonical now has one targeted extra delta.
+- `eval/adaptive_behavior_shadow_real_log_calibration.py` and `eval/adaptive_behavior_shadow_real_log_rerun.py` now provide a local real-log-style calibration loop for the runtime adaptive behavior shadow. The rerun copies `memory_experiment_180_best.db`, runs 34 ask/feedback cycles through `MemoryApi`, logs linked answer/memory feedback, and compares shadow advisories to behavior-family labels.
+- Runtime adaptive behavior shadow now covers five families: `supported_evidence`, `missing_support`, `stale_conflict`, `wrong_scope`, and `ogcf_bridge_warning`. The latest local rerun reached overall match rate `0.913793`, with family match rates: `supported_evidence=0.852941`, `missing_support=1.0`, `stale_conflict=0.852941`, `wrong_scope=1.0`, and `ogcf_bridge_warning=1.0`. The shadow remains report-only and the unified architecture gate still passes.
+- The adaptive behavior roadmap has shifted from one-off runtime tuning toward candidate artifacts. `eval/adaptive_behavior_candidate_profile.py` now writes `adaptive_behavior_candidate_profile/v1`, `eval/adaptive_behavior_candidate_profile_guard.py` guards it, and `eval/adaptive_behavior_candidate_profile_guard_regression.py` protects the contract. Current profile guard readiness is `analysis_ready`, with a stale-conflict candidate and a supported-evidence low-support hold item.
+- `eval/adaptive_behavior_profile_memory_bank.py` now aggregates adaptive behavior candidate profiles across independent logs/runs. It writes `adaptive_behavior_profile_memory_bank/v1`, keeps single-run proposals in `hold`, and only marks clusters `recurrence_ready` when a proposal repeats across enough independent profile sources. `eval/adaptive_behavior_profile_memory_bank_guard.py` and `eval/adaptive_behavior_profile_memory_bank_guard_regression.py` protect the report-only contract. Current local single-profile bank has two hold clusters, zero ready clusters, guard readiness `analysis_ready`, and no mutation fields.
+- A second independent profile was produced by replaying the earlier Hermes adaptive-shadow outcome log through current runtime logic. The multisource adaptive behavior profile bank now has two profiles, two clusters, and readiness counts `{"hold": 1, "recurrence_ready": 1}`. The `stale_conflict_explicit_signal_gate` cluster is recurrence-ready across local and Hermes-derived profiles; `supported_evidence_low_support_review` remains hold.
+- `eval/adaptive_behavior_stale_conflict_candidate_promotion.py` now provides the targeted promotion-style guard for the recurrence-ready stale-conflict candidate. It passes 6/6 cases: incidental stale context stays uncertain, explicit old/previous queries trigger stale advisories, current/corrected queries suppress stale over-fire, explicit conflict diagnostics still trigger, and resolver disclosure action alone does not trigger without explicit support. The unified architecture gate now includes `adaptive_behavior_stale_conflict_candidate_ok`.
+- The stale-conflict shadow controller is now a Level 1 configurable control surface. `adaptive_behavior.shadow.stale_conflict_requires_explicit_signal`, `stale_conflict_positive_probability`, and `stale_conflict_neutral_probability` control the behavior that was previously fixed in code. `eval/adaptive_behavior_stale_conflict_config_regression.py` passes 4/4 cases and proves default suppression, opt-in incidental stale triggering, and probability overrides work without mutating runtime state. The unified architecture gate now includes `adaptive_behavior_stale_conflict_config_ok`.
+- The missing-support shadow controller is now a Level 1 configurable control surface. `adaptive_behavior.shadow.missing_support_no_evidence_refusal_probability`, `missing_support_selected_sensitive_probability`, `missing_support_selected_evidence_probability`, and `missing_support_no_evidence_probability` replace fixed probabilities in runtime shadow code. `eval/adaptive_behavior_missing_support_config_regression.py` passes 5/5 cases and proves no-evidence refusal, sensitive lookup, selected-evidence neutrality, and no-evidence non-refusal probabilities are honored from config. The unified architecture gate now includes `adaptive_behavior_missing_support_config_ok`.
+- The wrong-scope shadow controller is now a Level 1 configurable control surface. `adaptive_behavior.shadow.wrong_scope_deflection_probability`, `wrong_scope_no_evidence_github_probability`, `wrong_scope_no_evidence_probability`, `wrong_scope_selected_evidence_probability`, `wrong_scope_route_confidence`, and `wrong_scope_low_route_confidence` replace fixed wrong-scope branch values. `eval/adaptive_behavior_wrong_scope_config_regression.py` passes 6/6 cases and proves scope-deflection, no-evidence approval, generic no-evidence scope, selected-evidence scope, and low-route-confidence branches are config-controlled. The unified architecture gate now includes `adaptive_behavior_wrong_scope_config_ok`.
 
 ## Technological Value
 
@@ -223,6 +232,62 @@ This makes the architecture relevant for local agents, personal memory systems, 
    - attach answer-level and memory-level feedback to the same ask operation ids;
    - build a calibration/replay artifact comparing advisories to real feedback;
    - keep runtime promotion blocked until real-log calibration beats symbolic fallback and passes the unified architecture gate.
+
+10. Turn adaptive behavior calibration into a candidate-profile workflow:
+   - use local and Hermes linked ask/feedback logs to build calibration reports;
+   - emit report-only `adaptive_behavior_candidate_profile/v1` artifacts with proposed profile changes;
+   - guard those artifacts before touching `config.yaml` or runtime behavior;
+   - use the current symbolic runtime shadow as the transparent fallback;
+   - compare later candidate profiles against the learned semantic behavior scorer on held-out logs.
+
+11. Build a multi-log adaptive behavior memory bank:
+   - aggregate candidate profiles from independent local and Hermes runs;
+   - require recurrence across logs before moving a candidate from `hold` to promotion testing;
+   - keep weak low-support supported-evidence cases in `hold` until real logs prove they generalize;
+   - use the unified architecture gate, including `adaptive_behavior_candidate_profile_guard_ok`, before any upload or promotion.
+
+12. Feed the adaptive behavior memory bank with independent profiles:
+   - compare profile clusters across runs;
+   - only consider config-level promotion when a cluster becomes `recurrence_ready`;
+   - keep the symbolic runtime shadow as fallback and compare against the semantic learned scorer before runtime action.
+
+13. Build a targeted promotion test for the recurrence-ready stale-conflict candidate:
+   - completed with `eval/adaptive_behavior_stale_conflict_candidate_promotion.py`;
+   - keep this as a guard before any config-level promotion.
+
+14. Decide promotion shape for the guarded stale-conflict candidate:
+   - completed first extraction into explicit report-only config knobs;
+   - keep default conservative behavior active while collecting more real logs;
+   - compare future learned/neural-symbolic stale-conflict proposals against this config surface before any runtime promotion;
+   - optionally require three-source recurrence before changing default config values.
+
+15. Continue the hardcoded-to-configurable adaptive-shadow migration:
+   - completed missing-support probability extraction into explicit report-only config knobs;
+   - completed wrong-scope probability and route-confidence extraction into explicit report-only config knobs;
+   - keep `supported_evidence_low_support_review` in hold until additional real logs clarify low-support positives.
+
+16. Extract a shared evidence-context helper layer:
+   - completed first extraction in `core/evidence_context.py`;
+   - added `EvidenceContextSummary` as the first reusable compact evidence object for report-only controllers;
+   - migrated report-only shadow modules before touching resolver or pipeline behavior;
+   - centralized selected-evidence filtering, normalized text handling, row signal extraction, ordinary lookup detection, resolver action extraction, and stale/current conflict checks;
+   - `core/adaptive_behavior_shadow.py` and `core/answer_behavior_shadow.py` now build the same summary object before emitting advisories/actions;
+   - `core/selector_runtime.py` now uses the same summary object for retrieval-row normalization before deriving selector features;
+   - `EvidenceRowState` and `retrieval_row_state()` now centralize stale/current/standalone/topical-anchor/current-correction row interpretation for selector-side feature extraction;
+   - `core/resolver.py` now uses `retrieval_row_state()` for repeated selector/evidence signal reads in positive-signal detection, query relevance, evidence preference scoring, and confidence estimation;
+   - `EvidenceContextFeatures` now provides the first compact derived-feature object over `EvidenceContextSummary`;
+   - `core/adaptive_behavior_shadow.py` now consumes `EvidenceContextFeatures` for retrieval/selected/stale counts, match signals, conflict pressure, memory risk, scope-deflection pressure, and OGCF bridge pressure;
+   - adaptive behavior shadow diagnostics now export `evidence_context_features` into live responses and logged ask events, giving future learned controllers a stable calibration feature vector;
+   - `eval/adaptive_behavior_feature_scorer_eval.py` now trains a report-only tiny local softmax scorer on exported `evidence_context_features`; first local result is not promotion-ready (`test_learned_match_rate=0.565217` vs symbolic `0.956522`);
+   - `eval/adaptive_behavior_feature_scorer_regression.py` guards this as a research/dataset path and blocks runtime promotion from the small local log;
+   - `eval/adaptive_behavior_feature_scorer_hybrid_eval.py` now tests family-specific scorers plus a residual override gate; current result preserves the symbolic baseline (`hybrid=0.956522`, `symbolic=0.956522`) but does not improve it, so promotion remains blocked;
+   - `eval/adaptive_behavior_feature_scorer_hybrid_regression.py` guards the hybrid path and the unified gate now requires it;
+   - `eval/adaptive_behavior_feature_challenge_log.py` now generates local hard-case feature-export logs with 50 challenge cases and 70 symbolic-wrong decisions;
+   - on the combined local rerun + generated challenge log, the hybrid residual scorer beats symbolic (`hybrid=0.915254`, `symbolic=0.745763`, delta `+0.169491`), proving the feature path can learn useful corrections when enough symbolic-error cases exist;
+   - `eval/adaptive_behavior_feature_challenge_regression.py` guards this positive result as report-only and still blocks promotion because the hard cases are generated rather than independent real logs;
+   - protected by `eval/evidence_context_regression.py`, `eval/evidence_context_selector_runtime_regression.py`, and the unified architecture gate;
+   - the unified gate now requires `evidence_context_regression_ok`, `evidence_context_selector_runtime_ok`, `adaptive_behavior_feature_scorer_ok`, `adaptive_behavior_feature_scorer_hybrid_ok`, and `adaptive_behavior_feature_challenge_ok`;
+   - use this as the stable input contract for later neural-symbolic learned controllers.
 
 ## Current Publication State
 

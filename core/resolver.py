@@ -11,6 +11,7 @@ from core.evidence_states import (
     evidence_is_too_weak as _evidence_is_too_weak,
     requires_sensitive_evidence as _requires_sensitive_evidence,
 )
+from core.evidence_context import float_value, retrieval_row_state
 
 
 def resolve_answer(
@@ -235,10 +236,11 @@ def order_evidence(query: str, items: list[dict[str, Any]]) -> list[dict[str, An
 
 
 def has_positive_selector_signal(item: dict[str, Any]) -> bool:
+    state = retrieval_row_state(item)
     return (
-        float(item.get("answer_type_score") or 0.0) > 0.0
-        or float(item.get("claim_scope_score") or 0.0) >= 0.50
-        or float(item.get("text_match_score") or 0.0) >= 0.50
+        state.answer_type_score > 0.0
+        or state.claim_scope_score >= 0.50
+        or state.text_match_score >= 0.50
     )
 
 
@@ -355,8 +357,9 @@ def is_relevant_to_query(query: str, item: dict[str, Any]) -> bool:
         return False
     if domain_terms and query_terms & domain_terms:
         return True
-    text_match = float(item.get("text_match_score") or 0.0)
-    intent_match = float(item.get("intent_match_score") or 0.0)
+    state = retrieval_row_state(item)
+    text_match = state.text_match_score
+    intent_match = state.intent_match_score
     if intent_match <= -0.40 and text_match < 0.67:
         return False
     if text_match >= 0.34:
@@ -364,7 +367,7 @@ def is_relevant_to_query(query: str, item: dict[str, Any]) -> bool:
     if intent_match >= 0.65 and normalized_terms(query) & text_terms:
         return True
     overlap = query_terms & text_terms
-    if float(item.get("answer_type_score") or 0.0) > 0.0 and len(overlap) >= 2:
+    if state.answer_type_score > 0.0 and len(overlap) >= 2:
         return True
     if len(overlap) >= max(1, len(query_terms) // 2):
         return True
@@ -384,11 +387,12 @@ def is_relevant_to_query(query: str, item: dict[str, Any]) -> bool:
 def evidence_preference_score(query: str, item: dict[str, Any]) -> float:
     text = str(item.get("text") or "")
     clean_text = clean_answer_text(text)
-    score = float(item.get("score") or 0.0)
-    score += 0.20 * float(item.get("text_match_score") or 0.0)
-    score += 0.24 * float(item.get("claim_scope_score") or 0.0)
-    score += 0.28 * float(item.get("answer_type_score") or 0.0)
-    score += 0.12 * float(item.get("intent_match_score") or 0.0)
+    state = retrieval_row_state(item)
+    score = float_value(item.get("score"), 0.0)
+    score += 0.20 * state.text_match_score
+    score += 0.24 * state.claim_scope_score
+    score += 0.28 * state.answer_type_score
+    score += 0.12 * state.intent_match_score
     score += 0.05 * len(normalized_terms(query) & normalized_terms(clean_text))
     rank = int(item.get("rank") or 0)
     if rank > 0 and has_positive_selector_signal(item):
@@ -399,10 +403,9 @@ def evidence_preference_score(query: str, item: dict[str, Any]) -> float:
         score -= 0.35
     if is_negative_permission_evidence(item):
         score -= 0.22
-    authority_state = str(item.get("authority_state") or "").strip().lower()
-    if authority_state == "current":
-        score += 0.35 * max(0.30, float(item.get("correction_relevance_score") or 1.0))
-    elif authority_state == "superseded" or item.get("superseded_by_memory_ids"):
+    if state.authority_state == "current":
+        score += 0.35 * max(0.30, state.correction_relevance_score)
+    elif state.authority_state == "superseded" or item.get("superseded_by_memory_ids"):
         score -= 0.55
     lower = text.lower()
     if "does not change" in lower or "doesn't change" in lower:
@@ -436,12 +439,13 @@ def estimate_confidence(evidence: list[dict[str, Any]], conflict: bool) -> float
     if not evidence:
         return 0.0
     top = evidence[0]
-    score = float(top.get("score") or 0.0)
-    feedback = max(0.0, float(top.get("feedback_score") or 0.0))
-    supersession = max(0.0, float(top.get("supersession_score") or 0.0))
-    relation = max(0.0, float(top.get("relation_supersession_score") or 0.0))
-    summary = max(0.0, float(top.get("summary_relation_score") or 0.0))
-    text_match = max(0.0, float(top.get("text_match_score") or 0.0))
+    state = retrieval_row_state(top)
+    score = float_value(top.get("score"), 0.0)
+    feedback = max(0.0, state.feedback_score)
+    supersession = max(0.0, state.supersession_score)
+    relation = max(0.0, state.relation_supersession_score)
+    summary = max(0.0, state.summary_relation_score)
+    text_match = max(0.0, state.text_match_score)
     usage_count = max(0, int(top.get("usage_count") or 0))
     evidence_count = len(evidence)
     usage_bonus = min(0.08, 0.025 * usage_count)

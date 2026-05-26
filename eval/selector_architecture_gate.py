@@ -104,6 +104,39 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
         "adaptive_behavior_shadow_runtime_ok": bool(
             (step_json(steps, "adaptive_behavior_shadow_runtime_regression") or {}).get("ok")
         ),
+        "adaptive_behavior_candidate_profile_guard_ok": bool(
+            (step_json(steps, "adaptive_behavior_candidate_profile_guard_regression") or {}).get("ok")
+        ),
+        "adaptive_behavior_profile_memory_bank_guard_ok": bool(
+            (step_json(steps, "adaptive_behavior_profile_memory_bank_guard_regression") or {}).get("ok")
+        ),
+        "adaptive_behavior_stale_conflict_candidate_ok": bool(
+            (step_json(steps, "adaptive_behavior_stale_conflict_candidate_promotion") or {}).get("ok")
+        ),
+        "adaptive_behavior_stale_conflict_config_ok": bool(
+            (step_json(steps, "adaptive_behavior_stale_conflict_config_regression") or {}).get("ok")
+        ),
+        "adaptive_behavior_missing_support_config_ok": bool(
+            (step_json(steps, "adaptive_behavior_missing_support_config_regression") or {}).get("ok")
+        ),
+        "adaptive_behavior_wrong_scope_config_ok": bool(
+            (step_json(steps, "adaptive_behavior_wrong_scope_config_regression") or {}).get("ok")
+        ),
+        "evidence_context_regression_ok": bool(
+            (step_json(steps, "evidence_context_regression") or {}).get("ok")
+        ),
+        "evidence_context_selector_runtime_ok": bool(
+            (step_json(steps, "evidence_context_selector_runtime_regression") or {}).get("ok")
+        ),
+        "adaptive_behavior_feature_scorer_ok": bool(
+            (step_json(steps, "adaptive_behavior_feature_scorer_regression") or {}).get("ok")
+        ),
+        "adaptive_behavior_feature_scorer_hybrid_ok": bool(
+            (step_json(steps, "adaptive_behavior_feature_scorer_hybrid_regression") or {}).get("ok")
+        ),
+        "adaptive_behavior_feature_challenge_ok": bool(
+            (step_json(steps, "adaptive_behavior_feature_challenge_regression") or {}).get("ok")
+        ),
     }
     return {
         "ok": all(step["ok"] for step in steps) and all(required_summary.values()),
@@ -141,7 +174,22 @@ def write_markdown(report: dict[str, Any], out_md: Path) -> None:
     lines.extend(["```", "", "## Evidence State Gate", "", "```json"])
     lines.append(json.dumps(report["evidence_gate_summary"], indent=2))
     lines.extend(["```", "", "## Shadow Guard Regressions", "", "| regression | pass |", "| --- | --- |"])
-    for key in ("shadow_coverage_guard_ok", "gemma_shadow_regression_ok", "adaptive_behavior_shadow_runtime_ok"):
+    for key in (
+        "shadow_coverage_guard_ok",
+        "gemma_shadow_regression_ok",
+        "adaptive_behavior_shadow_runtime_ok",
+        "adaptive_behavior_candidate_profile_guard_ok",
+        "adaptive_behavior_profile_memory_bank_guard_ok",
+        "adaptive_behavior_stale_conflict_candidate_ok",
+        "adaptive_behavior_stale_conflict_config_ok",
+        "adaptive_behavior_missing_support_config_ok",
+        "adaptive_behavior_wrong_scope_config_ok",
+        "evidence_context_regression_ok",
+        "evidence_context_selector_runtime_ok",
+        "adaptive_behavior_feature_scorer_ok",
+        "adaptive_behavior_feature_scorer_hybrid_ok",
+        "adaptive_behavior_feature_challenge_ok",
+    ):
         lines.append(f"| `{key}` | `{report['required_summary'].get(key)}` |")
     lines.extend(
         [
@@ -218,6 +266,7 @@ def main() -> int:
                 str(ROOT / "core" / "evidence_states.py"),
                 str(ROOT / "core" / "adaptive_behavior.py"),
                 str(ROOT / "core" / "adaptive_behavior_shadow.py"),
+                str(ROOT / "core" / "evidence_context.py"),
                 str(ROOT / "core" / "controller_context.py"),
                 str(ROOT / "core" / "pipeline.py"),
                 str(ROOT / "core" / "resolver.py"),
@@ -229,6 +278,26 @@ def main() -> int:
                 str(ROOT / "eval" / "adaptive_context_gemma_shadow_eval.py"),
                 str(ROOT / "eval" / "adaptive_context_gemma_shadow_regression.py"),
                 str(ROOT / "eval" / "adaptive_behavior_shadow_runtime_regression.py"),
+                str(ROOT / "eval" / "adaptive_behavior_shadow_real_log_calibration.py"),
+                str(ROOT / "eval" / "adaptive_behavior_shadow_real_log_rerun.py"),
+                str(ROOT / "eval" / "adaptive_behavior_candidate_profile.py"),
+                str(ROOT / "eval" / "adaptive_behavior_candidate_profile_guard.py"),
+                str(ROOT / "eval" / "adaptive_behavior_candidate_profile_guard_regression.py"),
+                str(ROOT / "eval" / "adaptive_behavior_profile_memory_bank.py"),
+                str(ROOT / "eval" / "adaptive_behavior_profile_memory_bank_guard.py"),
+                str(ROOT / "eval" / "adaptive_behavior_profile_memory_bank_guard_regression.py"),
+                str(ROOT / "eval" / "adaptive_behavior_stale_conflict_candidate_promotion.py"),
+                str(ROOT / "eval" / "adaptive_behavior_stale_conflict_config_regression.py"),
+                str(ROOT / "eval" / "adaptive_behavior_missing_support_config_regression.py"),
+                str(ROOT / "eval" / "adaptive_behavior_wrong_scope_config_regression.py"),
+                str(ROOT / "eval" / "adaptive_behavior_feature_scorer_eval.py"),
+                str(ROOT / "eval" / "adaptive_behavior_feature_scorer_regression.py"),
+                str(ROOT / "eval" / "adaptive_behavior_feature_scorer_hybrid_eval.py"),
+                str(ROOT / "eval" / "adaptive_behavior_feature_scorer_hybrid_regression.py"),
+                str(ROOT / "eval" / "adaptive_behavior_feature_challenge_log.py"),
+                str(ROOT / "eval" / "adaptive_behavior_feature_challenge_regression.py"),
+                str(ROOT / "eval" / "evidence_context_regression.py"),
+                str(ROOT / "eval" / "evidence_context_selector_runtime_regression.py"),
                 str(ROOT / "eval" / "selector_architecture_gate.py"),
             ],
         ),
@@ -277,6 +346,50 @@ def main() -> int:
         run_step(
             "adaptive_behavior_shadow_runtime_regression",
             [python, str(ROOT / "eval" / "adaptive_behavior_shadow_runtime_regression.py")],
+        ),
+        run_step(
+            "adaptive_behavior_candidate_profile_guard_regression",
+            [python, str(ROOT / "eval" / "adaptive_behavior_candidate_profile_guard_regression.py")],
+        ),
+        run_step(
+            "adaptive_behavior_profile_memory_bank_guard_regression",
+            [python, str(ROOT / "eval" / "adaptive_behavior_profile_memory_bank_guard_regression.py")],
+        ),
+        run_step(
+            "adaptive_behavior_stale_conflict_candidate_promotion",
+            [python, str(ROOT / "eval" / "adaptive_behavior_stale_conflict_candidate_promotion.py")],
+        ),
+        run_step(
+            "adaptive_behavior_stale_conflict_config_regression",
+            [python, str(ROOT / "eval" / "adaptive_behavior_stale_conflict_config_regression.py")],
+        ),
+        run_step(
+            "adaptive_behavior_missing_support_config_regression",
+            [python, str(ROOT / "eval" / "adaptive_behavior_missing_support_config_regression.py")],
+        ),
+        run_step(
+            "adaptive_behavior_wrong_scope_config_regression",
+            [python, str(ROOT / "eval" / "adaptive_behavior_wrong_scope_config_regression.py")],
+        ),
+        run_step(
+            "evidence_context_regression",
+            [python, str(ROOT / "eval" / "evidence_context_regression.py")],
+        ),
+        run_step(
+            "evidence_context_selector_runtime_regression",
+            [python, str(ROOT / "eval" / "evidence_context_selector_runtime_regression.py")],
+        ),
+        run_step(
+            "adaptive_behavior_feature_scorer_regression",
+            [python, str(ROOT / "eval" / "adaptive_behavior_feature_scorer_regression.py")],
+        ),
+        run_step(
+            "adaptive_behavior_feature_scorer_hybrid_regression",
+            [python, str(ROOT / "eval" / "adaptive_behavior_feature_scorer_hybrid_regression.py")],
+        ),
+        run_step(
+            "adaptive_behavior_feature_challenge_regression",
+            [python, str(ROOT / "eval" / "adaptive_behavior_feature_challenge_regression.py")],
         ),
     ]
 

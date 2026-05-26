@@ -63,6 +63,8 @@ def main() -> int:
     base_shadow = base.get("adaptive_behavior_shadow")
     shadow = shadowed.get("adaptive_behavior_shadow") or {}
     logged_shadow = ((ask_events[-1].get("payload") or {}).get("adaptive_behavior_shadow") or {}) if ask_events else {}
+    shadow_features = ((shadow.get("diagnostics") or {}).get("evidence_context_features") or {})
+    logged_features = ((logged_shadow.get("diagnostics") or {}).get("evidence_context_features") or {})
     checks = {
         "baseline_does_not_include_shadow": base_shadow is None,
         "requested_shadow_in_response": shadow.get("schema") == "adaptive_behavior_shadow/v1",
@@ -84,6 +86,10 @@ def main() -> int:
         == [row.get("memory_id") for row in shadowed.get("evidence") or []],
         "outcome_log_has_two_ask_events": len(ask_events) == 2,
         "memory_id_present": bool(taught.get("memory", {}).get("memory_id")),
+        "evidence_context_features_in_response": shadow_features.get("selected_count") == 1
+        and shadow_features.get("retrieval_count", 0) >= 1
+        and "memory_bad_rate" in shadow_features,
+        "evidence_context_features_logged": logged_features == shadow_features,
     }
     result = {
         "schema": "adaptive_behavior_shadow_runtime_regression/v1",
@@ -92,6 +98,7 @@ def main() -> int:
         "shadow_summary": {
             "advisory_counts": shadow.get("advisory_counts"),
             "diagnostics": shadow.get("diagnostics"),
+            "evidence_context_features": shadow_features,
             "decision_count": len(shadow.get("decisions") or []),
         },
         "log_path": str(log_path),

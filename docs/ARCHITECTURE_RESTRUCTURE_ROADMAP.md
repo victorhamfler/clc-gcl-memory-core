@@ -1696,3 +1696,587 @@ The unified selector architecture gate now includes this runtime regression:
 ```
 
 The next development step should collect real agent ask/feedback logs with `include_adaptive_behavior_shadow=true` and `log_adaptive_behavior_shadow=true`, then build a calibration/replay artifact that compares shadow advisories against real answer-level and memory-level feedback. Promotion remains out of scope until that real-log calibration exists.
+
+## Adaptive Behavior Shadow Calibration Checkpoint
+
+After Hermes produced a first real-log adaptive-shadow report, the selector session added a local in-process rerun and calibration path so the same class of test can be repeated without requiring Hermes.
+
+New report-only evals:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_behavior_shadow_real_log_rerun.py
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_behavior_shadow_real_log_calibration.py --log <outcome-log.jsonl>
+```
+
+The rerun copies `memory_experiment_180_best.db`, runs 34 ask/feedback cycles through the current `MemoryApi`, logs `adaptive_behavior_shadow/v1`, attaches linked answer and memory feedback, then compares advisories to expected family-specific labels.
+
+The runtime shadow surface now emits five first-class behavior families:
+
+- `supported_evidence`;
+- `missing_support`;
+- `stale_conflict`;
+- `wrong_scope`;
+- `ogcf_bridge_warning`.
+
+The latest local calibration result after the missing-support and stale-overfire cleanup:
+
+| Family | Match rate | Notes |
+|---|---:|---|
+| `supported_evidence` | `0.852941` | Improved, but low-retrieval-score positives still need more real logs before relaxing caps. |
+| `missing_support` | `1.0` | Sensitive/private lookup handling now correctly favors missing-support behavior. |
+| `stale_conflict` | `0.852941` | Improved by requiring explicit stale signal or stale-shaped query instead of incidental stale context alone. |
+| `wrong_scope` | `1.0` | First-class scope behavior is now visible and clean on the local rerun. |
+| `ogcf_bridge_warning` | `1.0` | Useful/noisy bridge-warning separation is clean on the local rerun. |
+
+Overall local match rate: `0.913793`.
+
+Safety state:
+
+- runtime shadow remains disabled by default;
+- per-call request/logging is explicit;
+- no answer text, selector policy, evidence rows, memory rows, learned artifacts, or runtime config are mutated by the shadow surface;
+- the unified selector architecture gate still passes with `adaptive_behavior_shadow_runtime_ok: true`.
+
+This checkpoint changes the roadmap priority. The next work should not be an open-ended sequence of one-off edits to `core/adaptive_behavior_shadow.py`. The correct roadmap path is:
+
+```text
+runtime logs
+-> calibration report
+-> adaptive behavior candidate profile
+-> guard/regression
+-> optional config/controller promotion later
+```
+
+The candidate-profile workflow now exists:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_behavior_candidate_profile.py
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_behavior_candidate_profile_guard.py
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_behavior_candidate_profile_guard_regression.py
+```
+
+It writes a report-only `adaptive_behavior_candidate_profile/v1` artifact. Current local profile:
+
+- proposal `stale_conflict_explicit_signal_gate`: `candidate`;
+- proposal `supported_evidence_low_support_review`: `hold`;
+- readiness from guard: `analysis_ready`;
+- no runtime/config mutation fields.
+
+The unified selector architecture gate now includes:
+
+```json
+{
+  "adaptive_behavior_candidate_profile_guard_ok": true
+}
+```
+
+Recommended next development:
+
+1. Keep the current symbolic runtime shadow as the transparent fallback.
+2. Collect more real/Hermes linked logs before promoting the `supported_evidence_low_support_review` hold item.
+3. Later, compare the symbolic runtime shadow against the learned semantic behavior scorer on the same linked logs, then blend only if the learned path beats the fallback under holdout.
+
+The architectural lesson is that the adaptive behavior shadow is valuable, but it should now evolve through candidate artifacts and multi-log calibration, not through unlimited manual growth of another heuristic module.
+
+## Adaptive Behavior Profile Memory Bank
+
+The multi-log profile memory bank now exists:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_behavior_profile_memory_bank.py --profile <profile-a.json> --profile <profile-b.json>
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_behavior_profile_memory_bank_guard.py --bank <bank.json>
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_behavior_profile_memory_bank_guard_regression.py
+```
+
+It writes:
+
+```text
+schema: adaptive_behavior_profile_memory_bank/v1
+```
+
+The memory bank groups repeated `adaptive_behavior_candidate_profile/v1` proposals by behavior family and proposal id. It keeps single-run proposals in `hold` and only marks a cluster `recurrence_ready` when the same candidate recurs across the configured number of independent profile sources.
+
+Current local single-profile result:
+
+- profiles: `1`;
+- proposal clusters: `2`;
+- readiness counts: `{"hold": 2}`;
+- ready clusters: `0`;
+- guard readiness: `analysis_ready`.
+
+This is the desired conservative behavior. The current local profile is useful evidence, but it is not enough for promotion because it comes from one rerun. The bank is now ready to accept future Hermes/local profiles and decide whether proposals recur naturally.
+
+Second-source replay result:
+
+- source A: local in-process rerun profile;
+- source B: Hermes adaptive-shadow outcome log replayed through current runtime logic;
+- multisource profiles: `2`;
+- proposal clusters: `2`;
+- readiness counts: `{"hold": 1, "recurrence_ready": 1}`.
+
+The recurring cluster is:
+
+```text
+stale_conflict:stale_conflict_explicit_signal_gate
+```
+
+It appeared as `candidate` in both independent profiles and is now `recurrence_ready` in the memory bank. The `supported_evidence_low_support_review` cluster appeared in both profiles too, but stayed `hold`, which is the desired behavior because the evidence says not to relax low-support caps yet.
+
+Multisource artifacts:
+
+```text
+..\experiments\adaptive_behavior_profile_memory_bank_multisource_results.json
+..\experiments\adaptive_behavior_profile_memory_bank_multisource_report.md
+..\experiments\adaptive_behavior_profile_memory_bank_multisource_guard_results.json
+..\experiments\adaptive_behavior_profile_memory_bank_multisource_guard_report.md
+```
+
+The unified selector architecture gate now includes:
+
+```json
+{
+  "adaptive_behavior_profile_memory_bank_guard_ok": true
+}
+```
+
+Next development after this checkpoint:
+
+1. Treat `stale_conflict_explicit_signal_gate` as the first recurrence-ready adaptive behavior candidate.
+2. Keep `supported_evidence_low_support_review` in `hold` until stronger real logs prove it should change.
+3. Only then consider any config-level candidate promotion.
+
+## Stale-Conflict Candidate Promotion Guard
+
+The targeted promotion guard for the recurrence-ready candidate now exists:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_behavior_stale_conflict_candidate_promotion.py
+```
+
+It writes:
+
+```text
+schema: adaptive_behavior_stale_conflict_candidate_promotion/v1
+```
+
+Candidate tested:
+
+```text
+stale_conflict_explicit_signal_gate
+```
+
+Current result:
+
+- cases: `6/6` passed;
+- incidental stale context remains `uncertain_keep_symbolic`;
+- explicit `old` / `previous` stale-shaped queries become `likely_helpful`;
+- current/corrected queries suppress stale over-fire;
+- explicit `stale_current_conflict` diagnostics still trigger;
+- resolver stale-disclosure action alone does not trigger without explicit query/diagnostic support.
+
+The unified selector architecture gate now includes:
+
+```json
+{
+  "adaptive_behavior_stale_conflict_candidate_ok": true
+}
+```
+
+This means the first recurrence-ready adaptive behavior candidate has a promotion-style guard, but it still does not automatically change runtime config. The next stage should decide whether this guarded candidate should remain as code-level behavior, become an explicit config profile, or wait for another real Hermes profile before promotion.
+
+## Stale-Conflict Config Control Surface
+
+The recurrence-ready stale-conflict candidate has now moved one step further along the hardcoded-to-adaptive roadmap. Its runtime shadow behavior is still report-only, but the core decision knobs are explicit config values instead of hidden constants:
+
+```yaml
+adaptive_behavior:
+  shadow:
+    stale_conflict_requires_explicit_signal: true
+    stale_conflict_positive_probability: 0.82
+    stale_conflict_neutral_probability: 0.50
+```
+
+Regression:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_behavior_stale_conflict_config_regression.py
+```
+
+Current result:
+
+- default config suppresses incidental stale context;
+- explicit old/previous stale queries still produce positive stale-conflict advisories;
+- a config override can intentionally allow incidental stale context;
+- positive and neutral probabilities are honored from config;
+- no runtime state, answer text, selector policy, memory row, or config is mutated.
+
+The unified architecture gate now also includes:
+
+```json
+{
+  "adaptive_behavior_stale_conflict_config_ok": true
+}
+```
+
+Architectural status:
+
+```text
+recurring candidate -> promotion-style guard -> configurable report-only control surface
+```
+
+This is still not a learned controller. It is the correct Level 1 foundation for one: future learned or neural-symbolic logic can propose these stale-conflict controller values from multi-run outcomes, while the symbolic config/regression/gate path remains the safety boundary.
+
+## Missing-Support Config Control Surface
+
+The next stable adaptive behavior family has also been moved into Level 1 config. `missing_support` had clean calibration on the local real-log rerun, so its fixed probability choices are now explicit shadow-controller config:
+
+```yaml
+adaptive_behavior:
+  shadow:
+    missing_support_no_evidence_refusal_probability: 0.80
+    missing_support_selected_sensitive_probability: 0.76
+    missing_support_selected_evidence_probability: 0.50
+    missing_support_no_evidence_probability: 0.58
+```
+
+Regression:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_behavior_missing_support_config_regression.py
+```
+
+Current result:
+
+- no-evidence refusal remains a positive missing-support advisory;
+- sensitive lookup pressure can be adjusted through config;
+- ordinary selected evidence remains neutral by default;
+- no-evidence non-refusal behavior can be tuned without source edits;
+- no runtime state, answer text, selector policy, memory row, or config is mutated.
+
+The unified architecture gate now also includes:
+
+```json
+{
+  "adaptive_behavior_missing_support_config_ok": true
+}
+```
+
+Architectural status:
+
+```text
+clean calibrated behavior family -> configurable report-only control surface -> future learned calibration target
+```
+
+The next similar extraction candidate is `wrong_scope`, because it is also clean on the current rerun. `supported_evidence` should remain in hold until more real logs resolve the low-support positive cases.
+
+## Wrong-Scope Config Control Surface
+
+The `wrong_scope` adaptive behavior family has now followed the same Level 1 path. Its fixed probabilities and route-confidence values are explicit shadow-controller config:
+
+```yaml
+adaptive_behavior:
+  shadow:
+    wrong_scope_deflection_probability: 0.78
+    wrong_scope_no_evidence_github_probability: 0.68
+    wrong_scope_no_evidence_probability: 0.54
+    wrong_scope_selected_evidence_probability: 0.46
+    wrong_scope_route_confidence: 0.56
+    wrong_scope_low_route_confidence: 0.42
+```
+
+Regression:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_behavior_wrong_scope_config_regression.py
+```
+
+Current result:
+
+- explicit scope deflection remains a positive wrong-scope advisory;
+- no-evidence GitHub approval queries can be tuned through config;
+- generic no-evidence scope-sensitive queries remain neutral by default;
+- selected-evidence scope-sensitive queries remain neutral by default;
+- weak selected-scope cases can use a separate low route-confidence branch;
+- no runtime state, answer text, selector policy, memory row, or config is mutated.
+
+The unified architecture gate now also includes:
+
+```json
+{
+  "adaptive_behavior_wrong_scope_config_ok": true
+}
+```
+
+Architectural status:
+
+```text
+clean calibrated behavior family -> configurable report-only control surface -> future learned calibration target
+```
+
+After this checkpoint, the adaptive behavior shadow has three Level 1 configurable behavior surfaces: `stale_conflict`, `missing_support`, and `wrong_scope`. The remaining high-value family, `supported_evidence`, should not be promoted or relaxed from the current local rerun because it still has low-support positive mismatches.
+
+## Full Codebase Analysis Checkpoint
+
+A full pass over the memory program and selector code shows that the architecture direction is sound, but the next stage should prioritize cleaner shared contracts before adding more behavior families or learned scorers.
+
+Best current parts:
+
+- `core/controller_context.py` is the right integration point for the adaptive memory brain. It gives selector decisions, OGCF diagnostics, retrieval context, resolver-shadow snapshots, and outcome logs one shared `adaptive_memory_context/v1` path.
+- `core/retrieval_signals.py` and `core/evidence_states.py` are successful examples of the roadmap pattern: extracted logic, config defaults, candidate artifacts, and promotion gates.
+- canonical memory support/provenance and duplicate-pressure handling provide user-visible value beyond vector similarity.
+- OGCF remains valuable as a geometry-level bridge/composition-risk signal, especially when combined with canonical memory instead of replacing it.
+- runtime adaptive behavior shadow, resolver shadow, and answer-feedback datasets now form the first practical route from real agent behavior to guarded controller improvement.
+
+Main implementation weaknesses:
+
+- `core/pipeline.py`, `core/resolver.py`, `storage/db.py`, and `core/selector_runtime.py` are still too large and carry mixed responsibilities.
+- retrieval/evidence rows are still loose dictionaries passed across resolver, selector, shadow controllers, and evals.
+- several modules duplicate small language/evidence helpers, such as selected-evidence filtering, normalized text checks, row signal extraction, ordinary fact lookup checks, and stale/current state tests.
+- adding more learned behavior on top of loose dict contracts would make the system harder to audit.
+
+The next structural goal is therefore:
+
+```text
+retrieval rows -> shared evidence context -> resolver / selector / shadows / outcome dataset
+```
+
+This should become a stable input layer for future neural-symbolic controllers. Learned models should train on this shared context, while symbolic gates still decide whether any learned output can affect runtime.
+
+## Evidence Context Extraction
+
+The next implementation step is a behavior-preserving extraction:
+
+```text
+core/evidence_context.py
+```
+
+This module should centralize small, reusable evidence helpers:
+
+- normalized text handling;
+- selected evidence filtering;
+- numeric row-signal extraction;
+- compact evidence counts;
+- resolver-shadow action extraction;
+- ordinary fact lookup detection;
+- authority/memory-state extraction;
+- stale-current conflict checks;
+- generic term matching.
+
+Initial migration target:
+
+- `core/adaptive_behavior_shadow.py`;
+- `core/answer_behavior_shadow.py`.
+
+Reason:
+
+These two shadow modules are report-only, share duplicated helpers, and are safer to migrate before touching `core/resolver.py` or `core/pipeline.py`. The migration should preserve behavior exactly and add a regression proving the shared helpers match prior expectations.
+
+After this extraction, the next larger refactor should be to split `MemoryPipeline.retrieve()` into candidate generation, candidate enrichment, and scoring modules. That should happen only after the shared evidence context is protected by tests and the unified architecture gate.
+
+Current implementation checkpoint:
+
+- `core/evidence_context.py` now centralizes the first shared evidence helpers;
+- `EvidenceContextSummary` now provides a reusable compact context object with normalized query/answer text, selected evidence, stale context, retrieval context, diagnostics, resolver actions, ordinary-lookup state, and stale-conflict state;
+- `core/adaptive_behavior_shadow.py` and `core/answer_behavior_shadow.py` consume those helpers;
+- `eval/evidence_context_regression.py` protects the helper contract;
+- `eval/selector_architecture_gate.py` now requires `evidence_context_regression_ok`.
+
+Validation:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\evidence_context_regression.py
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_behavior_shadow_runtime_regression.py
+..\.venv-torch\Scripts\python.exe .\eval\resolver_shadow_mode_regression.py
+..\.venv-torch\Scripts\python.exe .\eval\selector_architecture_gate.py
+```
+
+The extraction is intentionally small. It proves the right direction without changing answer selection, selector policy, runtime config, memory rows, or learned artifacts.
+
+Second implementation checkpoint:
+
+- `core/adaptive_behavior_shadow.py` now builds one `EvidenceContextSummary` and reads selected evidence, stale context, resolver actions, row maxima, normalized query/answer text, and ordinary lookup from it;
+- `core/answer_behavior_shadow.py` now builds the same summary and reads selected evidence, diagnostics, stale conflict, ordinary lookup, and stale-context counts from it;
+- the regression now checks both low-level helpers and summary-level behavior;
+- real-log adaptive shadow replay remains unchanged at `0.913793`;
+- the unified selector architecture gate still passes.
+
+This turns evidence context from a utility module into the first shared context object for report-only controllers. The next safe migration target is selector-side context feature extraction, but that should be done in smaller pieces because `selector_runtime.py` currently carries more policy-sensitive logic than the shadow modules.
+
+Third implementation checkpoint:
+
+- `core/selector_runtime.py` now uses `EvidenceContextSummary` for retrieval-row normalization before deriving selector features;
+- this is intentionally behavior-preserving: selector scoring, selector policy, answer selection, memory rows, config, and learned artifacts are unchanged;
+- `eval/evidence_context_selector_runtime_regression.py` protects the selector-side shared-context contract and confirms malformed retrieval rows are ignored while canonical support, stale/current counts, duplicate pressure, and nonzero feature signals are preserved;
+- `eval/selector_architecture_gate.py` now requires `evidence_context_selector_runtime_ok`.
+
+Validation:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\evidence_context_selector_runtime_regression.py
+..\.venv-torch\Scripts\python.exe .\eval\selector_retrieval_feature_eval.py
+..\.venv-torch\Scripts\python.exe .\eval\clc_policy_feature_signal_regression.py
+..\.venv-torch\Scripts\python.exe .\eval\selector_architecture_gate.py
+```
+
+The best next refactor remains gradual: move more selector/resolver row interpretation into the shared evidence-context layer only when each step has a focused regression. This is the right base for the future neural-symbolic controller because learned behavior can consume one compact context object while symbolic gates continue to protect runtime behavior.
+
+Fourth implementation checkpoint:
+
+- `core/evidence_context.py` now exposes `EvidenceRowState` and `retrieval_row_state()` as the shared interpretation of a retrieval/evidence row;
+- `core/selector_runtime.py` now uses that shared row-state classifier for stale/current/standalone/topical-anchor/current-correction detection while keeping all selector formulas unchanged;
+- `eval/evidence_context_regression.py` now protects row-state behavior for stale-by-supersession, current-by-authority, standalone/topical-anchor, score fallback, and claim-scope fallback;
+- selector retrieval feature eval, CLC policy feature signal regression, and the unified architecture gate still pass.
+
+This is a useful architecture step because row-state interpretation is the natural bridge between symbolic memory provenance and future learned/neural scoring. The next migration target should be resolver-side row-state reads in small pieces, especially places where `authority_state`, `claim_scope_score`, `answer_type_score`, and `text_match_score` are manually reinterpreted.
+
+Fifth implementation checkpoint:
+
+- `EvidenceRowState` now also carries answer-type, intent-match, correction-relevance, feedback, and summary-relation signals;
+- `core/resolver.py` now uses `retrieval_row_state()` for repeated selector/evidence signal reads in positive-signal detection, query relevance checks, evidence preference scoring, and confidence estimation;
+- resolver behavior remains intentionally unchanged: resolver preference and confidence still use the explicit `score` field where they historically did, while selector runtime continues to use score-or-cosine retrieval scoring;
+- `eval/evidence_context_regression.py` now protects the added row-state fields;
+- resolver-focused regressions and the unified architecture gate still pass.
+
+Validation:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\evidence_context_regression.py
+..\.venv-torch\Scripts\python.exe .\eval\resolver_shadow_mode_regression.py
+..\.venv-torch\Scripts\python.exe .\eval\evidence_states_module_smoke.py
+..\.venv-torch\Scripts\python.exe .\eval\policy_correction_deflection_regression.py
+..\.venv-torch\Scripts\python.exe .\eval\repo_publish_permission_ambiguity_regression.py
+..\.venv-torch\Scripts\python.exe .\eval\multi_intent_answer_composition_regression.py
+..\.venv-torch\Scripts\python.exe .\eval\day1_answer_source_regression.py
+..\.venv-torch\Scripts\python.exe .\eval\selector_architecture_gate.py
+```
+
+This gives the future adaptive memory brain a more stable shared input layer across selector and resolver behavior. The next best structural target is to add a compact derived-feature object on top of `EvidenceContextSummary` instead of continuing to pass many loose diagnostic fields by hand.
+
+Sixth implementation checkpoint:
+
+- `core/evidence_context.py` now exposes `EvidenceContextFeatures`, the first compact derived-feature object on top of `EvidenceContextSummary`;
+- the feature object carries retrieval/selected/stale counts, max retrieval and selected match signals, stale-current conflict, contradiction pressure, memory-bad-rate fallback, scope-deflection pressure, and OGCF bridge pressure;
+- `core/adaptive_behavior_shadow.py` now consumes `EvidenceContextFeatures` instead of manually pulling scattered row maxima and diagnostic values;
+- `eval/evidence_context_regression.py` protects the feature object contract;
+- adaptive behavior family regressions, real-log adaptive shadow rerun, and the unified architecture gate still pass.
+
+Validation:
+
+```powershell
+..\.venv-torch\Scripts\python.exe .\eval\evidence_context_regression.py
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_behavior_shadow_runtime_regression.py
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_behavior_missing_support_config_regression.py
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_behavior_stale_conflict_config_regression.py
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_behavior_wrong_scope_config_regression.py
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_behavior_stale_conflict_candidate_promotion.py
+..\.venv-torch\Scripts\python.exe .\eval\adaptive_behavior_shadow_real_log_rerun.py
+..\.venv-torch\Scripts\python.exe .\eval\selector_architecture_gate.py
+```
+
+This is a key neural-symbolic roadmap step: learned controllers can now target a named compact feature object instead of depending on module-specific dictionaries. The next development should either migrate resolver-shadow diagnostics to this feature object or add a report-only export path that logs `EvidenceContextFeatures` for calibration datasets.
+
+Seventh implementation checkpoint:
+
+- `core/evidence_context.py` now exposes `evidence_context_features_dict()` so the compact feature object can be serialized into runtime and calibration artifacts;
+- `core/adaptive_behavior_shadow.py` now includes `diagnostics.evidence_context_features` in response and outcome-log payloads when adaptive behavior shadow logging is requested;
+- `eval/adaptive_behavior_shadow_runtime_regression.py` now verifies that the feature vector is present in both the live response and logged ask event;
+- adaptive behavior family regressions, real-log adaptive shadow rerun, and the unified architecture gate still pass;
+- real-log adaptive shadow match rate remains unchanged at `0.913793`.
+
+This is the first concrete bridge from the symbolic report-only controller to a future learned/neural controller dataset. The next dataset-building step should collect many `diagnostics.evidence_context_features` vectors with linked answer/memory feedback labels and train/evaluate a small local scorer against the current symbolic shadow.
+
+Eighth implementation checkpoint:
+
+- `eval/adaptive_behavior_feature_scorer_eval.py` now trains a tiny deterministic local softmax scorer on logged `diagnostics.evidence_context_features`;
+- the eval joins exported feature vectors with linked answer feedback labels and compares learned advisories against the current symbolic adaptive behavior shadow;
+- `eval/adaptive_behavior_feature_scorer_regression.py` guards the dataset path and explicitly blocks promotion from a single small local log;
+- `eval/selector_architecture_gate.py` now requires `adaptive_behavior_feature_scorer_ok`.
+
+Current result on the local adaptive-shadow rerun log:
+
+```text
+samples: 116
+train/test: 93 / 23
+train learned match rate: 0.924731
+test learned match rate: 0.565217
+test symbolic match rate: 0.956522
+promotion_ready: false
+```
+
+Interpretation:
+
+- the exported feature vector is usable as a learning input;
+- the first tiny learned scorer overfits the small local log and is not competitive with the symbolic shadow;
+- this is still a valuable negative result because it prevents premature neural promotion;
+- the next useful test is a larger multi-log feature dataset with real Hermes logs, then either a family-specific scorer or a hybrid residual model that only learns where the symbolic shadow is weak.
+
+For now, the symbolic adaptive behavior shadow remains the runtime authority. The learned path is a report-only research track.
+
+Ninth implementation checkpoint:
+
+- `eval/adaptive_behavior_feature_scorer_hybrid_eval.py` now tests a stronger neural-symbolic shape: family-specific feature scorers plus a residual model that only allows learned overrides when it predicts the symbolic shadow is wrong;
+- `eval/adaptive_behavior_feature_scorer_hybrid_regression.py` guards the hybrid path as report-only and requires the hybrid not to underperform the symbolic baseline on the current fixture;
+- `eval/selector_architecture_gate.py` now requires `adaptive_behavior_feature_scorer_hybrid_ok`.
+
+Current local result:
+
+```text
+samples: 116
+train/test: 93 / 23
+family models: 5
+symbolic match rate: 0.956522
+family model match rate: 0.608696
+hybrid match rate: 0.956522
+hybrid delta vs symbolic: 0.0
+overrides: 0
+promotion_ready: false
+```
+
+Interpretation:
+
+- family-specific learning is better than the first global scorer but still weaker than symbolic behavior;
+- the residual gate learned to avoid unsafe overrides, so the hybrid preserved symbolic performance;
+- the learned path is currently useful as a diagnostic/research layer, not as a runtime controller;
+- the next real development requirement is more feature-export logs, especially cases where the symbolic shadow is wrong, because the residual model saw only one symbolic error in the current holdout.
+
+The architecture direction remains correct: symbolic controller first, learned residual second, promotion only after multi-log holdout beats the symbolic fallback.
+
+Tenth implementation checkpoint:
+
+- `eval/adaptive_behavior_feature_challenge_log.py` now generates a local hard-case adaptive-shadow outcome log with exported `evidence_context_features`;
+- it also writes a combined feature log by appending the challenge cases to the local real-log rerun data;
+- `eval/adaptive_behavior_feature_challenge_regression.py` guards the challenge dataset path and confirms the learned hybrid can beat the symbolic baseline on the enriched fixture while staying report-only;
+- `eval/selector_architecture_gate.py` now requires `adaptive_behavior_feature_challenge_ok`.
+
+Current generated data:
+
+```text
+challenge cases: 50
+challenge symbolic-wrong decisions: 70
+combined samples for scorer: 296
+```
+
+Current combined-log result:
+
+```text
+global learned scorer: 0.796610
+symbolic baseline:      0.745763
+family model:           0.847458
+hybrid residual model:  0.915254
+hybrid delta:          +0.169491
+```
+
+Interpretation:
+
+- this is the first positive learned-residual result: when the dataset contains enough symbolic-error cases, `EvidenceContextFeatures` can support a learned hybrid controller that beats the symbolic shadow;
+- the result is not promotion-ready because the new hard cases are generated, not independent real Hermes logs;
+- nevertheless, the architecture direction is validated: stable feature export -> labeled hard cases -> family/residual scorer -> guarded comparison against symbolic fallback.
+
+Next development requirement:
+
+```text
+replace generated hard cases with independent real/Hermes feature-export logs
+then rerun the same hybrid residual gate as a true holdout test
+```
+
+Until then, runtime authority remains symbolic and the learned residual path remains report-only.

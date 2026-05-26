@@ -13,6 +13,7 @@ from core.clc_policy_selector import (
     POLICY_PERIODIC,
 )
 from core.config import resolve_project_path
+from core.evidence_context import build_evidence_context_summary, retrieval_row_state
 
 
 DEFAULT_MATRIX_REPORT = "../experiments/clc_policy_matrix_eval_live_results.json"
@@ -80,16 +81,19 @@ def selector_features_from_retrieval_context(
     label_cost: float = 0.0002,
     budget_pressure: float = 0.2,
 ) -> tuple[CLCPolicyFeatures, dict[str, Any]]:
-    rows = [row for row in retrieval_rows if isinstance(row, dict)]
+    evidence_summary = build_evidence_context_summary(
+        query="",
+        retrieval_context=retrieval_rows,
+    )
+    rows = evidence_summary.retrieval_context
     total = max(1, len(rows))
     contradiction_scores = [max(0.0, float(row.get("stored_contradiction_score") or 0.0)) for row in rows]
-    supersession_scores = [float(row.get("supersession_score") or 0.0) for row in rows]
-    relation_scores = [float(row.get("relation_supersession_score") or 0.0) for row in rows]
+    row_states = [retrieval_row_state(row) for row in rows]
+    supersession_scores = [state.supersession_score for state in row_states]
+    relation_scores = [state.relation_supersession_score for state in row_states]
     source_reliability = [float(row.get("source_reliability") or 0.0) for row in rows]
     domain_reliability = [float(row.get("domain_reliability") or 0.0) for row in rows]
-    retrieval_scores = [float(row.get("score") or row.get("cosine") or 0.0) for row in rows]
-    text_match_scores = [float(row.get("text_match_score") or 0.0) for row in rows]
-    claim_scope_scores = [float(row.get("claim_scope_score") or row.get("text_match_score") or 0.0) for row in rows]
+    retrieval_scores = [state.score for state in row_states]
     canonical_support_counts = [max(1, int(row.get("canonical_support_count") or 1)) for row in rows]
     canonical_supported_keeper_rows = sum(
         1
@@ -124,51 +128,34 @@ def selector_features_from_retrieval_context(
     correction_current_claim_matches: list[float] = []
     top_stale_rank = 0
     top_current_rank = 0
-    for row, supersession, relation, text_match, claim_match in zip(
+    for row, state in zip(
         rows,
-        supersession_scores,
-        relation_scores,
-        text_match_scores,
-        claim_scope_scores,
+        row_states,
     ):
-        authority_state = str(row.get("authority_state") or "").lower()
-        score = float(row.get("score") or row.get("cosine") or 0.0)
-        explicit_current = authority_state in {"authoritative", "current"} or bool(row.get("supersedes_memory_ids"))
-        is_stale = (
-            authority_state in {"superseded", "stale"}
-            or row.get("superseded_by_memory_ids")
-            or supersession < -0.05
-            or relation < -0.05
-        )
-        is_current = (
-            explicit_current
-            or supersession > 0.05
-            or relation > 0.05
-        )
-        if authority_state in {"standalone", "unknown", ""} and not row.get("superseded_by_memory_ids"):
-            topical_anchor_text_matches.append(text_match)
-            topical_anchor_claim_matches.append(claim_match)
-        if explicit_current:
-            correction_current_text_matches.append(text_match)
-            correction_current_claim_matches.append(claim_match)
-        if is_stale:
+        if state.is_topical_anchor and not row.get("superseded_by_memory_ids"):
+            topical_anchor_text_matches.append(state.text_match_score)
+            topical_anchor_claim_matches.append(state.claim_scope_score)
+        if state.explicit_current:
+            correction_current_text_matches.append(state.text_match_score)
+            correction_current_claim_matches.append(state.claim_scope_score)
+        if state.is_stale:
             stale_rows += 1
-            stale_scores.append(score)
-            stale_text_matches.append(text_match)
-            stale_claim_matches.append(claim_match)
+            stale_scores.append(state.score)
+            stale_text_matches.append(state.text_match_score)
+            stale_claim_matches.append(state.claim_scope_score)
             if top_stale_rank == 0:
                 top_stale_rank = len(stale_scores) + len(current_scores) + len(standalone_scores)
-        if is_current:
+        if state.is_current:
             current_rows += 1
-            current_scores.append(score)
-            current_text_matches.append(text_match)
-            current_claim_matches.append(claim_match)
+            current_scores.append(state.score)
+            current_text_matches.append(state.text_match_score)
+            current_claim_matches.append(state.claim_scope_score)
             if top_current_rank == 0:
                 top_current_rank = len(stale_scores) + len(current_scores) + len(standalone_scores)
-        if not is_stale and not is_current:
-            standalone_scores.append(score)
-            standalone_text_matches.append(text_match)
-            standalone_claim_matches.append(claim_match)
+        if state.is_standalone:
+            standalone_scores.append(state.score)
+            standalone_text_matches.append(state.text_match_score)
+            standalone_claim_matches.append(state.claim_scope_score)
 
     stale_ratio = stale_rows / total
     current_ratio = current_rows / total
@@ -182,7 +169,7 @@ def selector_features_from_retrieval_context(
     avg_domain_reliability = sum(domain_reliability) / total
     avg_retrieval_score = sum(retrieval_scores) / total
     top_score = retrieval_scores[0] if retrieval_scores else 0.0
-    top_authority_state = str(rows[0].get("authority_state") or "unknown").lower() if rows else "unknown"
+    top_authority_state = row_states[0].authority_state if row_states else "unknown"
     stale_score_max = max(stale_scores or [0.0])
     current_score_max = max(current_scores or [0.0])
     standalone_score_max = max(standalone_scores or [0.0])

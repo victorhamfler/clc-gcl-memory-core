@@ -2,6 +2,16 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.evidence_context import (
+    build_evidence_context_summary,
+    diagnostics_from_selector_snapshot,
+    float_value,
+    normalize_text,
+    ordinary_fact_lookup,
+    selected_evidence,
+    stale_conflict_present,
+)
+
 
 DEFAULT_RESOLVER_SHADOW_CONFIG = {
     "enabled": False,
@@ -45,24 +55,19 @@ def normalize_resolver_shadow_config(config: dict[str, Any] | None = None) -> di
 
 
 def _float(value: Any, default: float) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return float(default)
+    return float_value(value, default)
 
 
 def _normalize(value: Any) -> str:
-    return " ".join(str(value or "").strip().lower().split())
+    return normalize_text(value)
 
 
 def _diagnostics(selector_snapshot: dict[str, Any] | None) -> dict[str, Any]:
-    snapshot = selector_snapshot if isinstance(selector_snapshot, dict) else {}
-    value = snapshot.get("diagnostics")
-    return value if isinstance(value, dict) else {}
+    return diagnostics_from_selector_snapshot(selector_snapshot)
 
 
 def _selected_evidence(evidence: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
-    return [row for row in (evidence or []) if isinstance(row, dict)]
+    return selected_evidence(evidence)
 
 
 def _has_refusal_language(answer: str, markers: tuple[str, ...]) -> bool:
@@ -71,12 +76,7 @@ def _has_refusal_language(answer: str, markers: tuple[str, ...]) -> bool:
 
 
 def _ordinary_fact_lookup(query: str, selector_snapshot: dict[str, Any] | None) -> bool:
-    diagnostics = _diagnostics(selector_snapshot)
-    if _normalize(diagnostics.get("ogcf_intent")) == "ordinary_fact_lookup":
-        return True
-    query_text = _normalize(query)
-    ordinary_terms = ("when is", "what is the calendar", "meeting", "scheduled", "calendar", "location")
-    return any(term in query_text for term in ordinary_terms)
+    return ordinary_fact_lookup(query, selector_snapshot=selector_snapshot)
 
 
 def _stale_conflict_present(
@@ -86,13 +86,12 @@ def _stale_conflict_present(
     selector_snapshot: dict[str, Any] | None,
     conflict: bool,
 ) -> bool:
-    diagnostics = _diagnostics(selector_snapshot)
-    if _float(diagnostics.get("stale_current_conflict"), 0.0) > 0.0:
-        return True
-    if conflict and stale_context:
-        return True
-    states = {_normalize(row.get("authority_state") or row.get("memory_state")) for row in evidence}
-    return "current" in states and "stale" in states
+    return stale_conflict_present(
+        evidence=evidence,
+        stale_context=stale_context,
+        selector_snapshot=selector_snapshot,
+        conflict=conflict,
+    )
 
 
 def resolver_shadow_actions(
@@ -106,8 +105,16 @@ def resolver_shadow_actions(
     config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     cfg = normalize_resolver_shadow_config(config)
-    selected_evidence = _selected_evidence(evidence)
-    diagnostics = _diagnostics(selector_snapshot)
+    evidence_summary = build_evidence_context_summary(
+        query=query,
+        answer=answer,
+        evidence=evidence,
+        stale_context=stale_context,
+        selector_snapshot=selector_snapshot,
+        conflict=conflict,
+    )
+    selected_evidence = evidence_summary.selected_evidence
+    diagnostics = evidence_summary.diagnostics
     snapshot = selector_snapshot if isinstance(selector_snapshot, dict) else {}
     actions: list[str] = []
     reasons: list[str] = []
@@ -129,12 +136,7 @@ def resolver_shadow_actions(
             }
         )
 
-    stale_conflict = _stale_conflict_present(
-        evidence=selected_evidence,
-        stale_context=stale_context,
-        selector_snapshot=selector_snapshot,
-        conflict=conflict,
-    )
+    stale_conflict = evidence_summary.stale_conflict_present
     if stale_conflict:
         actions.append("disclose_stale_conflict")
         reasons.append("stale_conflict_present")
@@ -146,7 +148,7 @@ def resolver_shadow_actions(
             }
         )
 
-    if selected_evidence and bool(snapshot.get("ogcf_meta_present")) and not _ordinary_fact_lookup(query, selector_snapshot):
+    if selected_evidence and bool(snapshot.get("ogcf_meta_present")) and not evidence_summary.ordinary_fact_lookup:
         ogcf_score = _float(diagnostics.get("ogcf_bridge_overload_score"), 0.0)
         ogcf_effective = _float(diagnostics.get("ogcf_effective_affected_memory_ratio"), 0.0)
         if (
@@ -189,8 +191,8 @@ def resolver_shadow_actions(
         "annotations": annotations,
         "diagnostics": {
             "selected_evidence_count": len(selected_evidence),
-            "stale_context_count": len(stale_context or []),
-            "ordinary_fact_lookup": _ordinary_fact_lookup(query, selector_snapshot),
+            "stale_context_count": evidence_summary.stale_context_count,
+            "ordinary_fact_lookup": evidence_summary.ordinary_fact_lookup,
             "stale_conflict": stale_conflict,
             "ogcf_meta_present": bool(snapshot.get("ogcf_meta_present")),
         },
