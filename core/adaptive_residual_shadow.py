@@ -10,6 +10,8 @@ from core.evidence_context import normalize_text
 DEFAULT_POLICY = {
     "residual_threshold": 0.8,
     "family_confidence_threshold": 0.0,
+    "learned_risk_suppressor_enabled": True,
+    "learned_risk_confidence_threshold": 0.5,
     "allowed_families": ["supported_evidence"],
     "allowed_target": "likely_helpful",
     "suppressors": [
@@ -75,6 +77,12 @@ TERM_GROUPS = {
     "ordinary_namespace_profile": ORDINARY_NAMESPACE_PROFILE_TERMS,
     "unsupported_proof": UNSUPPORTED_PROOF_TERMS,
 }
+PROTECTED_LEARNED_RISK_LABELS = {
+    "unsupported_authority_claim",
+    "stale_previous_lookup",
+    "sensitive_private_lookup",
+    "ordinary_namespace_scope_risk",
+}
 
 
 def _as_term_tuple(value: Any, default: tuple[str, ...]) -> tuple[str, ...]:
@@ -95,7 +103,15 @@ def load_policy(root: Path, override: dict[str, Any] | None = None) -> dict[str,
     config = load_config(root)
     configured = config.get("adaptive_residual_shadow") if isinstance(config, dict) else None
     if isinstance(configured, dict):
-        for key in ("residual_threshold", "family_confidence_threshold", "allowed_families", "allowed_target", "suppressors"):
+        for key in (
+            "residual_threshold",
+            "family_confidence_threshold",
+            "learned_risk_suppressor_enabled",
+            "learned_risk_confidence_threshold",
+            "allowed_families",
+            "allowed_target",
+            "suppressors",
+        ):
             if key in configured and configured[key] is not None:
                 if key in {"allowed_families", "suppressors"}:
                     active_policy[key] = list(_as_term_tuple(configured[key], tuple(active_policy.get(key) or [])))
@@ -302,15 +318,20 @@ def adaptive_residual_shadow_advisories(
             and sample["behavior_family"] in set(active_policy.get("allowed_families") or [])
             and family_advisory == active_policy.get("allowed_target")
         )
-        would_override = bool(allowed and not suppressed)
+        learned_risk_suppressed = bool(
+            active_policy.get("learned_risk_suppressor_enabled", True)
+            and learned_risk_label in PROTECTED_LEARNED_RISK_LABELS
+            and learned_risk_confidence >= float(active_policy.get("learned_risk_confidence_threshold") or 0.0)
+        )
+        would_override = bool(allowed and not suppressed and not learned_risk_suppressed)
         if would_override:
             counts["would_override"] += 1
             advisory = family_advisory
             source = "learned_residual_context_guarded_override"
-        elif suppressed and allowed:
+        elif (suppressed or learned_risk_suppressed) and allowed:
             counts["suppressed"] += 1
             advisory = sample["symbolic_advisory"]
-            source = "context_suppressed_symbolic_fallback"
+            source = "context_suppressed_symbolic_fallback" if suppressed else "learned_risk_suppressed_symbolic_fallback"
         else:
             counts["symbolic_fallback"] += 1
             advisory = sample["symbolic_advisory"]
@@ -328,6 +349,7 @@ def adaptive_residual_shadow_advisories(
                 "term_risk_label": term_risk_label,
                 "learned_risk_label": learned_risk_label,
                 "learned_risk_confidence": learned_risk_confidence,
+                "learned_risk_suppressed": learned_risk_suppressed,
                 "learned_risk_disagrees_with_terms": bool(
                     learned_risk_label != "unavailable"
                     and learned_risk_label != term_risk_label

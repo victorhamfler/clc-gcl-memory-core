@@ -158,6 +158,15 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
         "adaptive_residual_risk_exception_simulation_ok": bool(
             (step_json(steps, "adaptive_residual_risk_exception_simulation") or {}).get("ok")
         ),
+        "adaptive_residual_learned_risk_veto_ok": bool(
+            (step_json(steps, "adaptive_residual_learned_risk_veto_regression") or {}).get("ok")
+        ),
+        "adaptive_residual_learned_risk_external_failure_replay_ok": bool(
+            (step_json(steps, "adaptive_residual_learned_risk_external_failure_replay") or {}).get("ok")
+        ),
+        "adaptive_residual_learned_risk_authority_paraphrase_ok": bool(
+            (step_json(steps, "adaptive_residual_learned_risk_authority_paraphrase_regression") or {}).get("ok")
+        ),
         "adaptive_behavior_candidate_profile_guard_ok": bool(
             (step_json(steps, "adaptive_behavior_candidate_profile_guard_regression") or {}).get("ok")
         ),
@@ -250,6 +259,9 @@ def write_markdown(report: dict[str, Any], out_md: Path) -> None:
         "adaptive_residual_risk_overprotection_candidate_ok",
         "adaptive_residual_risk_overprotection_recurrence_ok",
         "adaptive_residual_risk_exception_simulation_ok",
+        "adaptive_residual_learned_risk_veto_ok",
+        "adaptive_residual_learned_risk_external_failure_replay_ok",
+        "adaptive_residual_learned_risk_authority_paraphrase_ok",
         "adaptive_behavior_candidate_profile_guard_ok",
         "adaptive_behavior_profile_memory_bank_guard_ok",
         "adaptive_behavior_stale_conflict_candidate_ok",
@@ -356,6 +368,8 @@ def main() -> int:
                 str(ROOT / "eval" / "adaptive_residual_shadow_fifth_holdout_log.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_sixth_natural_holdout_log.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_seventh_agent_style_log.py"),
+                str(ROOT / "eval" / "adaptive_residual_shadow_ninth_authority_veto_log.py"),
+                str(ROOT / "eval" / "adaptive_residual_shadow_tenth_authority_boundary_log.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_logged_eval.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_multi_log_eval.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_suppressor_regression.py"),
@@ -374,6 +388,9 @@ def main() -> int:
                 str(ROOT / "eval" / "adaptive_residual_risk_overprotection_candidate.py"),
                 str(ROOT / "eval" / "adaptive_residual_risk_overprotection_recurrence.py"),
                 str(ROOT / "eval" / "adaptive_residual_risk_exception_simulation.py"),
+                str(ROOT / "eval" / "adaptive_residual_learned_risk_veto_regression.py"),
+                str(ROOT / "eval" / "adaptive_residual_learned_risk_external_failure_replay.py"),
+                str(ROOT / "eval" / "adaptive_residual_learned_risk_authority_paraphrase_regression.py"),
                 str(ROOT / "eval" / "adaptive_behavior_shadow_real_log_calibration.py"),
                 str(ROOT / "eval" / "adaptive_behavior_shadow_real_log_rerun.py"),
                 str(ROOT / "eval" / "adaptive_behavior_candidate_profile.py"),
@@ -457,7 +474,7 @@ def main() -> int:
                 python,
                 str(ROOT / "eval" / "adaptive_residual_shadow_multi_log_eval.py"),
                 "--min-logs",
-                "3",
+                "7",
                 "--exclude-processed-failures",
             ],
         ),
@@ -520,6 +537,18 @@ def main() -> int:
         run_step(
             "adaptive_residual_risk_exception_simulation",
             [python, str(ROOT / "eval" / "adaptive_residual_risk_exception_simulation.py")],
+        ),
+        run_step(
+            "adaptive_residual_learned_risk_veto_regression",
+            [python, str(ROOT / "eval" / "adaptive_residual_learned_risk_veto_regression.py")],
+        ),
+        run_step(
+            "adaptive_residual_learned_risk_external_failure_replay",
+            [python, str(ROOT / "eval" / "adaptive_residual_learned_risk_external_failure_replay.py")],
+        ),
+        run_step(
+            "adaptive_residual_learned_risk_authority_paraphrase_regression",
+            [python, str(ROOT / "eval" / "adaptive_residual_learned_risk_authority_paraphrase_regression.py")],
         ),
         run_step(
             "adaptive_behavior_candidate_profile_guard_regression",

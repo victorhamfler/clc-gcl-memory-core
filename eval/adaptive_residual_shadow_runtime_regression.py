@@ -91,6 +91,11 @@ def main() -> int:
             for item in residual.get("decisions") or []
             if isinstance(item, dict)
         ),
+        "decisions_include_learned_risk_suppression_flag": all(
+            "learned_risk_suppressed" in item
+            for item in residual.get("decisions") or []
+            if isinstance(item, dict)
+        ),
         "selector_snapshot_unchanged": base.get("selector_snapshot", {}).get("decision")
         == shadowed.get("selector_snapshot", {}).get("decision"),
         "answer_unchanged": base.get("answer") == shadowed.get("answer"),

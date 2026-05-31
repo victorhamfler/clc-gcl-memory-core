@@ -141,6 +141,8 @@ adaptive_behavior:
 adaptive_residual_shadow:
   residual_threshold: 0.8
   family_confidence_threshold: 0.0
+  learned_risk_suppressor_enabled: true
+  learned_risk_confidence_threshold: 0.5
   allowed_families: supported_evidence
   allowed_target: likely_helpful
   suppressors: sensitive_private,stale_previous,ordinary_namespace_profile,unsupported_proof

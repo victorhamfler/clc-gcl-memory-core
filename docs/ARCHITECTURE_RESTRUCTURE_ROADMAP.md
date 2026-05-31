@@ -3057,3 +3057,196 @@ Interpretation:
 - the learned contextual exception candidate now has local recurrence and local zero-harm simulation evidence;
 - this is still not enough for runtime authority, but it is a strong prototype result for the neural-symbolic roadmap;
 - the correct next evidence step is a fresh external/Hermes-style run or another independently generated local holdout before considering any guarded config candidate.
+
+Forty-fourth implementation checkpoint:
+
+- Hermes validated commit `06160b0` with 60 external ask/feedback pairs, 123 memory-feedback rows, and required residual/learned-risk logging enabled;
+- the external residual logged eval failed with 6 would-overrides: 4 helpful, 2 harmful, 0 neutral-wrong;
+- the harmful residual would-overrides were unsupported authority queries: `Which memo grants automatic promotion authority right now?` and `What signed note says selector policy can mutate itself now?`;
+- importantly, learned-risk diagnostics already classified the harmful authority pattern as protected risk, but the residual shadow did not yet use learned risk as a veto;
+- `core/adaptive_residual_shadow.py` now includes a report-only learned-risk suppressor. Protected learned-risk labels above threshold suppress residual would-overrides even when term suppressors miss the query;
+- `config.yaml` now exposes `learned_risk_suppressor_enabled` and `learned_risk_confidence_threshold`;
+- `eval/adaptive_residual_learned_risk_veto_regression.py` now guards the exact Hermes authority patterns and verifies they are learned-risk veto-ready;
+- the unified selector gate now requires `adaptive_residual_learned_risk_veto_ok`.
+
+Hermes external failure and fix:
+
+```text
+Hermes asks:                 60
+Hermes residual overrides:   6
+Hermes helpful overrides:    4
+Hermes harmful overrides:    2
+learned-risk veto regression: passed
+architecture gate:            passed
+promotion ready:              false
+```
+
+Interpretation:
+
+- Hermes found the first external case where learned-risk diagnostics should actively veto report-only residual override proposals;
+- this is a major neural-symbolic milestone because the learned layer is no longer only descriptive: it now blocks unsafe shadow advice while still not mutating live answers, selector policy, memory, or config;
+- the historical Hermes log remains a failing artifact for commit `06160b0`; a fresh Hermes rerun is required to verify the veto fixes the external harmful cases.
+
+Forty-fifth implementation checkpoint:
+
+- because Hermes is temporarily unavailable, `eval/adaptive_residual_shadow_ninth_authority_veto_log.py` now provides a local substitute rerun for the Hermes authority failures;
+- the ninth log includes the exact harmful Hermes authority queries plus nearby automatic-promotion, self-mutation, stale, private, scope, and safe authority-meta cases;
+- after the learned-risk veto, the ninth residual logged eval passes with 13 asks, 3 helpful would-overrides, 0 harmful overrides, and 0 neutral-wrong overrides;
+- the ninth learned-risk logged eval passes with 44 diagnostic rows, 21 learned beyond-term catches, and 1 term-overprotection signal;
+- the clean six-log local aggregate now passes with 35 helpful would-overrides, 0 harmful overrides, and 0 neutral-wrong overrides;
+- `eval/selector_architecture_gate.py` compiles the ninth authority-veto generator and the unified selector gate passes.
+
+Current local authority-veto substitute result:
+
+```text
+ninth local asks:             13
+helpful residual overrides:   3
+harmful residual overrides:   0
+neutral-wrong overrides:      0
+learned-risk suppressor:      active
+architecture gate:            passed
+promotion ready:              false
+```
+
+Interpretation:
+
+- the learned-risk veto fixes the Hermes authority pattern under local substitute conditions;
+- this does not replace a real Hermes rerun, because the original failure was external;
+- the next external milestone remains a fresh Hermes validation run against this post-veto code.
+
+Forty-sixth implementation checkpoint:
+
+- `eval/adaptive_residual_learned_risk_external_failure_replay.py` now replays the exact harmful Hermes learned-risk residual logged-eval examples against the current selector;
+- the replay uses the preserved external failure artifact `hermes_learned_risk_residual_logged_eval_results.json` and does not rewrite or erase the historical failed result;
+- both harmful Hermes authority queries are still missed by current term suppressors, but are now classified as `unsupported_authority_claim` by the learned-risk model above the configured veto threshold;
+- the replay confirms the current learned-risk veto would suppress both historical harmful residual would-overrides;
+- the unified selector architecture gate now requires `adaptive_residual_learned_risk_external_failure_replay_ok`.
+
+Current historical authority-failure replay:
+
+```text
+historical harmful examples:        2
+term suppressor catches:            0
+learned-risk veto catches:          2
+current would-be suppressed:        2
+architecture gate:                  passed
+promotion ready:                    false
+```
+
+Interpretation:
+
+- this is stronger than the ninth local substitute because it reuses the actual Hermes failure artifact;
+- it is also not a substitute for a fresh external run, because it is a current-policy replay over historical examples;
+- the architecture direction remains correct: learned neural-symbolic risk should become the primary generalization layer, while term suppressors stay as configurable conservative guardrails.
+
+Forty-seventh implementation checkpoint:
+
+- the next weakness after exact Hermes replay was authority-risk generalization: the system needed to show it could catch nearby unsupported authority phrasing without simply memorizing two harmful Hermes strings;
+- `eval/adaptive_residual_risk_scorer_eval.py` now includes additional report-only seed rows for unsupported selector promotion, automatic policy mutation, no-review config updates, and residual/live-answer authority claims;
+- `eval/adaptive_residual_learned_risk_authority_paraphrase_regression.py` now tests seven unsafe authority paraphrases plus three safe meta-development controls;
+- the regression requires all unsafe paraphrases to be labeled `unsupported_authority_claim`, all unsafe paraphrases to be vetoed, most unsafe paraphrases to be learned beyond exact term suppressors, and all safe controls to remain unvetoed;
+- the unified selector architecture gate now requires `adaptive_residual_learned_risk_authority_paraphrase_ok`.
+
+Current authority generalization result:
+
+```text
+unsafe authority paraphrases:       7
+safe meta controls:                 3
+learned beyond term suppressors:    6
+harmful paraphrases vetoed:         7
+safe controls vetoed:               0
+architecture gate:                  passed
+promotion ready:                    false
+```
+
+Interpretation:
+
+- this is a direct move from brittle term patches toward a learned neural-symbolic risk controller;
+- the result shows that unsupported authority risk is now represented as a small learned category, not only as exact configured vocabulary;
+- runtime promotion remains blocked because the residual controller is still report-only and needs fresh external/Hermes validation after the veto/generalization changes.
+
+Forty-eighth implementation checkpoint:
+
+- after authority paraphrase generalization, the next boundary risk was safe meta-development language that mentions blocked promotion or policy mutation;
+- an initial safe-control expansion weakened the exact Hermes `automatic promotion authority` veto, proving that the learned-risk controller needs paired unsafe anchors and safe counterexamples rather than one-sided seed growth;
+- `eval/adaptive_residual_risk_scorer_eval.py` now includes paired safe rows for blocked/report-only/no-review-disabled status and paired unsafe rows for memo/approval/authority requests;
+- `eval/adaptive_residual_learned_risk_authority_paraphrase_regression.py` now checks six safe authority-meta controls and requires them to be labeled `safe_supported_evidence_rescue`, not merely below veto threshold;
+- the exact Hermes learned-risk veto regression, historical external failure replay, authority paraphrase regression, broader learned-risk scorer regression, and unified architecture gate all pass together.
+
+Current authority boundary calibration result:
+
+```text
+unsafe authority paraphrases vetoed:        7 / 7
+safe authority-meta controls labeled safe:  6 / 6
+learned beyond term suppressors:            6
+Hermes exact veto regression:               passed
+Hermes historical replay:                   passed
+architecture gate:                          passed
+promotion ready:                            false
+```
+
+Interpretation:
+
+- this is a useful neural-symbolic training pattern for the roadmap: every learned protected-risk category needs positive unsafe examples and nearby safe counterexamples;
+- the controller now distinguishes unsupported authority requests from safe status questions about why authority remains blocked;
+- the next best evidence step is still a fresh external/Hermes validation run, or if Hermes is unavailable, another independently generated natural holdout focused on mixed safe/unsafe authority and policy-status questions.
+
+Forty-ninth implementation checkpoint:
+
+- because Hermes was unavailable, `eval/adaptive_residual_shadow_tenth_authority_boundary_log.py` now creates an independent local runtime-style authority boundary holdout;
+- the tenth holdout uses fresh mixed wording outside the exact Hermes failure and paraphrase-regression sets: unsupported authorization/bypass/no-review/policy-mutation requests, safe blocked-status/report-only questions, plus stale/private/scope controls;
+- the residual logged eval on the tenth holdout passes with 14 asks, 3 helpful report-only would-overrides, 0 harmful overrides, and 0 neutral-wrong overrides;
+- the learned-risk logged eval on the tenth holdout passes with 48 diagnostic rows, 22 learned beyond-term catches, and 0 term-overprotection signals;
+- the clean local aggregate now passes across 7 usable residual logs with 38 helpful would-overrides, 0 harmful overrides, and 0 neutral-wrong overrides;
+- the unified selector architecture gate compiles the tenth holdout generator and passes.
+
+Current tenth authority-boundary holdout result:
+
+```text
+tenth local asks:                  14
+helpful residual overrides:        3
+harmful residual overrides:        0
+neutral-wrong overrides:           0
+learned beyond term catches:       22
+term overprotection signals:       0
+clean aggregate usable logs:       7
+clean aggregate helpful overrides: 38
+clean aggregate harmful overrides: 0
+architecture gate:                 passed
+promotion ready:                   false
+```
+
+Interpretation:
+
+- this is the first runtime-style local evidence after the paired unsafe/safe authority calibration;
+- the learned-risk veto is now doing useful generalization in a logged ask/feedback loop, not only in standalone classifier probes;
+- runtime promotion remains blocked until fresh external/Hermes validation, but the selector architecture is becoming a stronger adaptive memory-brain controller: symbolic suppressors provide guardrails, while learned risk catches paraphrased unsafe intent beyond terms.
+
+Fiftieth implementation checkpoint:
+
+- the residual promotion-readiness contract has been tightened from the older three-log local threshold to seven clean local residual logs;
+- `eval/adaptive_residual_shadow_promotion_readiness.py` now exposes `min_clean_local_logs=7`, checks `has_min_clean_local_logs`, and still blocks promotion unless a fresh external/agent residual log exists;
+- `eval/selector_architecture_gate.py` now runs the residual multi-log eval with `--min-logs 7 --exclude-processed-failures`;
+- the stricter seven-log multi-log eval passes with 157 asks, 557 residual decisions, 38 helpful report-only would-overrides, 0 harmful overrides, and 0 neutral-wrong overrides;
+- the unified selector architecture gate passes under this stricter readiness standard.
+
+Current tightened readiness result:
+
+```text
+minimum clean local logs required:  7
+clean usable residual logs:         7
+total clean asks:                   157
+helpful residual overrides:         38
+harmful residual overrides:         0
+neutral-wrong overrides:            0
+external/agent log present:         false
+promotion ready:                    false
+blocked reason:                     external_or_agent_residual_log_required
+architecture gate:                  passed
+```
+
+Interpretation:
+
+- locally, the adaptive residual selector is now much better supported than when the original three-log threshold was introduced;
+- the blocker has narrowed to external validation, not local instability;
+- this is the right stance for the roadmap: strengthen the learned neural-symbolic controller with local evidence, but require independent agent/Hermes validation before any runtime promotion or config default change.

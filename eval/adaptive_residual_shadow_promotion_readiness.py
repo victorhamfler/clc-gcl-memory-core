@@ -21,6 +21,7 @@ from eval.adaptive_residual_shadow_multi_log_eval import (  # noqa: E402
 
 OUT_JSON = REPO_ROOT / "experiments" / "adaptive_residual_shadow_promotion_readiness_results.json"
 OUT_MD = REPO_ROOT / "experiments" / "adaptive_residual_shadow_promotion_readiness_report.md"
+MIN_CLEAN_LOCAL_LOGS = 7
 
 
 def log_kind(path: str) -> str:
@@ -37,7 +38,7 @@ def build_report() -> dict[str, Any]:
     replay = build_failure_replay_report()
     processed_failure_logs = set(PROCESSED_FAILURE_LOG_NAMES) if replay.get("ok") else set()
     clean_logs = filter_logs(logs, processed_failure_logs)
-    multi = build_multi_log_report(clean_logs, min_logs=3)
+    multi = build_multi_log_report(clean_logs, min_logs=MIN_CLEAN_LOCAL_LOGS)
     log_rows = []
     external_count = 0
     for row in multi.get("logs") or []:
@@ -50,7 +51,8 @@ def build_report() -> dict[str, Any]:
         log_rows.append(enriched)
     totals = multi.get("totals") if isinstance(multi.get("totals"), dict) else {}
     checks = {
-        "three_log_gate_passed": bool(multi.get("ok")),
+        "clean_local_log_gate_passed": bool(multi.get("ok")),
+        "has_min_clean_local_logs": int(totals.get("usable_log_count") or 0) >= MIN_CLEAN_LOCAL_LOGS,
         "processed_failure_replay_passed": bool(replay.get("ok")),
         "zero_harmful_overrides": int(totals.get("harmful_override_count") or 0) == 0,
         "zero_neutral_wrong_overrides": int(totals.get("neutral_wrong_override_count") or 0) == 0,
@@ -60,7 +62,8 @@ def build_report() -> dict[str, Any]:
         "no_runtime_mutation": True,
     }
     promotion_ready = (
-        checks["three_log_gate_passed"]
+        checks["clean_local_log_gate_passed"]
+        and checks["has_min_clean_local_logs"]
         and checks["zero_harmful_overrides"]
         and checks["zero_neutral_wrong_overrides"]
         and checks["has_helpful_overrides"]
@@ -68,7 +71,8 @@ def build_report() -> dict[str, Any]:
     )
     return {
         "schema": "adaptive_residual_shadow_promotion_readiness/v1",
-        "ok": checks["three_log_gate_passed"] and not promotion_ready,
+        "ok": checks["clean_local_log_gate_passed"] and checks["has_min_clean_local_logs"] and not promotion_ready,
+        "min_clean_local_logs": MIN_CLEAN_LOCAL_LOGS,
         "checks": checks,
         "promotion_ready": promotion_ready,
         "blocked_reason": None if promotion_ready else "external_or_agent_residual_log_required",
