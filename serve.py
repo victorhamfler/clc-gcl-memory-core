@@ -17,6 +17,7 @@ from core.learning import learn_from_document, learn_from_text
 from core.maintenance import improvement_plan, memory_review, record_memory_improvement, weak_memories
 from core.outcome_log import OutcomeLogger
 from core.adaptive_behavior import normalize_adaptive_behavior_config
+from core.adaptive_residual_shadow import adaptive_residual_shadow_advisories
 from core.adaptive_behavior_shadow import adaptive_behavior_shadow_advisories
 from core.answer_behavior_shadow import normalize_resolver_shadow_config, resolver_shadow_actions
 from core.runtime import create_pipeline, pipeline_config_view, pipeline_stats
@@ -265,6 +266,26 @@ class MemoryApi:
             adaptive_context=adaptive_context,
             resolver_shadow=resolver_shadow,
             config=cfg,
+        )
+
+    def _include_adaptive_residual_shadow(self, payload: dict[str, Any]) -> bool:
+        return bool(payload.get("include_adaptive_residual_shadow"))
+
+    def _log_adaptive_residual_shadow(self, payload: dict[str, Any]) -> bool:
+        return bool(payload.get("log_adaptive_residual_shadow"))
+
+    def _adaptive_residual_shadow_payload(
+        self,
+        *,
+        query: str,
+        asked: dict[str, Any],
+        adaptive_behavior_shadow: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        return adaptive_residual_shadow_advisories(
+            root=self.root,
+            query=query,
+            answer=str(asked.get("answer") or ""),
+            adaptive_behavior_shadow=adaptive_behavior_shadow,
         )
 
     def selector_decide(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -728,11 +749,32 @@ class MemoryApi:
                 cfg=adaptive_behavior_cfg,
             )
             response["adaptive_behavior_shadow"] = adaptive_behavior_shadow
+        adaptive_residual_shadow = None
+        if self._include_adaptive_residual_shadow(payload):
+            if adaptive_behavior_shadow is None:
+                adaptive_behavior_shadow = self._adaptive_behavior_shadow_payload(
+                    query=query,
+                    asked=asked,
+                    adaptive_context=adaptive_context,
+                    resolver_shadow=resolver_shadow,
+                    cfg=adaptive_behavior_cfg,
+                )
+            adaptive_residual_shadow = self._adaptive_residual_shadow_payload(
+                query=query,
+                asked=asked,
+                adaptive_behavior_shadow=adaptive_behavior_shadow,
+            )
+            response["adaptive_residual_shadow"] = adaptive_residual_shadow
         logged_selector_snapshot = selector_snapshot
         log_resolver_shadow = resolver_shadow if resolver_shadow_cfg.get("include_in_outcome_log") else None
         log_adaptive_behavior_shadow = (
             adaptive_behavior_shadow
             if adaptive_behavior_shadow and self._log_adaptive_behavior_shadow(payload, adaptive_behavior_cfg)
+            else None
+        )
+        log_adaptive_residual_shadow = (
+            adaptive_residual_shadow
+            if adaptive_residual_shadow and self._log_adaptive_residual_shadow(payload)
             else None
         )
         log_status = self._record_outcome(
@@ -765,6 +807,7 @@ class MemoryApi:
                 "adaptive_memory_context": self._adaptive_context_log_payload(adaptive_context, limit=10),
                 **({"resolver_shadow": log_resolver_shadow} if log_resolver_shadow else {}),
                 **({"adaptive_behavior_shadow": log_adaptive_behavior_shadow} if log_adaptive_behavior_shadow else {}),
+                **({"adaptive_residual_shadow": log_adaptive_residual_shadow} if log_adaptive_residual_shadow else {}),
             },
         )
         response["operation_id"] = log_status["operation_id"]

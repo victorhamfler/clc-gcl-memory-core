@@ -2280,3 +2280,533 @@ then rerun the same hybrid residual gate as a true holdout test
 ```
 
 Until then, runtime authority remains symbolic and the learned residual path remains report-only.
+
+Eleventh implementation checkpoint:
+
+- `eval/adaptive_behavior_feature_cross_log_holdout.py` now runs a leave-log-out residual evaluation: train on selected local/challenge feature logs, test on an independent Hermes real feature-export log, and sweep override thresholds;
+- `eval/adaptive_behavior_feature_cross_log_holdout_regression.py` records the current zero-harm external-holdout behavior as a standalone local regression without adding the machine-local Hermes path to the portable architecture gate;
+- Hermes' first real feature-residual report showed that the earlier random/hybrid split did not independently improve over symbolic behavior (`hybrid=0.773585`, `symbolic=0.773585`);
+- the new cross-log test found a safer threshold shape on the same Hermes holdout: threshold `0.7` produced zero harmful overrides and improved over symbolic by `+0.04`;
+- threshold `0.5` gave the largest raw gain (`+0.043636`) but caused one harmful override, so the roadmap should prefer zero-harm calibration over maximum accuracy.
+
+Current cross-log result:
+
+```text
+train samples: 296
+test samples: 275
+symbolic baseline: 0.76
+best any threshold: 0.5, delta +0.043636, harmful overrides 1
+best zero-harm threshold: 0.7, delta +0.04, helpful overrides 15, harmful overrides 0
+promotion_ready: false
+```
+
+Interpretation:
+
+- the learned residual path has a real signal when trained on hard symbolic-error cases and evaluated on Hermes data;
+- the result is still not promotion-ready because one training source is generated challenge data and the holdout is only one independent real log;
+- the next proof step is a two-holdout matrix: train without the generated challenge where possible, test on at least two independent real Hermes logs, and require repeated zero-harm improvement before runtime or config promotion.
+
+Twelfth implementation checkpoint:
+
+- `eval/adaptive_behavior_shadow_second_holdout_log.py` now creates a second independent local runtime holdout log with different queries, linked answer feedback, memory feedback, resolver shadow, adaptive behavior shadow, and exported `EvidenceContextFeatures`;
+- the second holdout produced 24 asks, 24 answer-feedback rows, 37 memory-feedback rows, and 87 adaptive behavior decisions;
+- logged/replayed calibration matched exactly at `0.83908`, so the second log is usable for feature-residual holdout testing;
+- rerunning the cross-log residual scorer on this second holdout found another positive zero-harm operating point, but only after extending the threshold grid above `0.95`.
+
+Second holdout result:
+
+```text
+test samples: 87
+symbolic baseline: 0.83908
+best broad-grid threshold: 0.6, delta +0.034483, harmful overrides 1
+best strict zero-harm threshold: 0.995, delta +0.045977, helpful overrides 5, harmful overrides 0
+```
+
+Combined interpretation across two holdouts:
+
+- Hermes real holdout: zero-harm improvement at threshold `0.7`, delta `+0.04`;
+- second local runtime holdout: zero-harm improvement at threshold `0.995`, delta `+0.045977`;
+- the repeated lift is encouraging, but the threshold instability means runtime promotion is still blocked;
+- the next controller improvement should learn or configure a conservative override policy that separates safe high-confidence supported-evidence fixes from stale/scope cases that can produce harmful overrides.
+
+Thirteenth implementation checkpoint:
+
+- `eval/adaptive_behavior_feature_override_policy_eval.py` now searches conservative residual override policies across both holdouts instead of using one threshold-only rule;
+- policies can restrict allowed behavior families, allowed learned target advisories, residual confidence, and family-model confidence;
+- `eval/adaptive_behavior_feature_override_policy_regression.py` records the current two-holdout policy result as a standalone local regression, but it is intentionally not added to the portable architecture gate because one holdout is a local WSL Hermes artifact.
+
+Selected report-only candidate policy:
+
+```json
+{
+  "residual_threshold": 0.995,
+  "family_confidence_threshold": 0.0,
+  "allowed_families": ["supported_evidence"],
+  "allowed_target": "likely_helpful"
+}
+```
+
+Two-holdout result:
+
+```text
+Hermes real holdout:
+  symbolic: 0.76
+  hybrid:   0.778182
+  delta:    +0.018182
+  helpful overrides: 5
+  harmful overrides: 0
+
+Second local runtime holdout:
+  symbolic: 0.83908
+  hybrid:   0.885057
+  delta:    +0.045977
+  helpful overrides: 5
+  harmful overrides: 0
+```
+
+Interpretation:
+
+- the best next controller shape is a narrow positive-supported-evidence rescue gate, not broad learned override;
+- learned residuals should only override symbolic behavior when they predict a symbolic false negative and the family model wants to change the advisory to `likely_helpful`;
+- stale-conflict, wrong-scope, missing-support, and harmful/suppression advisories should remain symbolic/config controlled until more real holdouts prove a learned override is safe;
+- this is still report-only and promotion-blocked until at least one more independent natural Hermes holdout confirms the same zero-harm pattern.
+
+Fourteenth implementation checkpoint:
+
+- `eval/adaptive_behavior_override_policy_candidate.py` now converts the winning two-holdout override policy into a formal `adaptive_behavior_override_policy_candidate/v1` artifact;
+- `eval/adaptive_behavior_override_policy_candidate_guard.py` guards that candidate before any runtime/config implementation;
+- the candidate is explicitly report-only, positive-rescue-only, supported-evidence-only, and promotion-blocked.
+
+Guarded candidate:
+
+```text
+id: adaptive_behavior_supported_evidence_positive_rescue_v1
+readiness: guarded_report_only_candidate
+residual_threshold: 0.995
+allowed_families: supported_evidence
+allowed_target: likely_helpful
+total helpful overrides: 10
+total harmful overrides: 0
+mean delta: +0.032079
+```
+
+This gives the roadmap a clean candidate lifecycle:
+
+```text
+feature logs -> override policy eval -> candidate artifact -> candidate guard -> future natural holdout confirmation
+```
+
+The next best development after this checkpoint is not to wire the candidate into runtime. It is to generate or collect another natural holdout, preferably from Hermes, and rerun the candidate guard against a three-holdout matrix. If that repeats zero-harm improvement, the later implementation step should be a disabled-by-default runtime shadow mode that emits what this candidate would have done, still without changing the answer.
+
+Fifteenth implementation checkpoint:
+
+- `eval/adaptive_behavior_shadow_third_holdout_log.py` now creates a third local natural-style runtime holdout with a harder query mix;
+- the third holdout produced 24 asks, 24 linked answer-feedback rows, 52 memory-feedback rows, and 82 adaptive decisions;
+- logged/replayed calibration matched exactly at `0.621951`, making it a valid but much harder holdout;
+- the prior two-holdout candidate did not survive the three-holdout requirement.
+
+Third holdout threshold sweep:
+
+```text
+symbolic baseline: 0.621951
+best raw threshold: 0.7, delta +0.085366, harmful overrides 2
+best zero-harm threshold: 0.999, delta +0.02439, helpful overrides 2, harmful overrides 0
+```
+
+Three-holdout policy result:
+
+```text
+best safe policy: res0.999 supported_evidence -> likely_helpful
+Hermes holdout:       +0.007273, zero harmful
+second local holdout: +0.0,      zero harmful
+third local holdout:  +0.02439,  zero harmful
+selected candidate: none
+guard readiness: blocked_no_three_holdout_candidate
+```
+
+Interpretation:
+
+- the learned residual signal is real, but the current candidate is not robust enough for promotion;
+- the safety gate worked correctly by blocking the candidate when the third holdout exposed threshold/context instability;
+- the next development direction should be context-filtered rescue, not a global threshold. The harmful third-holdout cases were sensitive/profile/ordinary-cross-namespace questions that looked like supported evidence to the family model;
+- the next candidate should add a learned or configurable suppression feature for sensitive/private lookup pressure and ordinary profile/namespace lookup pressure before permitting supported-evidence rescue.
+
+Sixteenth implementation checkpoint:
+
+- `eval/adaptive_behavior_feature_override_policy_eval.py` now tests explicit context suppressors before allowing learned supported-evidence rescue;
+- suppressors currently cover sensitive/private lookup pressure, stale/previous-policy lookup pressure, and ordinary profile/namespace lookup pressure;
+- the guarded candidate recovered across all three holdouts after adding these suppressors.
+
+Selected context-filtered policy:
+
+```json
+{
+  "residual_threshold": 0.8,
+  "family_confidence_threshold": 0.0,
+  "allowed_families": ["supported_evidence"],
+  "allowed_target": "likely_helpful",
+  "suppressors": ["sensitive_private", "stale_previous", "ordinary_namespace_profile"]
+}
+```
+
+Three-holdout result:
+
+```text
+Hermes real holdout:   +0.036364, 10 helpful, 0 harmful
+second local holdout:  +0.045977,  6 helpful, 0 harmful
+third local holdout:   +0.085366,  7 helpful, 0 harmful
+mean delta:            +0.055902
+total helpful:         23
+total harmful:         0
+readiness:             guarded_report_only_candidate
+```
+
+Interpretation:
+
+- the architecture should treat learned residual rescue as a neural-symbolic controller: learned residual/family models propose the override, while symbolic/context suppressors decide whether it is safe enough to emit;
+- this is a much stronger shape than a threshold-only controller because it explains why the third holdout failed and how the rescue was made safer;
+- the candidate is still not runtime-promoted. The next stage should either collect a natural Hermes fourth holdout or implement a disabled-by-default runtime shadow that only logs what this context-filtered candidate would have done.
+
+Seventeenth implementation checkpoint:
+
+- `core/adaptive_residual_shadow.py` now implements a disabled-by-default runtime shadow for the guarded context-filtered residual rescue candidate;
+- `/ask` can request it with `include_adaptive_residual_shadow=true` and can log it with `log_adaptive_residual_shadow=true`;
+- it trains the tiny local residual/family models from existing feature logs only when explicitly requested, applies the guarded policy, and emits report-only decisions with residual confidence, family advisory, suppressor reasons, and whether the candidate would override symbolic behavior;
+- it does not return or log `adaptive_behavior_shadow` unless separately requested, but internally reuses the same evidence-context feature export path;
+- `eval/adaptive_residual_shadow_runtime_regression.py` proves answer text, evidence ids, selector decision, memory rows, runtime config, and selector policy remain unchanged;
+- the unified architecture gate now requires `adaptive_residual_shadow_runtime_ok`.
+
+Current runtime status:
+
+```text
+adaptive residual shadow: disabled by default
+runtime mutation: none
+config mutation: none
+answer mutation: none
+memory mutation: none
+logging: explicit request only
+```
+
+This moves the learned residual path from an offline candidate artifact to an observable live controller candidate while preserving the safety rule: the symbolic runtime remains authoritative.
+
+Eighteenth implementation checkpoint:
+
+- `eval/adaptive_residual_shadow_fourth_holdout_log.py` now creates a fourth live-style local holdout with explicit `include_adaptive_residual_shadow=true` and `log_adaptive_residual_shadow=true`;
+- `eval/adaptive_residual_shadow_logged_eval.py` evaluates the residual-shadow payload exactly as logged by runtime asks, joined to linked answer feedback;
+- the fourth holdout produced 24 asks, 24 linked answer-feedback rows, 47 memory-feedback rows, and 89 logged residual-shadow decisions;
+- the guarded residual shadow emitted 9 `would_override` decisions: 9 helpful, 0 harmful, 0 neutral-wrong;
+- the shadow remained report-only and did not mutate answer text, selector policy, runtime config, learned artifacts, or memory rows.
+
+Fourth logged-runtime result:
+
+```text
+ask count:        24
+decision count:   89
+would overrides:  9
+helpful:          9
+harmful:          0
+promotion ready:  false
+```
+
+Interpretation:
+
+- the context-filtered residual controller is now validated not only by offline replay, but by the actual runtime shadow object written to outcome logs;
+- the useful signal remains concentrated in `supported_evidence -> likely_helpful` rescue, including several cases where symbolic behavior stayed uncertain or marked bridge-related answers too pessimistically;
+- promotion should still remain blocked until natural multi-day logs confirm the pattern outside generated/local holdouts, but the next engineering step can treat logged residual-shadow evaluation as the standard safety harness for neural-symbolic controller candidates.
+
+Nineteenth implementation checkpoint:
+
+- `eval/selector_architecture_gate.py` now requires `adaptive_residual_shadow_logged_eval_ok`;
+- the unified gate no longer treats logged residual-shadow validation as a side report: a residual controller candidate must pass the runtime mutation regression and the linked-feedback logged-decision evaluation;
+- the current gate passes with the fourth-holdout logged payload: 9 helpful report-only overrides, 0 harmful overrides.
+
+Current residual-controller promotion rule:
+
+```text
+runtime mutation regression: required
+logged decision eval:        required
+harmful logged overrides:    must be zero
+runtime promotion:           still blocked until natural multi-session logs repeat the result
+```
+
+Twentieth implementation checkpoint:
+
+- `eval/adaptive_residual_shadow_multi_log_eval.py` now aggregates logged residual-shadow linked-feedback evaluations across all available residual outcome logs;
+- the aggregate check requires usable residual logs, at least one helpful override, zero harmful overrides, zero neutral-wrong overrides, report-only behavior, and no runtime/config mutation;
+- `eval/selector_architecture_gate.py` now requires `adaptive_residual_shadow_multi_log_eval_ok` in addition to the focused single-log check;
+- the current aggregate uses the available fourth holdout residual log and passes with 9 helpful overrides, 0 harmful overrides, and 0 neutral-wrong overrides.
+
+Current multi-log residual-controller rule:
+
+```text
+single-log residual eval: required
+multi-log aggregate eval: required
+helpful overrides:        must be present
+harmful overrides:        must be zero
+neutral-wrong overrides:  must be zero
+promotion state:          report-only until natural multi-session logs expand the aggregate
+```
+
+Twenty-first implementation checkpoint:
+
+- `eval/adaptive_residual_shadow_fifth_holdout_log.py` now creates a second independent residual-shadow logged holdout with 28 asks, linked answer feedback, memory feedback, and explicit runtime residual-shadow logging;
+- the first fifth-holdout pass exposed a useful safety failure: an unsupported proof-style query and a hidden deployment-key query could still look like supported-evidence rescue candidates;
+- `core/adaptive_residual_shadow.py` now adds a narrow `unsupported_proof` suppressor and expands sensitive/private suppression for deployment-key pressure;
+- after regenerating the fifth holdout, the focused logged eval passed with 9 helpful overrides, 0 harmful overrides, and 0 neutral-wrong overrides;
+- `eval/selector_architecture_gate.py` now runs `adaptive_residual_shadow_multi_log_eval.py --min-logs 2`.
+
+Two-log residual aggregate:
+
+```text
+usable residual logs: 2
+ask count:            52
+decision count:       187
+would overrides:      18
+helpful:              18
+harmful:              0
+neutral-wrong:        0
+promotion ready:      false
+```
+
+Interpretation:
+
+- the fifth holdout did its job by finding a real boundary weakness before promotion;
+- the best controller shape remains a neural-symbolic one: learned residual/family models propose rescue, while explicit suppressors block unsupported proof pressure, sensitive/private retrieval pressure, stale/previous pressure, and ordinary namespace/profile pressure;
+- the architecture gate is now stricter than before because it requires repeated logged residual evidence across at least two residual outcome logs.
+
+Twenty-second implementation checkpoint:
+
+- `eval/adaptive_residual_shadow_suppressor_regression.py` now protects the exact suppressor boundary exposed by the fifth holdout;
+- it checks unsupported proof/result claims, hidden deployment-key pressure, secret credential pressure, stale previous-roadmap pressure, ordinary cross-namespace profile pressure, and clean supported-evidence queries;
+- `core/adaptive_residual_shadow.py` now includes the `cross-namespace` spelling variant in ordinary namespace/profile suppression;
+- `eval/selector_architecture_gate.py` now requires `adaptive_residual_shadow_suppressor_ok`;
+- the full architecture gate passes with the targeted suppressor regression, two-log residual aggregate, single-log residual eval, and runtime no-mutation regression all enabled.
+
+Current residual safety guard stack:
+
+```text
+runtime no-mutation regression:       required
+single logged-decision eval:          required
+two-log aggregate decision eval:      required
+targeted suppressor regression:       required
+runtime authority:                    symbolic
+residual controller status:           report-only
+```
+
+Twenty-third implementation checkpoint:
+
+- residual-shadow controller policy is now configurable through `config.yaml` under `adaptive_residual_shadow`;
+- configurable fields include residual threshold, family confidence threshold, allowed families, allowed target advisory, active suppressors, and term groups for each suppressor;
+- `core/adaptive_residual_shadow.py` loads this configured policy through `load_policy(root)` and falls back to the built-in safe defaults when config is absent;
+- `eval/adaptive_residual_shadow_suppressor_regression.py` now validates the configured policy rather than only the Python defaults;
+- the full architecture gate passes with the configurable residual policy enabled.
+
+Current configurable residual policy surface:
+
+```text
+adaptive_residual_shadow.residual_threshold
+adaptive_residual_shadow.family_confidence_threshold
+adaptive_residual_shadow.allowed_families
+adaptive_residual_shadow.allowed_target
+adaptive_residual_shadow.suppressors
+adaptive_residual_shadow.terms.sensitive_private
+adaptive_residual_shadow.terms.stale_previous
+adaptive_residual_shadow.terms.ordinary_namespace_profile
+adaptive_residual_shadow.terms.unsupported_proof
+```
+
+Interpretation:
+
+- this moves the residual controller one step closer to the roadmap goal of learned/configurable adaptive control instead of brittle hardcoded behavior;
+- the suppressors are still symbolic vocabulary gates, but they are now an explicit policy interface that can later be updated by guarded candidate profiles or learned term miners instead of source-code edits.
+
+Twenty-fourth implementation checkpoint:
+
+- `eval/adaptive_residual_shadow_term_candidate_miner.py` now provides the first report-only term-mining path for residual suppressor evolution;
+- it reads available residual-shadow outcome logs, evaluates logged decisions, extracts candidate suppressor terms only from harmful or neutral-wrong would-overrides, and emits a candidate profile artifact;
+- when no unsafe residual overrides remain, it records `recommendation: no_new_terms_needed` instead of inventing vocabulary;
+- it also verifies known boundary queries are currently suppressed by the configured policy;
+- `eval/selector_architecture_gate.py` now requires `adaptive_residual_shadow_term_miner_ok`.
+
+Current term-miner result:
+
+```text
+residual logs read: 2
+candidate terms:    0
+recommendation:     no_new_terms_needed
+gate status:        passed
+```
+
+Interpretation:
+
+- this is the first step from static configurable suppressors toward adaptive suppressor maintenance;
+- the miner is intentionally conservative: it can propose terms from failures, but it cannot update config or runtime behavior;
+- future natural logs that expose unsafe residual overrides can now produce reviewable suppressor candidates without source-code edits.
+
+Twenty-fifth implementation checkpoint:
+
+- `eval/adaptive_residual_shadow_term_miner_regression.py` now tests the term miner against synthetic unsafe residual overrides;
+- the regression verifies that harmful/neutral-wrong examples produce reviewable candidate terms and that the miner recommends review instead of automatic config mutation;
+- `eval/selector_architecture_gate.py` now requires `adaptive_residual_shadow_term_miner_regression_ok`;
+- the full architecture gate passes with both clean-log mining (`no_new_terms_needed`) and synthetic-failure mining (`review_candidates_before_config_update`) protected.
+
+Current adaptive suppressor maintenance path:
+
+```text
+clean residual logs -> no new terms
+unsafe residual examples -> candidate terms
+candidate terms -> review-only artifact
+config mutation -> never automatic
+runtime mutation -> never automatic
+```
+
+Twenty-sixth implementation checkpoint:
+
+- `eval/adaptive_residual_shadow_term_candidate_miner.py` now ranks candidate suppressor terms by review quality;
+- vague one-token terms such as `key`, `live`, `hidden`, `deployment`, `profile`, and `retrieve` are filtered out;
+- `eval/adaptive_residual_shadow_term_miner_regression.py` now requires the miner to find known useful failure phrases while rejecting noisy single-token candidates;
+- current synthetic unsafe examples produce 15 reviewable multi-word candidates, while current clean residual logs still produce no new candidates.
+
+Current candidate-quality rule:
+
+```text
+single weak tokens: filtered
+multi-word failure phrases: retained
+config updates: review-only
+runtime updates: blocked
+```
+
+Twenty-seventh implementation checkpoint:
+
+- `eval/adaptive_residual_shadow_term_patch_proposal.py` now turns mined suppressor candidates into a review-only config patch preview;
+- the proposal groups terms into `sensitive_private`, `unsupported_proof`, `ordinary_namespace_profile`, or `stale_previous`, while ambiguous terms stay in a `review_required` bucket;
+- the proposal snapshots `config.yaml` before and after generation and verifies it did not mutate config;
+- `eval/adaptive_residual_shadow_term_patch_regression.py` validates the grouping rules with synthetic terms and confirms config remains unchanged;
+- `eval/selector_architecture_gate.py` now requires both `adaptive_residual_shadow_term_patch_ok` and `adaptive_residual_shadow_term_patch_regression_ok`.
+
+Current guarded suppressor update lifecycle:
+
+```text
+unsafe residual logs -> term miner -> quality filter -> patch proposal -> human review
+automatic config write -> blocked
+automatic runtime change -> blocked
+```
+
+Twenty-eighth implementation checkpoint:
+
+- `eval/adaptive_residual_shadow_term_patch_pipeline_regression.py` now tests the full adaptive suppressor maintenance path end to end with synthetic unsafe residual examples;
+- it runs synthetic unsafe examples through the miner, candidate quality filter, patch proposal grouping, and config mutation checks;
+- the regression verifies that specific candidates are grouped into `sensitive_private`, `unsupported_proof`, and `ordinary_namespace_profile` buckets;
+- `eval/adaptive_residual_shadow_term_patch_proposal.py` now treats candidate-producing unsafe miner reports as valid review inputs while still requiring report-only behavior and unchanged config;
+- `eval/selector_architecture_gate.py` now requires `adaptive_residual_shadow_term_patch_pipeline_ok`.
+
+Current adaptive suppressor loop status:
+
+```text
+clean logs:          no patch terms proposed
+synthetic failures:  patch preview terms proposed and grouped
+config mutation:     blocked
+runtime mutation:    blocked
+gate status:         passed
+```
+
+Twenty-ninth implementation checkpoint:
+
+- `eval/adaptive_residual_shadow_term_patch_proposal.py` now compares mined candidate terms against the active configured suppressor terms;
+- patch previews separate truly new `append_terms` from `already_configured` terms, preventing duplicate config proposals;
+- `eval/adaptive_residual_shadow_term_patch_pipeline_regression.py` now verifies both new-term grouping and existing-term deduplication;
+- the full architecture gate passes with duplicate-aware patch proposals.
+
+Current duplicate-aware patch behavior:
+
+```text
+already configured terms -> listed separately
+new candidate terms -> append preview only
+ambiguous terms -> review_required
+config mutation -> blocked
+```
+
+Thirtieth implementation checkpoint:
+
+- `eval/adaptive_residual_shadow_term_patch_guard.py` now guards review-only suppressor patch proposals before any manual config application is considered;
+- the guard requires proposal validity, report-only status, no config/runtime mutation, no ambiguous terms for automatic application, and no new terms unless manual review is explicitly required;
+- on current clean residual logs the guard passes with `no_action_needed: true` and `manual_review_required: false`;
+- `eval/selector_architecture_gate.py` now requires `adaptive_residual_shadow_term_patch_guard_ok`.
+
+Current suppressor patch promotion state:
+
+```text
+clean logs: no action needed
+new append terms: manual review required
+ambiguous terms: manual review required
+automatic config application: blocked
+runtime promotion: blocked
+```
+
+Thirty-first implementation checkpoint:
+
+- `eval/adaptive_residual_shadow_sixth_natural_holdout_log.py` now creates a larger natural-style residual-shadow holdout with 44 asks, linked answer feedback, memory feedback, and explicit runtime residual logging;
+- the first sixth-holdout pass exposed a real wrong-scope boundary: `Can ordinary namespace lookup bypass the residual suppressors?` was incorrectly rescued by the residual controller;
+- `core/adaptive_residual_shadow.py` and `config.yaml` now extend `ordinary_namespace_profile` suppression with `ordinary namespace` and `namespace lookup`;
+- `eval/adaptive_residual_shadow_suppressor_regression.py` now includes the ordinary namespace bypass case;
+- after regenerating the sixth holdout, the logged eval passed with 11 helpful overrides, 0 harmful overrides, and 0 neutral-wrong overrides;
+- `eval/selector_architecture_gate.py` now requires `adaptive_residual_shadow_multi_log_eval.py --min-logs 3`.
+
+Three-log residual aggregate:
+
+```text
+usable residual logs: 3
+ask count:            96
+decision count:       351
+would overrides:      29
+helpful:              29
+harmful:              0
+neutral-wrong:        0
+promotion ready:      false
+```
+
+Interpretation:
+
+- the residual controller has now survived three logged holdouts after each discovered boundary failure was converted into a configurable suppressor and regression case;
+- this is materially stronger than the earlier two-log result, but runtime promotion should still remain blocked until at least one independent external/natural agent log repeats the zero-harm pattern.
+
+Thirty-second implementation checkpoint:
+
+- `eval/adaptive_residual_shadow_promotion_readiness.py` now summarizes residual-controller promotion evidence and explicitly blocks runtime promotion until external/agent residual logs exist;
+- the readiness report uses the three-log aggregate as evidence, classifies current logs as local/local-natural-style, and records `blocked_reason: external_or_agent_residual_log_required`;
+- `eval/selector_architecture_gate.py` now requires `adaptive_residual_shadow_promotion_readiness_ok`.
+
+Current promotion readiness:
+
+```text
+three-log local aggregate: passed
+helpful overrides:        29
+harmful overrides:        0
+neutral-wrong overrides:  0
+external/agent logs:      0
+promotion ready:          false
+blocked reason:           external_or_agent_residual_log_required
+```
+
+Interpretation:
+
+- the local evidence is strong enough to justify continued development of the residual controller;
+- it is not yet strong enough to justify runtime authority or config auto-application;
+- the next evidence milestone should be an independent Hermes/agent residual log evaluated by the same readiness artifact.
+
+Thirty-third implementation checkpoint:
+
+- `docs/HERMES_ADAPTIVE_RESIDUAL_SHADOW_EXTERNAL_LOG_HANDOVER.md` now defines the external Hermes/agent validation run required by the promotion-readiness gate;
+- the handover specifies runtime flags, feedback labels, scenario families, output files, optional local evaluation commands, and success criteria;
+- this turns the readiness blocker into an executable external validation task rather than an informal note.
+
+Next evidence target:
+
+```text
+external/agent residual log: required
+minimum ask-feedback pairs:  40
+target ask-feedback pairs:   60+
+harmful overrides:           0
+neutral-wrong overrides:     0
+helpful overrides:           >0
+```

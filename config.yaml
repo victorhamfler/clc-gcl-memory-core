@@ -138,6 +138,18 @@ adaptive_behavior:
     wrong_scope_route_confidence: 0.56
     wrong_scope_low_route_confidence: 0.42
 
+adaptive_residual_shadow:
+  residual_threshold: 0.8
+  family_confidence_threshold: 0.0
+  allowed_families: supported_evidence
+  allowed_target: likely_helpful
+  suppressors: sensitive_private,stale_previous,ordinary_namespace_profile,unsupported_proof
+  terms:
+    sensitive_private: api key,bank pin,database password,deployment key,deployment password,hidden deployment,hostname,identity number,passport,password,personal identity,private,recovery phrase,secret,token,unlogged,unrecorded
+    stale_previous: old,previous,before the correction,before the update,still valid,still be used
+    ordinary_namespace_profile: ordinary profile,ordinary namespace,profile lookup,namespace lookup,cross-namespace,cross namespaces,namespace crossing
+    unsupported_proof: already natural multi-day data,changed live answers,proves residual,result proves,unsupported claim
+
 claim_scope:
   stopwords: about,check,checks,current,currently,does,for,from,help,helps,latest,prefer,prefers,preference,remember,should,that,the,use,what,when,where,which,who,with,victor,hermes,project
   slot_aliases:
