@@ -116,6 +116,9 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
         "adaptive_residual_shadow_suppressor_ok": bool(
             (step_json(steps, "adaptive_residual_shadow_suppressor_regression") or {}).get("ok")
         ),
+        "adaptive_residual_shadow_external_failure_replay_ok": bool(
+            (step_json(steps, "adaptive_residual_shadow_external_failure_replay") or {}).get("ok")
+        ),
         "adaptive_residual_shadow_term_miner_ok": bool(
             (step_json(steps, "adaptive_residual_shadow_term_candidate_miner") or {}).get("ok")
         ),
@@ -136,6 +139,24 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
         ),
         "adaptive_residual_shadow_promotion_readiness_ok": bool(
             (step_json(steps, "adaptive_residual_shadow_promotion_readiness") or {}).get("ok")
+        ),
+        "adaptive_residual_risk_scorer_ok": bool(
+            (step_json(steps, "adaptive_residual_risk_scorer_regression") or {}).get("ok")
+        ),
+        "adaptive_residual_risk_disagreement_ok": bool(
+            (step_json(steps, "adaptive_residual_risk_disagreement_eval") or {}).get("ok")
+        ),
+        "adaptive_residual_risk_logged_eval_ok": bool(
+            (step_json(steps, "adaptive_residual_risk_logged_eval") or {}).get("ok")
+        ),
+        "adaptive_residual_risk_overprotection_candidate_ok": bool(
+            (step_json(steps, "adaptive_residual_risk_overprotection_candidate") or {}).get("ok")
+        ),
+        "adaptive_residual_risk_overprotection_recurrence_ok": bool(
+            (step_json(steps, "adaptive_residual_risk_overprotection_recurrence") or {}).get("ok")
+        ),
+        "adaptive_residual_risk_exception_simulation_ok": bool(
+            (step_json(steps, "adaptive_residual_risk_exception_simulation") or {}).get("ok")
         ),
         "adaptive_behavior_candidate_profile_guard_ok": bool(
             (step_json(steps, "adaptive_behavior_candidate_profile_guard_regression") or {}).get("ok")
@@ -215,6 +236,7 @@ def write_markdown(report: dict[str, Any], out_md: Path) -> None:
         "adaptive_residual_shadow_logged_eval_ok",
         "adaptive_residual_shadow_multi_log_eval_ok",
         "adaptive_residual_shadow_suppressor_ok",
+        "adaptive_residual_shadow_external_failure_replay_ok",
         "adaptive_residual_shadow_term_miner_ok",
         "adaptive_residual_shadow_term_miner_regression_ok",
         "adaptive_residual_shadow_term_patch_ok",
@@ -222,6 +244,12 @@ def write_markdown(report: dict[str, Any], out_md: Path) -> None:
         "adaptive_residual_shadow_term_patch_pipeline_ok",
         "adaptive_residual_shadow_term_patch_guard_ok",
         "adaptive_residual_shadow_promotion_readiness_ok",
+        "adaptive_residual_risk_scorer_ok",
+        "adaptive_residual_risk_disagreement_ok",
+        "adaptive_residual_risk_logged_eval_ok",
+        "adaptive_residual_risk_overprotection_candidate_ok",
+        "adaptive_residual_risk_overprotection_recurrence_ok",
+        "adaptive_residual_risk_exception_simulation_ok",
         "adaptive_behavior_candidate_profile_guard_ok",
         "adaptive_behavior_profile_memory_bank_guard_ok",
         "adaptive_behavior_stale_conflict_candidate_ok",
@@ -327,9 +355,11 @@ def main() -> int:
                 str(ROOT / "eval" / "adaptive_residual_shadow_fourth_holdout_log.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_fifth_holdout_log.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_sixth_natural_holdout_log.py"),
+                str(ROOT / "eval" / "adaptive_residual_shadow_seventh_agent_style_log.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_logged_eval.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_multi_log_eval.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_suppressor_regression.py"),
+                str(ROOT / "eval" / "adaptive_residual_shadow_external_failure_replay.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_term_candidate_miner.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_term_miner_regression.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_term_patch_proposal.py"),
@@ -337,6 +367,13 @@ def main() -> int:
                 str(ROOT / "eval" / "adaptive_residual_shadow_term_patch_pipeline_regression.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_term_patch_guard.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_promotion_readiness.py"),
+                str(ROOT / "eval" / "adaptive_residual_risk_scorer_eval.py"),
+                str(ROOT / "eval" / "adaptive_residual_risk_scorer_regression.py"),
+                str(ROOT / "eval" / "adaptive_residual_risk_disagreement_eval.py"),
+                str(ROOT / "eval" / "adaptive_residual_risk_logged_eval.py"),
+                str(ROOT / "eval" / "adaptive_residual_risk_overprotection_candidate.py"),
+                str(ROOT / "eval" / "adaptive_residual_risk_overprotection_recurrence.py"),
+                str(ROOT / "eval" / "adaptive_residual_risk_exception_simulation.py"),
                 str(ROOT / "eval" / "adaptive_behavior_shadow_real_log_calibration.py"),
                 str(ROOT / "eval" / "adaptive_behavior_shadow_real_log_rerun.py"),
                 str(ROOT / "eval" / "adaptive_behavior_candidate_profile.py"),
@@ -416,11 +453,21 @@ def main() -> int:
         ),
         run_step(
             "adaptive_residual_shadow_multi_log_eval",
-            [python, str(ROOT / "eval" / "adaptive_residual_shadow_multi_log_eval.py"), "--min-logs", "3"],
+            [
+                python,
+                str(ROOT / "eval" / "adaptive_residual_shadow_multi_log_eval.py"),
+                "--min-logs",
+                "3",
+                "--exclude-processed-failures",
+            ],
         ),
         run_step(
             "adaptive_residual_shadow_suppressor_regression",
             [python, str(ROOT / "eval" / "adaptive_residual_shadow_suppressor_regression.py")],
+        ),
+        run_step(
+            "adaptive_residual_shadow_external_failure_replay",
+            [python, str(ROOT / "eval" / "adaptive_residual_shadow_external_failure_replay.py")],
         ),
         run_step(
             "adaptive_residual_shadow_term_candidate_miner",
@@ -449,6 +496,30 @@ def main() -> int:
         run_step(
             "adaptive_residual_shadow_promotion_readiness",
             [python, str(ROOT / "eval" / "adaptive_residual_shadow_promotion_readiness.py")],
+        ),
+        run_step(
+            "adaptive_residual_risk_scorer_regression",
+            [python, str(ROOT / "eval" / "adaptive_residual_risk_scorer_regression.py")],
+        ),
+        run_step(
+            "adaptive_residual_risk_disagreement_eval",
+            [python, str(ROOT / "eval" / "adaptive_residual_risk_disagreement_eval.py")],
+        ),
+        run_step(
+            "adaptive_residual_risk_logged_eval",
+            [python, str(ROOT / "eval" / "adaptive_residual_risk_logged_eval.py")],
+        ),
+        run_step(
+            "adaptive_residual_risk_overprotection_candidate",
+            [python, str(ROOT / "eval" / "adaptive_residual_risk_overprotection_candidate.py")],
+        ),
+        run_step(
+            "adaptive_residual_risk_overprotection_recurrence",
+            [python, str(ROOT / "eval" / "adaptive_residual_risk_overprotection_recurrence.py")],
+        ),
+        run_step(
+            "adaptive_residual_risk_exception_simulation",
+            [python, str(ROOT / "eval" / "adaptive_residual_risk_exception_simulation.py")],
         ),
         run_step(
             "adaptive_behavior_candidate_profile_guard_regression",

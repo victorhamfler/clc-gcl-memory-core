@@ -57,7 +57,7 @@ SYNTHETIC_REPORTS = [
 
 
 def build_report() -> dict[str, object]:
-    mined = mine_reports(SYNTHETIC_REPORTS, load_policy(ROOT))
+    mined = mine_reports(SYNTHETIC_REPORTS, load_policy(ROOT), skip_currently_suppressed=False)
     candidate_terms = {str(row.get("term")) for row in mined.get("candidates") or [] if isinstance(row, dict)}
     noisy_terms = {"key", "live", "hidden", "deployment", "retrieve", "profile", "preference"}
     expected_any = {

@@ -10,7 +10,13 @@ ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = ROOT.parent
 sys.path.insert(0, str(ROOT))
 
-from eval.adaptive_residual_shadow_multi_log_eval import build_multi_log_report, discover_logs  # noqa: E402
+from eval.adaptive_residual_shadow_external_failure_replay import build_report as build_failure_replay_report  # noqa: E402
+from eval.adaptive_residual_shadow_multi_log_eval import (  # noqa: E402
+    PROCESSED_FAILURE_LOG_NAMES,
+    build_multi_log_report,
+    discover_logs,
+    filter_logs,
+)
 
 
 OUT_JSON = REPO_ROOT / "experiments" / "adaptive_residual_shadow_promotion_readiness_results.json"
@@ -28,7 +34,10 @@ def log_kind(path: str) -> str:
 
 def build_report() -> dict[str, Any]:
     logs = discover_logs("adaptive_residual_shadow_*_outcomes.jsonl")
-    multi = build_multi_log_report(logs, min_logs=3)
+    replay = build_failure_replay_report()
+    processed_failure_logs = set(PROCESSED_FAILURE_LOG_NAMES) if replay.get("ok") else set()
+    clean_logs = filter_logs(logs, processed_failure_logs)
+    multi = build_multi_log_report(clean_logs, min_logs=3)
     log_rows = []
     external_count = 0
     for row in multi.get("logs") or []:
@@ -42,6 +51,7 @@ def build_report() -> dict[str, Any]:
     totals = multi.get("totals") if isinstance(multi.get("totals"), dict) else {}
     checks = {
         "three_log_gate_passed": bool(multi.get("ok")),
+        "processed_failure_replay_passed": bool(replay.get("ok")),
         "zero_harmful_overrides": int(totals.get("harmful_override_count") or 0) == 0,
         "zero_neutral_wrong_overrides": int(totals.get("neutral_wrong_override_count") or 0) == 0,
         "has_helpful_overrides": int(totals.get("helpful_override_count") or 0) > 0,
@@ -65,6 +75,12 @@ def build_report() -> dict[str, Any]:
         "recommendation": "collect_external_or_agent_residual_log" if not promotion_ready else "eligible_for_manual_promotion_review",
         "totals": totals,
         "logs": log_rows,
+        "processed_failure_logs": sorted(processed_failure_logs),
+        "processed_failure_replay": {
+            "ok": replay.get("ok"),
+            "source_eval": replay.get("source_eval"),
+            "replayed": len(replay.get("replay_rows") or []),
+        },
         "report_only": True,
         "mutates_runtime": False,
         "mutates_config": False,

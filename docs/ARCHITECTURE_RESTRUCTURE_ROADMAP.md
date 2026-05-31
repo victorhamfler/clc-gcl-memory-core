@@ -2810,3 +2810,250 @@ harmful overrides:           0
 neutral-wrong overrides:     0
 helpful overrides:           >0
 ```
+
+Thirty-fourth implementation checkpoint:
+
+- Hermes produced the first external residual-shadow log against commit `ddc95bc` with 62 asks, 62 linked answer-feedback rows, 126 memory-feedback rows, and residual shadow present on every ask;
+- the external log found one harmful residual override: `Which stale config value was replaced by the current one?`;
+- root cause: the learned family path misrouted a stale-config replacement query into `supported_evidence -> likely_helpful` while the symbolic path correctly stayed `likely_harmful`;
+- `core/adaptive_residual_shadow.py` and `config.yaml` now extend `stale_previous` suppression with `stale`, `stale config`, `config value`, and `replaced by the current`;
+- `eval/adaptive_residual_shadow_suppressor_regression.py` now protects the exact stale-config replacement query;
+- `eval/adaptive_residual_shadow_external_failure_replay.py` replays Hermes' harmful example against the current suppressor policy and confirms it would now be suppressed.
+
+External failure status:
+
+```text
+Hermes external log:      useful development failure
+harmful overrides:        1 in historical logged payload
+current policy replay:    suppressed
+promotion ready:          false
+next external step:       rerun Hermes residual log with patched policy
+```
+
+Interpretation:
+
+- the external log did what it was supposed to do: it found a boundary the local holdouts missed;
+- because the harmful decision is already logged, the historical Hermes log remains a failing strict logged-eval artifact;
+- the patched policy needs a fresh external/agent run before promotion readiness can become true.
+
+Thirty-fifth implementation checkpoint:
+
+- residual-shadow evaluation now distinguishes clean validation logs from processed historical failure logs;
+- `eval/adaptive_residual_shadow_multi_log_eval.py` supports excluding processed failure logs from clean aggregate metrics while preserving the original failure files as evidence;
+- `eval/adaptive_residual_shadow_promotion_readiness.py` now requires the external failure replay to pass, excludes processed historical failure logs from clean readiness metrics, and still blocks promotion until a fresh clean external/agent log exists;
+- `eval/adaptive_residual_shadow_term_candidate_miner.py` treats unsafe historical rows as resolved when the current suppressor policy now blocks their query, while synthetic raw-mining regressions can still exercise the candidate-learning path;
+- `eval/selector_architecture_gate.py` now requires the external failure replay and passes again with the processed-failure split.
+
+Current processed-failure result:
+
+```text
+historical Hermes harmful rows replayed: 1
+current policy suppression:             passed
+clean residual logs:                    3
+clean would overrides:                  29
+clean helpful overrides:                29
+clean harmful overrides:                0
+promotion ready:                        false
+blocked reason:                         external_or_agent_residual_log_required
+```
+
+Interpretation:
+
+- the stale-config external failure is now a fixed regression target, not a clean validation log;
+- the architecture gate is green for continued development;
+- promotion remains correctly blocked until a new Hermes/agent run validates the patched policy without harmful or neutral-wrong overrides.
+
+Thirty-sixth implementation checkpoint:
+
+- because Hermes was temporarily unavailable, `eval/adaptive_residual_shadow_seventh_agent_style_log.py` now creates a laptop-local agent-style substitute residual log;
+- the substitute log targets the recently fixed stale-config failure, unsupported production-authority claims, private/sensitive lookup pressure, wrong-scope namespace pressure, and OGCF bridge useful/noise wording;
+- the first run exposed one neutral-wrong missing-support override on `Which proof says the residual controller can now mutate live answers?`;
+- `unsupported_proof` suppression is now configurable for `can now mutate`, `mutate live`, and `mutate live answers`, and `eval/adaptive_residual_shadow_suppressor_regression.py` protects this boundary;
+- after regeneration, the seventh agent-style log passes with 18 asks, 1 helpful would-override, 0 harmful overrides, and 0 neutral-wrong overrides;
+- the clean four-log aggregate passes with 114 asks, 412 residual decisions, 30 helpful overrides, 0 harmful overrides, and 0 neutral-wrong overrides;
+- the unified selector architecture gate passes with the new generator included in compile coverage.
+
+Interpretation:
+
+- the local agent-style substitute is useful for continued development while Hermes is unavailable;
+- it should not be treated as a replacement for independent external validation;
+- promotion readiness remains blocked with `external_or_agent_residual_log_required` until a fresh Hermes/agent log confirms the same zero-harm pattern outside this local generator.
+
+Thirty-seventh implementation checkpoint:
+
+- `eval/adaptive_residual_risk_scorer_eval.py` adds the first report-only learned residual-risk diagnostic for the residual controller;
+- the scorer trains a tiny local naive-Bayes text/decision model over synthetic boundary rows plus current residual-shadow logged examples;
+- it predicts risk categories that map to the roadmap's neural-symbolic suppressor direction: `unsupported_authority_claim`, `stale_previous_lookup`, `sensitive_private_lookup`, `ordinary_namespace_scope_risk`, `safe_supported_evidence_rescue`, and `other_symbolic_fallback`;
+- `eval/adaptive_residual_risk_scorer_regression.py` guards the diagnostic as report-only, config/runtime immutable, promotion-blocked, and requiring protected boundary recall;
+- the unified selector gate now requires `adaptive_residual_risk_scorer_ok`.
+
+Current learned-risk scorer result:
+
+```text
+samples:                   52
+logged samples:            30
+test accuracy:             0.666667
+protected boundary recall: 1.0
+promotion ready:           false
+```
+
+Interpretation:
+
+- this is the first concrete step beyond purely term-based suppressors;
+- it is not yet a runtime controller because general accuracy is modest and the dataset is still mostly generated/local;
+- its value is as a diagnostic learner that can reveal whether future suppressor candidates are semantically recurring rather than merely phrase-matched.
+
+Thirty-eighth implementation checkpoint:
+
+- `eval/adaptive_residual_risk_disagreement_eval.py` now compares the learned residual-risk scorer against the current configurable term suppressors on paraphrased boundary challenges;
+- the disagreement report highlights cases where the learned scorer catches protected risks beyond the exact term lists and blocks safe-query over-warning as a regression failure;
+- the first run found useful beyond-term catches but over-warned a safe local-development query, so the learned scorer training set now includes additional safe local-log/development examples;
+- after the update, the disagreement eval passes with seven learned risk catches beyond current term suppressors and zero safe over-warnings;
+- the unified selector gate now requires `adaptive_residual_risk_disagreement_ok`.
+
+Current learned-vs-term result:
+
+```text
+learned beyond-term risk catches: 7
+safe over-warnings:              0
+runtime mutation:                false
+config mutation:                 false
+promotion ready:                 false
+```
+
+Interpretation:
+
+- the learned diagnostic is beginning to add value beyond brittle phrase matching;
+- it remains advisory only, but it gives the roadmap a concrete measurement for when learned semantic suppressors are becoming useful enough to consider guarded runtime-shadow integration.
+
+Thirty-ninth implementation checkpoint:
+
+- `core/adaptive_residual_shadow.py` now exports learned residual-risk diagnostics inside the runtime residual-shadow payload;
+- each residual decision now reports `term_risk_label`, `learned_risk_label`, `learned_risk_confidence`, and whether the learned risk label disagrees with the current term suppressor interpretation;
+- the top-level payload includes a `learned_risk_model` summary with sample counts and immutable report-only flags;
+- `eval/adaptive_residual_shadow_runtime_regression.py` now guards that these diagnostics are present while answer text, selector policy, evidence, runtime memory, and config remain unchanged;
+- this turns the learned risk scorer from an offline report into logged runtime shadow evidence for future real-agent calibration.
+
+Current runtime diagnostic status:
+
+```text
+runtime payload includes learned risk labels: true
+answer mutation:                              false
+selector mutation:                            false
+memory mutation:                              false
+config mutation:                              false
+architecture gate:                            passed
+promotion ready:                              false
+```
+
+Interpretation:
+
+- future local/Hermes residual logs can now collect learned-vs-term risk disagreement at ask time;
+- this is the needed data path before a learned semantic suppressor can ever be considered for guarded runtime authority;
+- the current implementation remains a diagnostic-only neural-symbolic shadow.
+
+Fortieth implementation checkpoint:
+
+- `eval/adaptive_residual_risk_logged_eval.py` now evaluates learned-risk diagnostics from actual runtime residual-shadow outcome logs;
+- the logged eval confirms the runtime payload carries learned and term risk labels for residual decisions;
+- it reports two development signals: learned protected-risk catches beyond current term suppressors, and term-overprotection cases where a safe meta/development query is protected by broad terms;
+- the seventh local agent-style log was regenerated with the runtime learned-risk fields and passed the logged-risk eval;
+- the unified selector gate now requires `adaptive_residual_risk_logged_eval_ok`.
+
+Current logged learned-risk result:
+
+```text
+risk diagnostic rows:       61
+learned beyond-term catches: 10
+term overprotection signals: 2
+runtime mutation:            false
+config mutation:             false
+architecture gate:           passed
+promotion ready:             false
+```
+
+Interpretation:
+
+- the learned diagnostic is now useful in real logs, not only offline challenge rows;
+- beyond-term catches show where learned semantic risk can eventually reduce dependence on phrase lists;
+- term-overprotection signals show where broad phrase suppressors may be too conservative and should later become learned/contextual rather than manually narrowed.
+
+Forty-first implementation checkpoint:
+
+- `eval/adaptive_residual_risk_overprotection_candidate.py` now converts logged term-overprotection signals into a review-only contextual exception candidate artifact;
+- the candidate groups safe learned-risk readings that are still protected by broad term suppressors, without changing the active suppressor policy;
+- the current local log produces one candidate group for `stale_previous_lookup` overprotection on safe meta/development queries about the current suppressor and Hermes replay;
+- the artifact explicitly blocks auto-application and requires recurrence across independent logs before any config or runtime change;
+- the unified selector gate now requires `adaptive_residual_risk_overprotection_candidate_ok`.
+
+Current overprotection candidate result:
+
+```text
+term overprotection signals: 2
+candidate groups:            1
+candidate action:            learned_contextual_exception_candidate
+auto apply:                  blocked
+promotion ready:             false
+architecture gate:           passed
+```
+
+Interpretation:
+
+- this is the first path for learned diagnostics to improve not only missed risk, but also overconservative term suppression;
+- it keeps the current safe term suppressors active while collecting evidence for future contextual exceptions;
+- the next milestone is recurrence testing across another independent local or Hermes-style log.
+
+Forty-second implementation checkpoint:
+
+- `eval/adaptive_residual_shadow_eighth_meta_recurrence_log.py` now creates a second local recurrence-focused residual log;
+- the eighth log stresses safe meta/development queries about stale suppressors and replay evidence alongside genuinely unsafe stale, private, unsupported, and scope-risk queries;
+- the eighth residual logged eval passes with 16 asks, 2 helpful would-overrides, 0 harmful overrides, and 0 neutral-wrong overrides;
+- the eighth learned-risk logged eval passes with 53 diagnostic rows, 4 learned beyond-term catches, and 1 term-overprotection signal;
+- the clean five-log residual aggregate passes with 32 helpful overrides, 0 harmful overrides, and 0 neutral-wrong overrides;
+- `eval/adaptive_residual_risk_overprotection_recurrence.py` now aggregates overprotection candidates across the seventh and eighth local logs;
+- recurrence is now observed for one `stale_previous_lookup` contextual exception candidate group, but promotion remains blocked.
+
+Current recurrence result:
+
+```text
+recurrence logs:        2
+recurrent groups:       1
+candidate family:       stale_previous_lookup
+runtime mutation:       false
+config mutation:        false
+architecture gate:      passed
+promotion ready:        false
+```
+
+Interpretation:
+
+- the safe meta/development overprotection pattern is no longer a one-log artifact;
+- it is still local-only evidence, so the correct action is to keep collecting recurrence, especially from a future Hermes/external log;
+- this is a concrete roadmap step toward learned contextual suppressor exceptions without weakening current safety.
+
+Forty-third implementation checkpoint:
+
+- `eval/adaptive_residual_risk_exception_simulation.py` now simulates the recurring learned contextual-exception candidate in report-only mode;
+- the simulation asks whether term-overprotected, learned-safe residual decisions would become helpful or unsafe if the broad term suppressor were bypassed by a learned contextual exception;
+- across the seventh and eighth local logs, the simulation found three candidate exceptions;
+- all three simulated exceptions were helpful, with 0 harmful and 0 neutral-wrong outcomes;
+- the unified selector gate now requires `adaptive_residual_risk_exception_simulation_ok`.
+
+Current exception simulation result:
+
+```text
+simulated exception candidates: 3
+helpful:                        3
+harmful:                        0
+neutral-wrong:                  0
+runtime mutation:               false
+config mutation:                false
+architecture gate:              passed
+promotion ready:                false
+```
+
+Interpretation:
+
+- the learned contextual exception candidate now has local recurrence and local zero-harm simulation evidence;
+- this is still not enough for runtime authority, but it is a strong prototype result for the neural-symbolic roadmap;
+- the correct next evidence step is a fresh external/Hermes-style run or another independently generated local holdout before considering any guarded config candidate.

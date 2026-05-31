@@ -21,7 +21,7 @@ OUT_MD = REPO_ROOT / "experiments" / "adaptive_residual_shadow_term_patch_pipeli
 
 def build_report() -> dict[str, object]:
     before = (ROOT / "config.yaml").read_text(encoding="utf-8") if (ROOT / "config.yaml").exists() else ""
-    mined = mine_reports(SYNTHETIC_REPORTS, load_policy(ROOT))
+    mined = mine_reports(SYNTHETIC_REPORTS, load_policy(ROOT), skip_currently_suppressed=False)
     after_mining = (ROOT / "config.yaml").read_text(encoding="utf-8") if (ROOT / "config.yaml").exists() else ""
     proposal = build_proposal_from_miner(mined, before_config=before, after_config=after_mining)
     grouped = proposal.get("proposed_term_groups") if isinstance(proposal.get("proposed_term_groups"), dict) else {}

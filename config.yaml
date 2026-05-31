@@ -146,9 +146,9 @@ adaptive_residual_shadow:
   suppressors: sensitive_private,stale_previous,ordinary_namespace_profile,unsupported_proof
   terms:
     sensitive_private: api key,bank pin,database password,deployment key,deployment password,hidden deployment,hostname,identity number,passport,password,personal identity,private,recovery phrase,secret,token,unlogged,unrecorded
-    stale_previous: old,previous,before the correction,before the update,still valid,still be used
+    stale_previous: stale,stale config,config value,old,previous,replaced by the current,before the correction,before the update,still valid,still be used
     ordinary_namespace_profile: ordinary profile,ordinary namespace,profile lookup,namespace lookup,cross-namespace,cross namespaces,namespace crossing
-    unsupported_proof: already natural multi-day data,changed live answers,proves residual,result proves,unsupported claim
+    unsupported_proof: already natural multi-day data,changed live answers,can now mutate,mutate live,mutate live answers,proves residual,result proves,unsupported claim
 
 claim_scope:
   stopwords: about,check,checks,current,currently,does,for,from,help,helps,latest,prefer,prefers,preference,remember,should,that,the,use,what,when,where,which,who,with,victor,hermes,project

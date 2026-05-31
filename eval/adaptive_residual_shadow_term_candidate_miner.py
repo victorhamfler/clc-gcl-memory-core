@@ -109,15 +109,22 @@ def iter_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
-def mine_reports(reports: list[dict[str, Any]], policy: dict[str, Any]) -> dict[str, Any]:
+def mine_reports(reports: list[dict[str, Any]], policy: dict[str, Any], *, skip_currently_suppressed: bool = True) -> dict[str, Any]:
     unsafe_rows = []
+    resolved_unsafe_rows = []
     suppressed_known_rows = []
     term_counts: Counter[str] = Counter()
     term_examples: dict[str, list[str]] = defaultdict(list)
     for report in reports:
         for row in iter_rows(report):
-            unsafe_rows.append(row)
             query = str(row.get("query") or "")
+            reasons = suppression_reasons(query, policy)
+            if skip_currently_suppressed and reasons:
+                resolved = dict(row)
+                resolved["current_suppression_reasons"] = reasons
+                resolved_unsafe_rows.append(resolved)
+                continue
+            unsafe_rows.append(row)
             for phrase in candidate_phrases(query):
                 term_counts[phrase] += 1
                 if len(term_examples[phrase]) < 3:
@@ -167,9 +174,12 @@ def mine_reports(reports: list[dict[str, Any]], policy: dict[str, Any]) -> dict[
         "candidate_count": len(candidates),
         "candidates": candidates,
         "unsafe_examples": unsafe_rows[:20],
+        "resolved_unsafe_examples": resolved_unsafe_rows[:20],
+        "resolved_unsafe_count": len(resolved_unsafe_rows),
         "boundary_checks": boundary_checks,
         "policy_suppressors": policy.get("suppressors"),
         "recommendation": "no_new_terms_needed" if not candidates else "review_candidates_before_config_update",
+        "skip_currently_suppressed": skip_currently_suppressed,
         "promotion_ready": False,
     }
 

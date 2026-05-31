@@ -39,8 +39,12 @@ SENSITIVE_PRIVATE_TERMS = (
     "unrecorded",
 )
 STALE_PREVIOUS_TERMS = (
+    "stale",
+    "stale config",
+    "config value",
     "old",
     "previous",
+    "replaced by the current",
     "before the correction",
     "before the update",
     "still valid",
@@ -58,6 +62,9 @@ ORDINARY_NAMESPACE_PROFILE_TERMS = (
 UNSUPPORTED_PROOF_TERMS = (
     "already natural multi-day data",
     "changed live answers",
+    "can now mutate",
+    "mutate live",
+    "mutate live answers",
     "proves residual",
     "result proves",
     "unsupported claim",
@@ -151,6 +158,35 @@ def _train_models(root: Path) -> tuple[dict[str, Any], dict[str, Any], list[str]
     return train_family_models(train_samples), train_residual_model(train_samples), [str(path) for path in DEFAULT_TRAIN_LOGS], train_counts
 
 
+def _train_risk_model(root: Path) -> tuple[dict[str, Any], int, int]:
+    # Imported lazily: this is an explicit report-only runtime shadow diagnostic.
+    from eval.adaptive_residual_risk_scorer_eval import (
+        SYNTHETIC_ROWS,
+        collect_logged_samples,
+        make_sample,
+        train_naive_bayes,
+    )
+    from eval.adaptive_residual_shadow_multi_log_eval import PROCESSED_FAILURE_LOG_NAMES, discover_logs, filter_logs
+
+    logs = filter_logs(discover_logs("adaptive_residual_shadow_*_outcomes.jsonl"), PROCESSED_FAILURE_LOG_NAMES)
+    logged_samples = collect_logged_samples(logs, load_policy(root))
+    samples = [make_sample(query, label) for query, label in SYNTHETIC_ROWS] + logged_samples
+    return train_naive_bayes(samples), len(samples), len(logged_samples)
+
+
+def _term_risk_label(reasons: list[str]) -> str:
+    reason_set = set(reasons)
+    if "unsupported_proof_lookup_pressure" in reason_set:
+        return "unsupported_authority_claim"
+    if "stale_previous_lookup_pressure" in reason_set:
+        return "stale_previous_lookup"
+    if "sensitive_private_lookup_pressure" in reason_set:
+        return "sensitive_private_lookup"
+    if "ordinary_namespace_profile_lookup_pressure" in reason_set:
+        return "ordinary_namespace_scope_risk"
+    return "no_term_suppression"
+
+
 def _sample_for_decision(
     *,
     query: str,
@@ -221,6 +257,19 @@ def adaptive_residual_shadow_advisories(
             "mutates_memory": False,
             "mutates_config": False,
         }
+    try:
+        risk_model, risk_sample_count, risk_logged_sample_count = _train_risk_model(root)
+        from eval.adaptive_residual_risk_scorer_eval import make_sample as make_risk_sample
+        from eval.adaptive_residual_risk_scorer_eval import predict as predict_risk
+
+        risk_model_error = None
+    except Exception as exc:
+        risk_model = {}
+        risk_sample_count = 0
+        risk_logged_sample_count = 0
+        make_risk_sample = None
+        predict_risk = None
+        risk_model_error = f"risk_model_training_failed: {exc}"
 
     decisions = []
     counts = {"would_override": 0, "suppressed": 0, "symbolic_fallback": 0}
@@ -231,6 +280,20 @@ def adaptive_residual_shadow_advisories(
         family_advisory, family_confidence, family_source = family_predict(family_models, sample)
         residual_label, residual_confidence = residual_predict(residual_model, sample)
         suppressed = suppression_reasons(query, active_policy)
+        term_risk_label = _term_risk_label(suppressed)
+        if risk_model and make_risk_sample and predict_risk:
+            risk_sample = make_risk_sample(
+                query,
+                "other_symbolic_fallback",
+                behavior_family=sample["behavior_family"],
+                symbolic_advisory=sample["symbolic_advisory"],
+                report_only_advisory=family_advisory,
+                would_override=False,
+            )
+            learned_risk_label, learned_risk_confidence = predict_risk(risk_model, risk_sample)
+        else:
+            learned_risk_label = "unavailable"
+            learned_risk_confidence = 0.0
         allowed = (
             residual_label == "symbolic_wrong"
             and residual_confidence >= float(active_policy.get("residual_threshold") or 0.0)
@@ -262,6 +325,14 @@ def adaptive_residual_shadow_advisories(
                 "residual_prediction": residual_label,
                 "residual_confidence": residual_confidence,
                 "suppression_reasons": suppressed,
+                "term_risk_label": term_risk_label,
+                "learned_risk_label": learned_risk_label,
+                "learned_risk_confidence": learned_risk_confidence,
+                "learned_risk_disagrees_with_terms": bool(
+                    learned_risk_label != "unavailable"
+                    and learned_risk_label != term_risk_label
+                    and not (learned_risk_label == "safe_supported_evidence_rescue" and term_risk_label == "no_term_suppression")
+                ),
                 "would_override": would_override,
                 "report_only_advisory": advisory,
                 "source": source,
@@ -275,6 +346,15 @@ def adaptive_residual_shadow_advisories(
         "policy": active_policy,
         "train_logs": train_logs,
         "train_counts_by_log": train_counts,
+        "learned_risk_model": {
+            "available": bool(risk_model),
+            "sample_count": risk_sample_count,
+            "logged_sample_count": risk_logged_sample_count,
+            "error": risk_model_error,
+            "report_only": True,
+            "mutates_runtime": False,
+            "mutates_config": False,
+        },
         "decision_counts": counts,
         "decisions": decisions,
         "report_only": True,

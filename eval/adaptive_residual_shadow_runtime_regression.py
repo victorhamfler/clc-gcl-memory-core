@@ -83,6 +83,14 @@ def main() -> int:
             for item in residual.get("decisions") or []
             if isinstance(item, dict)
         ),
+        "learned_risk_model_report_only": (residual.get("learned_risk_model") or {}).get("report_only") is True
+        and (residual.get("learned_risk_model") or {}).get("mutates_runtime") is False
+        and (residual.get("learned_risk_model") or {}).get("mutates_config") is False,
+        "decisions_include_learned_risk_labels": all(
+            "learned_risk_label" in item and "term_risk_label" in item
+            for item in residual.get("decisions") or []
+            if isinstance(item, dict)
+        ),
         "selector_snapshot_unchanged": base.get("selector_snapshot", {}).get("decision")
         == shadowed.get("selector_snapshot", {}).get("decision"),
         "answer_unchanged": base.get("answer") == shadowed.get("answer"),
@@ -99,6 +107,7 @@ def main() -> int:
             "ok": residual.get("ok"),
             "decision_counts": residual.get("decision_counts"),
             "policy": residual.get("policy"),
+            "learned_risk_model": residual.get("learned_risk_model"),
             "decision_count": len(residual.get("decisions") or []),
         },
         "log_path": str(log_path),

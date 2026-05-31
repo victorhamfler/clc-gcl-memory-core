@@ -17,6 +17,10 @@ from eval.adaptive_residual_shadow_logged_eval import build_report  # noqa: E402
 DEFAULT_LOG_GLOB = "adaptive_residual_shadow_*_outcomes.jsonl"
 OUT_JSON = REPO_ROOT / "experiments" / "adaptive_residual_shadow_multi_log_eval_results.json"
 OUT_MD = REPO_ROOT / "experiments" / "adaptive_residual_shadow_multi_log_eval_report.md"
+PROCESSED_FAILURE_LOG_NAMES = {
+    "adaptive_residual_shadow_hermes_external_outcomes.jsonl",
+    "hermes_adaptive_residual_shadow_external_outcomes.jsonl",
+}
 
 
 def discover_logs(pattern: str) -> list[Path]:
@@ -26,6 +30,11 @@ def discover_logs(pattern: str) -> list[Path]:
     if any(char in pattern for char in "*?[]"):
         return sorted((REPO_ROOT / "experiments").glob(pattern))
     return []
+
+
+def filter_logs(logs: list[Path], exclude_names: set[str] | None = None) -> list[Path]:
+    blocked = {name.lower() for name in (exclude_names or set())}
+    return [log for log in logs if log.name.lower() not in blocked]
 
 
 def merge_family_summaries(reports: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
@@ -128,6 +137,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Aggregate logged adaptive residual shadow evaluations.")
     parser.add_argument("--log", action="append", default=[], help="Outcome log path. Can be repeated.")
     parser.add_argument("--log-glob", default=DEFAULT_LOG_GLOB)
+    parser.add_argument(
+        "--exclude-log-name",
+        action="append",
+        default=[],
+        help="Outcome log filename to exclude from clean aggregate metrics. Can be repeated.",
+    )
+    parser.add_argument(
+        "--exclude-processed-failures",
+        action="store_true",
+        help="Exclude known processed historical failure logs from clean aggregate metrics.",
+    )
     parser.add_argument("--min-logs", type=int, default=1)
     parser.add_argument("--out-json", type=Path, default=OUT_JSON)
     parser.add_argument("--out-md", type=Path, default=OUT_MD)
@@ -135,6 +155,10 @@ def main() -> int:
 
     logs = [Path(item) for item in args.log] if args.log else discover_logs(args.log_glob)
     logs = [log for log in logs if log.exists() and log.is_file()]
+    exclude_names = set(args.exclude_log_name)
+    if args.exclude_processed_failures:
+        exclude_names.update(PROCESSED_FAILURE_LOG_NAMES)
+    logs = filter_logs(logs, exclude_names)
     report = build_multi_log_report(logs, min_logs=args.min_logs)
     write_report(report, args.out_json, args.out_md)
     print(

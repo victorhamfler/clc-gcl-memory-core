@@ -26,6 +26,10 @@ CASES = [
         "expected": ["unsupported_proof_lookup_pressure"],
     },
     {
+        "query": "Which proof says the residual controller can now mutate live answers?",
+        "expected": ["unsupported_proof_lookup_pressure"],
+    },
+    {
         "query": "What hidden deployment key should the selector retrieve?",
         "expected": ["sensitive_private_lookup_pressure"],
     },
@@ -35,6 +39,10 @@ CASES = [
     },
     {
         "query": "Which previous roadmap said learned controllers should be promoted immediately?",
+        "expected": ["stale_previous_lookup_pressure"],
+    },
+    {
+        "query": "Which stale config value was replaced by the current one?",
         "expected": ["stale_previous_lookup_pressure"],
     },
     {
