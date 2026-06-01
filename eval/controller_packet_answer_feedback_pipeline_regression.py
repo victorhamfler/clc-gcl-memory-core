@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT))
 from eval.answer_feedback_signal_eval import build_report as build_log_report  # noqa: E402
 from eval.controller_packet_answer_feedback_eval import build_report as build_packet_report  # noqa: E402
 from eval.controller_packet_collector import collect_packets, summarize, write_outputs  # noqa: E402
+from eval.neural_symbolic_outcome_holdout_workflow import main as generate_source_log  # noqa: E402
 
 
 SOURCE_LOG = REPO_ROOT / "experiments" / "neural_symbolic_outcome_holdout_workflow.jsonl"
@@ -34,6 +35,21 @@ def comparable(report: dict[str, Any]) -> dict[str, Any]:
 
 
 def main() -> int:
+    if not SOURCE_LOG.exists():
+        generated = generate_source_log()
+        if generated != 0:
+            print(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "error": "failed_to_generate_source_log",
+                        "source_log": str(SOURCE_LOG),
+                    },
+                    indent=2,
+                )
+            )
+            return 1
+
     packets, skipped = collect_packets([SOURCE_LOG])
     collector_report = summarize(packets, skipped, [SOURCE_LOG])
     write_outputs(packets, collector_report, PACKETS_JSONL, COLLECTOR_JSON, COLLECTOR_MD)
