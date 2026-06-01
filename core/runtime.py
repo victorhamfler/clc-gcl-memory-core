@@ -67,8 +67,12 @@ def resolve_embedding_cache_path(root: Path, embedding: dict[str, Any] | None) -
     return out
 
 
-def create_pipeline(root: Path, db_path: Path | None = None) -> MemoryPipeline:
-    config = load_config(root)
+def create_pipeline(
+    root: Path,
+    db_path: Path | None = None,
+    config_override: dict[str, Any] | None = None,
+) -> MemoryPipeline:
+    config = config_override if config_override is not None else load_config(root)
     resolved_db_path = db_path or configured_db_path(root, config)
     init_db(root, resolved_db_path)
     embedding_config = resolve_embedding_cache_path(root, runtime_embedding_config(config))
@@ -85,6 +89,7 @@ def create_pipeline(root: Path, db_path: Path | None = None) -> MemoryPipeline:
         retrieval_signal_config=config.get("retrieval_signals"),
         evidence_state_config=config.get("evidence_states"),
         canonical_memory_config=config.get("canonical_memory"),
+        resolver_policy_config=config.get("resolver_policy"),
         llm_config=config.get("llm"),
         clc_thresholds=config.get("thresholds"),
     )
@@ -164,6 +169,7 @@ def pipeline_config_view(pipeline: MemoryPipeline) -> dict[str, Any]:
         "retrieval_signals": pipeline.retrieval_signal_config,
         "evidence_states": pipeline.evidence_state_config,
         "canonical_memory": pipeline.canonical_memory_config,
+        "resolver_policy": pipeline.resolver_policy_config,
         "llm": sanitized_llm_config(pipeline.llm_config),
     }
 

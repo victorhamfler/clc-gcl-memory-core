@@ -13,6 +13,7 @@ from core.chunking import chunk_text
 from core.config import load_config, resolve_project_path
 from core.consolidation import consolidation_plan, create_consolidation_summaries
 from core.controller_context import build_adaptive_memory_context
+from core.controller_packet import build_controller_evidence_packet
 from core.learning import learn_from_document, learn_from_text
 from core.maintenance import improvement_plan, memory_review, record_memory_improvement, weak_memories
 from core.outcome_log import OutcomeLogger
@@ -26,6 +27,7 @@ from core.selector_runtime import (
     build_policy_selector,
     selector_config_view,
 )
+from storage.db import new_id
 
 
 ROOT = Path(__file__).resolve().parent
@@ -99,10 +101,15 @@ def is_answer_feedback_label(label: str) -> bool:
 
 
 class MemoryApi:
-    def __init__(self, root: Path, db_path: Path | None = None):
+    def __init__(
+        self,
+        root: Path,
+        db_path: Path | None = None,
+        config_override: dict[str, Any] | None = None,
+    ):
         self.root = root
-        self.root_config = load_config(root)
-        self.pipeline = create_pipeline(root, db_path=db_path)
+        self.root_config = config_override if config_override is not None else load_config(root)
+        self.pipeline = create_pipeline(root, db_path=db_path, config_override=self.root_config)
         self.outcome_logger = OutcomeLogger(root, self.root_config)
 
     def close(self) -> None:
@@ -131,9 +138,15 @@ class MemoryApi:
         event_type: str,
         payload: dict[str, Any],
         *,
+        operation_id: str | None = None,
         linked_operation_id: str | None = None,
     ) -> dict[str, Any]:
-        return self.outcome_logger.record(event_type, payload, linked_operation_id=linked_operation_id)
+        return self.outcome_logger.record(
+            event_type,
+            payload,
+            operation_id=operation_id,
+            linked_operation_id=linked_operation_id,
+        )
 
     @staticmethod
     def _evidence_brief(rows: list[dict[str, Any]] | None, limit: int = 10) -> list[dict[str, Any]]:
@@ -273,6 +286,14 @@ class MemoryApi:
 
     def _log_adaptive_residual_shadow(self, payload: dict[str, Any]) -> bool:
         return bool(payload.get("log_adaptive_residual_shadow"))
+
+    def _include_controller_packet(self, payload: dict[str, Any]) -> bool:
+        if "include_controller_packet" in payload:
+            return bool(payload.get("include_controller_packet"))
+        outcome_cfg = self.root_config.get("outcome_log") if isinstance(self.root_config, dict) else {}
+        if isinstance(outcome_cfg, dict) and "include_controller_packet" in outcome_cfg:
+            return bool(outcome_cfg.get("include_controller_packet"))
+        return True
 
     def _adaptive_residual_shadow_payload(
         self,
@@ -777,38 +798,50 @@ class MemoryApi:
             if adaptive_residual_shadow and self._log_adaptive_residual_shadow(payload)
             else None
         )
+        ask_operation_id = new_id("op")
+        log_payload = {
+            "request": {
+                "query": query,
+                "top_k": top_k,
+                "namespace": namespace,
+                "include_global": include_global,
+                "agent_id": payload.get("agent_id") or "default",
+                "session_id": payload.get("session_id"),
+                "store_session": payload.get("store_session", True),
+                "condition_name": payload.get("condition_name") or "hard_budget144",
+            },
+            "response": {
+                "answer": asked.get("answer"),
+                "confidence": asked.get("confidence"),
+                "conflict": asked.get("conflict"),
+                "session_id": asked.get("session_id"),
+                "agent_id": asked.get("agent_id"),
+                "namespace": asked.get("namespace"),
+                "namespace_warning": namespace_warning,
+                "evidence": self._evidence_brief(asked.get("evidence") or [], limit=10),
+                "raw_results": self._evidence_brief(asked.get("raw_results") or [], limit=10),
+                "source_context": self._evidence_brief(asked.get("source_context") or [], limit=10),
+                "stale_context": self._evidence_brief(asked.get("stale_context") or [], limit=10),
+            },
+            "selector_snapshot": logged_selector_snapshot,
+            "adaptive_memory_context": self._adaptive_context_log_payload(adaptive_context, limit=10),
+            **({"resolver_shadow": log_resolver_shadow} if log_resolver_shadow else {}),
+            **({"adaptive_behavior_shadow": log_adaptive_behavior_shadow} if log_adaptive_behavior_shadow else {}),
+            **({"adaptive_residual_shadow": log_adaptive_residual_shadow} if log_adaptive_residual_shadow else {}),
+        }
+        if self._include_controller_packet(payload):
+            log_payload["controller_evidence_packet"] = build_controller_evidence_packet(
+                {
+                    "operation_id": ask_operation_id,
+                    "event_type": "ask",
+                    "payload": log_payload,
+                },
+                evidence_state_config=self.pipeline.evidence_state_config,
+            )
         log_status = self._record_outcome(
             "ask",
-            {
-                "request": {
-                    "query": query,
-                    "top_k": top_k,
-                    "namespace": namespace,
-                    "include_global": include_global,
-                    "agent_id": payload.get("agent_id") or "default",
-                    "session_id": payload.get("session_id"),
-                    "store_session": payload.get("store_session", True),
-                    "condition_name": payload.get("condition_name") or "hard_budget144",
-                },
-                "response": {
-                    "answer": asked.get("answer"),
-                    "confidence": asked.get("confidence"),
-                    "conflict": asked.get("conflict"),
-                    "session_id": asked.get("session_id"),
-                    "agent_id": asked.get("agent_id"),
-                    "namespace": asked.get("namespace"),
-                    "namespace_warning": namespace_warning,
-                    "evidence": self._evidence_brief(asked.get("evidence") or [], limit=10),
-                    "raw_results": self._evidence_brief(asked.get("raw_results") or [], limit=10),
-                    "source_context": self._evidence_brief(asked.get("source_context") or [], limit=10),
-                    "stale_context": self._evidence_brief(asked.get("stale_context") or [], limit=10),
-                },
-                "selector_snapshot": logged_selector_snapshot,
-                "adaptive_memory_context": self._adaptive_context_log_payload(adaptive_context, limit=10),
-                **({"resolver_shadow": log_resolver_shadow} if log_resolver_shadow else {}),
-                **({"adaptive_behavior_shadow": log_adaptive_behavior_shadow} if log_adaptive_behavior_shadow else {}),
-                **({"adaptive_residual_shadow": log_adaptive_residual_shadow} if log_adaptive_residual_shadow else {}),
-            },
+            log_payload,
+            operation_id=ask_operation_id,
         )
         response["operation_id"] = log_status["operation_id"]
         response["outcome_log_logged"] = bool(log_status["logged"])

@@ -222,6 +222,42 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
         "evidence_context_selector_runtime_ok": bool(
             (step_json(steps, "evidence_context_selector_runtime_regression") or {}).get("ok")
         ),
+        "resolver_policy_config_ok": bool(
+            (step_json(steps, "resolver_policy_config_regression") or {}).get("ok")
+        ),
+        "resolver_policy_runtime_view_ok": bool(
+            (step_json(steps, "resolver_policy_runtime_view_regression") or {}).get("ok")
+        ),
+        "answer_quality_eval_ok": bool(
+            (step_json(steps, "answer_quality_eval") or {}).get("ok")
+        ),
+        "multi_intent_answer_composition_ok": bool(
+            (step_json(steps, "multi_intent_answer_composition_regression") or {}).get("ok")
+        ),
+        "controller_packet_regression_ok": bool(
+            (step_json(steps, "controller_packet_regression") or {}).get("ok")
+        ),
+        "controller_packet_residual_pipeline_ok": bool(
+            (step_json(steps, "controller_packet_residual_pipeline_regression") or {}).get("ok")
+        ),
+        "controller_packet_answer_feedback_pipeline_ok": bool(
+            (step_json(steps, "controller_packet_answer_feedback_pipeline_regression") or {}).get("ok")
+        ),
+        "outcome_logging_controller_packet_ok": bool(
+            (step_json(steps, "outcome_logging_regression") or {}).get("ok")
+        ),
+        "controller_packet_memory_bank_ok": bool(
+            (step_json(steps, "controller_packet_memory_bank_regression") or {}).get("ok")
+        ),
+        "controller_packet_calibration_proposals_ok": bool(
+            (step_json(steps, "controller_packet_calibration_proposals_regression") or {}).get("ok")
+        ),
+        "controller_packet_calibration_guard_ok": bool(
+            (step_json(steps, "controller_packet_calibration_guard_regression") or {}).get("ok")
+        ),
+        "controller_packet_calibration_pipeline_ok": bool(
+            (step_json(steps, "controller_packet_calibration_pipeline_regression") or {}).get("ok")
+        ),
         "adaptive_behavior_feature_scorer_ok": bool(
             (step_json(steps, "adaptive_behavior_feature_scorer_regression") or {}).get("ok")
         ),
@@ -302,6 +338,18 @@ def write_markdown(report: dict[str, Any], out_md: Path) -> None:
         "adaptive_behavior_wrong_scope_config_ok",
         "evidence_context_regression_ok",
         "evidence_context_selector_runtime_ok",
+        "resolver_policy_config_ok",
+        "resolver_policy_runtime_view_ok",
+        "answer_quality_eval_ok",
+        "multi_intent_answer_composition_ok",
+        "controller_packet_regression_ok",
+        "controller_packet_residual_pipeline_ok",
+        "controller_packet_answer_feedback_pipeline_ok",
+        "outcome_logging_controller_packet_ok",
+        "controller_packet_memory_bank_ok",
+        "controller_packet_calibration_proposals_ok",
+        "controller_packet_calibration_guard_ok",
+        "controller_packet_calibration_pipeline_ok",
         "adaptive_behavior_feature_scorer_ok",
         "adaptive_behavior_feature_scorer_hybrid_ok",
         "adaptive_behavior_feature_challenge_ok",
@@ -396,8 +444,10 @@ def main() -> int:
                 str(ROOT / "core" / "adaptive_residual_shadow.py"),
                 str(ROOT / "core" / "evidence_context.py"),
                 str(ROOT / "core" / "controller_context.py"),
+                str(ROOT / "core" / "controller_packet.py"),
                 str(ROOT / "core" / "pipeline.py"),
                 str(ROOT / "core" / "resolver.py"),
+                str(ROOT / "core" / "resolver_policy.py"),
                 str(ROOT / "core" / "runtime.py"),
                 str(ROOT / "eval" / "retrieval_signal_promotion_gate.py"),
                 str(ROOT / "eval" / "evidence_state_promotion_gate.py"),
@@ -413,6 +463,7 @@ def main() -> int:
                 str(ROOT / "eval" / "adaptive_residual_shadow_seventh_agent_style_log.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_ninth_authority_veto_log.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_tenth_authority_boundary_log.py"),
+                str(ROOT / "eval" / "adaptive_residual_shadow_benefit_opportunity_log.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_logged_eval.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_multi_log_eval.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_suppressor_regression.py"),
@@ -455,6 +506,25 @@ def main() -> int:
                 str(ROOT / "eval" / "adaptive_behavior_feature_challenge_regression.py"),
                 str(ROOT / "eval" / "evidence_context_regression.py"),
                 str(ROOT / "eval" / "evidence_context_selector_runtime_regression.py"),
+                str(ROOT / "eval" / "resolver_policy_config_regression.py"),
+                str(ROOT / "eval" / "resolver_policy_runtime_view_regression.py"),
+                str(ROOT / "eval" / "answer_quality_eval.py"),
+                str(ROOT / "eval" / "multi_intent_answer_composition_regression.py"),
+                str(ROOT / "eval" / "controller_packet_collector.py"),
+                str(ROOT / "eval" / "controller_packet_answer_feedback_eval.py"),
+                str(ROOT / "eval" / "controller_packet_answer_feedback_pipeline_regression.py"),
+                str(ROOT / "eval" / "controller_packet_residual_eval.py"),
+                str(ROOT / "eval" / "controller_packet_residual_pipeline_regression.py"),
+                str(ROOT / "eval" / "controller_packet_regression.py"),
+                str(ROOT / "eval" / "controller_packet_memory_bank.py"),
+                str(ROOT / "eval" / "controller_packet_memory_bank_regression.py"),
+                str(ROOT / "eval" / "controller_packet_calibration_proposals.py"),
+                str(ROOT / "eval" / "controller_packet_calibration_proposals_regression.py"),
+                str(ROOT / "eval" / "controller_packet_calibration_guard.py"),
+                str(ROOT / "eval" / "controller_packet_calibration_guard_regression.py"),
+                str(ROOT / "eval" / "controller_packet_calibration_pipeline.py"),
+                str(ROOT / "eval" / "controller_packet_calibration_pipeline_regression.py"),
+                str(ROOT / "eval" / "outcome_logging_regression.py"),
                 str(ROOT / "eval" / "selector_architecture_gate.py"),
             ],
         ),
@@ -629,6 +699,54 @@ def main() -> int:
         run_step(
             "evidence_context_selector_runtime_regression",
             [python, str(ROOT / "eval" / "evidence_context_selector_runtime_regression.py")],
+        ),
+        run_step(
+            "resolver_policy_config_regression",
+            [python, str(ROOT / "eval" / "resolver_policy_config_regression.py")],
+        ),
+        run_step(
+            "resolver_policy_runtime_view_regression",
+            [python, str(ROOT / "eval" / "resolver_policy_runtime_view_regression.py")],
+        ),
+        run_step(
+            "answer_quality_eval",
+            [python, str(ROOT / "eval" / "answer_quality_eval.py")],
+        ),
+        run_step(
+            "multi_intent_answer_composition_regression",
+            [python, str(ROOT / "eval" / "multi_intent_answer_composition_regression.py")],
+        ),
+        run_step(
+            "controller_packet_regression",
+            [python, str(ROOT / "eval" / "controller_packet_regression.py")],
+        ),
+        run_step(
+            "controller_packet_residual_pipeline_regression",
+            [python, str(ROOT / "eval" / "controller_packet_residual_pipeline_regression.py")],
+        ),
+        run_step(
+            "controller_packet_answer_feedback_pipeline_regression",
+            [python, str(ROOT / "eval" / "controller_packet_answer_feedback_pipeline_regression.py")],
+        ),
+        run_step(
+            "outcome_logging_regression",
+            [python, str(ROOT / "eval" / "outcome_logging_regression.py")],
+        ),
+        run_step(
+            "controller_packet_memory_bank_regression",
+            [python, str(ROOT / "eval" / "controller_packet_memory_bank_regression.py")],
+        ),
+        run_step(
+            "controller_packet_calibration_proposals_regression",
+            [python, str(ROOT / "eval" / "controller_packet_calibration_proposals_regression.py")],
+        ),
+        run_step(
+            "controller_packet_calibration_guard_regression",
+            [python, str(ROOT / "eval" / "controller_packet_calibration_guard_regression.py")],
+        ),
+        run_step(
+            "controller_packet_calibration_pipeline_regression",
+            [python, str(ROOT / "eval" / "controller_packet_calibration_pipeline_regression.py")],
         ),
         maybe_artifact_step(
             "adaptive_behavior_feature_scorer_regression",

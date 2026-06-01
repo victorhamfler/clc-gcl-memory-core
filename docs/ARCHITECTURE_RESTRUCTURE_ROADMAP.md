@@ -3341,3 +3341,213 @@ Interpretation:
 - the learned-risk authority veto appears externally safe on the rerun;
 - the architecture still needs a benefit-capable external run, but the problem is no longer missing retrieval evidence;
 - the next Hermes-style evidence step should deliberately include safe supported-evidence benefit-opportunity prompts where a helpful residual override is plausible.
+
+Fifty-fourth implementation checkpoint:
+
+- Hermes later recovered from a malformed copied DB by creating a fresh timestamped DB copy, passing evidence preflight, and completing a 90-ask authority-boundary rerun;
+- the recovered rerun produced 90 answer-feedback rows, 110 memory-feedback rows, and 305 residual decisions with 0 harmful overrides and 0 neutral-wrong overrides;
+- the rerun still produced 0 residual would-overrides, so `hermes_authority_boundary_rerun_assessment.py` correctly reported `safety_passed=true`, `benefit_passed=false`, and `benefit_inconclusive_reason=no_residual_benefit_opportunities`;
+- `MemoryApi` and `create_pipeline` now accept an explicit `config_override` so deterministic local tests can use isolated runtime config without changing production `config.yaml`;
+- `eval/adaptive_residual_shadow_benefit_opportunity_log.py` now builds a fresh local seed DB with hash embeddings, logs safe supported-evidence benefit opportunities plus authority/stale safety controls, and writes a focused outcome log;
+- the focused local benefit-opportunity log passed residual evaluation with 5 helpful report-only overrides, 0 harmful overrides, 0 neutral-wrong overrides, 31 learned-risk diagnostic rows, 17 learned beyond-term catches, and 0 term-overprotection signals;
+- the focused assessment passed both safety and benefit: `safety_passed=true`, `benefit_passed=true`;
+- portable architecture gate mode passed locally with `--allow-missing-runtime-artifacts --random-cases 16`.
+
+Current interpretation:
+
+```text
+Hermes recovered authority rerun:     safety pass, benefit inconclusive
+local benefit-opportunity harness:    safety pass, benefit pass
+helpful local residual overrides:     5
+harmful local residual overrides:     0
+learned beyond-term catches:          17
+term overprotection:                  0
+production mutation flags:            none
+promotion ready:                      false
+```
+
+Interpretation:
+
+- the architecture is not ready for live promotion, but the benefit mechanism is not dead; it appears only when the runtime sees safe supported-evidence cases where symbolic behavior is uncertain or too conservative;
+- the next external/Hermes test should reuse the focused benefit-opportunity prompt shape while still including the exact prior authority-failure controls;
+- the local seeded harness should remain a laptop-safe regression so future selector changes cannot accidentally remove the helpful override path.
+
+## Combined Memory and Selector Architecture Analysis
+
+Date: 2026-06-01
+
+The combined program is now best understood as a local neural-symbolic memory brain prototype with four cooperating loops:
+
+1. the memory loop stores, corrects, supersedes, consolidates, and retrieves memories with CSD/G-CL geometry;
+2. the retrieval/evidence loop scores retrieved rows with claim scope, answer type, evidence state, canonical support, source authority, and OGCF bridge diagnostics;
+3. the selector loop converts those signals into conservative policy decisions and report-only adaptive advisories;
+4. the evaluation loop mines outcome logs, proposes candidate controller knowledge, and blocks promotion until guarded replay and holdout tests pass.
+
+The best parts of the current architecture are:
+
+- `core/retrieval_signals.py` and `core/evidence_states.py`: these are the clearest examples of the roadmap working. They moved hardcoded behavior toward configurable control surfaces with mining and promotion gates.
+- `core/controller_context.py`: this is the beginning of the shared adaptive-memory context that can connect memory retrieval, OGCF diagnostics, selector decisions, resolver-shadow behavior, and outcome logs.
+- `core/adaptive_residual_shadow.py`: this is the strongest neural-symbolic direction so far. It keeps symbolic report-only safety flags, but adds learned residual and learned-risk judgments that generalize beyond exact terms.
+- OGCF integration: bridge/geometry pressure is now a useful second kind of memory signal, not just vector similarity.
+- The evaluation layer: the project has unusually strong guard culture for a prototype. Historical failures are preserved, replayed, and used to tighten learned-risk boundaries instead of being overwritten.
+
+The main weaknesses are now architectural, not only behavioral:
+
+- `core/pipeline.py` still owns too many responsibilities: retrieval, reranking, session context, correction-chain scoring, lexical backfill, authority/supersession scoring, and row assembly.
+- `core/resolver.py` still contains many answer-quality, conflict, confidence, and snippet-selection thresholds that should become configurable and later calibrated.
+- `serve.py` is becoming an orchestration hub for API behavior, adaptive context construction, resolver shadow, residual shadow, answer feedback, and outcome logging.
+- The roadmap has many report-only learned modules, but not yet one shared persisted "controller evidence packet" that can be treated as the stable training/evaluation unit across memory and selector sides.
+- The external/Hermes rerun proved safety but not benefit because useful residual opportunities are sparse unless the prompt mix deliberately includes safe supported-evidence cases where symbolic behavior is uncertain.
+
+## Next Combined Development Direction
+
+The next development should be a shared controller evidence packet and replay dataset, not a new heuristic.
+
+The packet should be written from every `ask` when outcome logging is enabled. It should be compact, versioned, and stable enough for both sessions to consume. It should include:
+
+- query, namespace, operation id, agent id, and session id;
+- selected evidence ids and compact evidence rows;
+- retrieval signal fields: score, text match, intent match, claim scope, answer type, correction relevance, source reliability, domain reliability, feedback score;
+- evidence-state fields: current/stale/historical/disputed/summary, weak-evidence flag, sensitive-evidence requirement, stale/current conflict summary;
+- canonical memory fields: keeper status, support count, duplicate pressure, provenance summary;
+- OGCF fields: intent, bridge overload score, affected ratio, maintenance pressure, geometry context;
+- selector fields: features, diagnostics, policy decision, guard changes, explanation top reasons;
+- resolver/adaptive fields: resolver-shadow actions, adaptive behavior shadow, adaptive residual shadow decisions, mutation flags;
+- linked feedback labels when they arrive, or enough identifiers for a collector to join feedback later.
+
+This packet should become the common substrate for:
+
+```text
+real runtime outcome log -> controller evidence packets -> multi-run memory bank -> calibrated candidate proposals -> guarded promotion gate
+```
+
+### Best Immediate Improvements
+
+The best next improvements, in order, are:
+
+1. Add a `controller_evidence_packet/v1` builder in `core/controller_context.py` or a new `core/controller_packet.py`.
+   - Memory side benefit: one stable representation of what the memory program believed when it answered.
+   - Selector side benefit: learned selector/residual modules train on the same fields used at runtime.
+   - Test: fixture ask row with retrieval context, OGCF meta, selector snapshot, resolver shadow, and feedback join produces a deterministic packet.
+
+2. Add an outcome-log collector that converts existing ask/feedback events into controller evidence packets.
+   - Memory side benefit: old Hermes logs remain useful without rerunning the agent.
+   - Selector side benefit: promotion-readiness and residual-risk tests can consume one normalized dataset instead of many custom parsers.
+   - Test: collector handles legacy logs with no adaptive context, modern logs with adaptive context, and focused benefit-opportunity logs.
+
+3. Start extracting resolver scoring constants into a `resolver_policy` config section.
+   - Memory side benefit: answer confidence, conflict handling, weak-evidence behavior, and snippet selection become auditable and calibratable.
+   - Selector side benefit: answer-level feedback banks can propose calibration changes without editing `resolver.py`.
+   - Test: current defaults reproduce existing resolver behavior on answer-quality and multi-intent regression fixtures.
+
+4. Add a benefit-opportunity external test recipe based on the new local harness.
+   - Memory side benefit: Hermes or a local substitute can seed safe supported-evidence cases reliably.
+   - Selector side benefit: external validation can prove usefulness, not only absence of harm.
+   - Test: prior failure controls stay suppressed while safe supported-evidence prompts produce helpful report-only overrides.
+
+5. Keep residual/adaptive mechanisms report-only until the packet bank shows repeated safe benefit across multiple real sessions.
+   - Promotion should require: clean local aggregate, historical failure replays, one successful external/Hermes benefit-capable run, and no mutation/config flags.
+
+## Ownership After This Analysis
+
+Selector-side session should do first:
+
+- define the packet schema;
+- implement a packet builder or collector;
+- add packet fixture regressions;
+- adapt one residual/answer-feedback eval to read packets.
+
+Initial implementation status:
+
+- `core/controller_packet.py` now defines `controller_evidence_packet/v1`, a compact report-only packet that joins ask events, retrieval/evidence fields, evidence-state summaries, canonical support, OGCF diagnostics, selector decisions, resolver/adaptive shadows, residual decisions, and linked feedback;
+- `eval/controller_packet_regression.py` validates the packet contract on a fixture containing current and stale evidence, OGCF metadata, resolver shadow actions, residual learned-risk decisions, answer feedback, and memory feedback;
+- `eval/controller_packet_collector.py` converts existing outcome JSONL logs into packet JSONL datasets, so old Hermes and local logs can be reused without rerunning the agent.
+- `eval/controller_packet_residual_eval.py` proves the packet format is directly usable by the residual evaluation path by scoring residual report-only overrides from packet JSONL instead of custom ask/feedback log parsing.
+- `eval/controller_packet_residual_pipeline_regression.py` compares legacy log-based residual evaluation against packet-based residual evaluation on the same benefit-opportunity log, proving the packet path preserves the current learned-residual counts and family summaries.
+- `eval/selector_architecture_gate.py` now requires both the packet fixture regression and the packet residual pipeline regression, so packet compatibility is part of the selector architecture gate rather than only a standalone experiment.
+- `eval/controller_packet_answer_feedback_eval.py` and `eval/controller_packet_answer_feedback_pipeline_regression.py` now move the answer-feedback signal path onto packets as well. The pipeline regression confirms packet-derived answer-feedback signals preserve legacy counts, families, and recommendation summaries on the neural-symbolic holdout workflow.
+- `eval/selector_architecture_gate.py` now also requires the packet answer-feedback pipeline regression. This means both learned-residual supervision and answer/resolver supervision are protected by the shared packet contract.
+- `core/resolver_policy.py` now introduces the first `resolver_policy` configurable surface. The initial slice extracts answer-confidence scoring constants from `core/resolver.py` into `resolver_policy.answer_confidence` while preserving the legacy formula by default.
+- `eval/resolver_policy_config_regression.py` verifies that committed config defaults match the legacy formula, conflict still lowers confidence, and config overrides affect `resolve_answer()` confidence. The selector architecture gate now requires this regression.
+- `resolver_policy.evidence_preference` now extracts the resolver's primary evidence-ranking weights from `core/resolver.py`. The same regression verifies that default preference scores preserve the legacy formula and that config overrides can change evidence ordering in a controlled fixture.
+- `resolver_policy.evidence_selection.max_selected_evidence` and `resolver_policy.answer_composition.low_confidence_threshold` now cover two more resolver behavior knobs. The regression verifies the default three-evidence limit, an override to one selected evidence row, and configurable low-confidence answer notices.
+- The broader answer-behavior checks are now gate-protected too: `eval/answer_quality_eval.py` and `eval/multi_intent_answer_composition_regression.py` must pass inside `eval/selector_architecture_gate.py`. This keeps resolver-policy extraction tied to real answer quality and multi-intent composition, not only isolated scoring fixtures.
+- `resolver_policy.answer_snippets` now extracts the resolver's snippet-selection constants: evidence scan limits, state bonuses, stale/broad/scope penalties, secondary-snippet thresholds, multi-intent rank bonuses, generic intro penalty, exact phrase bonus, and snippet truncation length. The regression verifies defaults preserve existing answer behavior while overrides can change snippet ranking and truncation in controlled fixtures.
+- `resolver_policy.evidence_arbitration` now extracts the resolver thresholds that decide stored-contradiction conflicts, current-vs-historical preference, session-focused evidence preference, current relevance floor, stale supplement inclusion, rank-one takeover tolerance, and positive selector-signal thresholds. The regression verifies the stored-contradiction threshold is configurable while default answer-quality and multi-intent behavior remain unchanged.
+- `resolver_policy.query_relevance` now extracts resolver relevance thresholds for negative intent rejection, text-match acceptance, intent acceptance, answer-type overlap, vector-score acceptance, and cosine acceptance. The regression verifies a borderline retrieved row can be admitted by a config override while defaults remain behavior-preserving.
+- `eval/resolver_policy_runtime_view_regression.py` now verifies the normalized resolver policy is visible through the runtime/API config view and that test/runtime overrides are reflected there. The architecture gate requires this, so external agents can verify resolver-policy configuration without reading Python internals.
+
+Memory-program session should do next:
+
+- expose or preserve all required runtime fields in ask outcome logs;
+- avoid changing selector internals directly;
+- add memory-side tests proving teach/correct/ask logs contain enough packet fields for replay;
+- continue improving storage/dedup/correction behavior, but report changes through packet-compatible handovers.
+
+Hermes/external agent should later do:
+
+- run a benefit-capable authority-boundary test using the focused prompt shape;
+- generate multi-day packet logs across normal work;
+- include both answer-level feedback and memory-row feedback.
+
+This keeps the roadmap aligned with the original goal: a configurable and adaptive memory brain where learned components improve from logged outcomes, while symbolic gates keep the system local, auditable, and safe.
+
+## Current Combined Architecture Status
+
+Date: 2026-06-01
+
+The combined memory and selector architecture is now past the pure experiment stage and is becoming a replayable adaptive-memory control system.
+
+The strongest current structure is:
+
+- memory side stores, corrects, supersedes, consolidates, and retrieves memories;
+- retrieval/evidence side computes explicit claim-scope, answer-type, evidence-state, authority, feedback, canonical-support, and OGCF fields;
+- selector side builds adaptive-memory context and conservative report-only controller decisions;
+- resolver side now exposes a broad `resolver_policy` surface for confidence, ranking, evidence selection, answer composition, snippet selection, arbitration, and query relevance;
+- controller packet side normalizes ask-time evidence, selector, resolver, OGCF, adaptive-shadow, and feedback fields into `controller_evidence_packet/v1`;
+- evaluation side protects the architecture with packet regressions, resolver-policy regressions, answer-quality checks, multi-intent checks, and portable architecture-gate mode.
+
+The main remaining weaknesses are:
+
+- `serve.py` still assembles ask orchestration, selector context, shadow systems, outcome logging, and packet writing in one place;
+- `core/pipeline.py` still owns retrieval row assembly, source context, lexical backfill, source-version logic, session context, and correction-chain scoring;
+- real long-run packet banks still depend on future Hermes or memory-session runs;
+- learned mechanisms remain report-only, which is correct for safety, but the next stage needs more multi-run calibration artifacts rather than more hand-tuned thresholds.
+
+Best next development sequence:
+
+1. Make controller evidence packets first-class in runtime ask outcome logs.
+   - This lets every future real ask become replay/training material without requiring an offline conversion step.
+   - The packet must remain report-only and must not mutate memory, answers, selector policy, or config.
+2. Add a packet-bank aggregation layer for runtime packets.
+   - This should group packets by resolver outcome family, selector decision family, OGCF pressure, and feedback labels.
+   - It should produce calibration candidates, not runtime changes.
+3. Start extracting ask orchestration from `serve.py` into a small service/helper once packet logging is stable.
+   - The target is not a rewrite; it is a careful split so API handling and controller assembly stop growing together.
+4. Continue pipeline decomposition only after runtime packets and packet banks are stable.
+   - Pipeline extraction should start with retrieval row assembly/source context, because those fields already appear in packets and tests.
+
+Implementation checkpoint:
+
+- `outcome_log.include_controller_packet` now defaults to `true`;
+- `MemoryApi.ask()` now writes a `controller_evidence_packet/v1` into ask outcome payloads using the same operation id as the logged ask event;
+- `eval/outcome_logging_regression.py` now verifies the runtime packet is present, operation-id aligned, report-only, populated with retrieval context, and selector-decision aligned with the ask selector snapshot;
+- `eval/selector_architecture_gate.py` now requires the outcome logging regression as `outcome_logging_controller_packet_ok`.
+- `eval/controller_packet_memory_bank.py` now aggregates controller packet JSONL files into report-only clusters by selector policy/action, OGCF intent, answer conflict state, residual would-override count, and feedback labels;
+- `eval/controller_packet_memory_bank_regression.py` verifies the packet bank separates calibration candidates from negative-feedback review clusters while preserving report-only/non-mutating guarantees;
+- a smoke run over the local benefit-opportunity packet log produced 9 packets, 3 clusters, 1 calibration candidate, and 2 negative-feedback review clusters;
+- `eval/selector_architecture_gate.py` now requires the packet-bank regression as `controller_packet_memory_bank_ok`.
+- `eval/controller_packet_calibration_proposals.py` now converts packet-bank clusters into report-only calibration proposals, separating positive residual-benefit candidates from missing-support and stale-answer review items;
+- `eval/controller_packet_calibration_proposals_regression.py` verifies proposal generation remains report-only and correctly identifies one resolver residual benefit candidate plus missing-support/stale review proposals;
+- a smoke run over the local packet-bank result produced 3 proposals: 1 promotion candidate and 2 review items;
+- `eval/selector_architecture_gate.py` now requires the calibration proposal regression as `controller_packet_calibration_proposals_ok`.
+- `eval/controller_packet_calibration_guard.py` now applies a conservative promotion-readiness guard to calibration proposals. By default it requires enough support, multiple source logs, report-only mutation flags, no negative labels, and no unresolved review items before any proposal can be marked ready;
+- `eval/controller_packet_calibration_guard_regression.py` verifies the current fixture proposals are all blocked for the right reasons: insufficient support, insufficient source-log diversity, and unresolved review items;
+- the smoke guard over the local calibration proposals reported 3 blocked proposals and 0 ready promotions, which is the expected state until real multi-run packet evidence exists;
+- `eval/selector_architecture_gate.py` now requires the calibration guard regression as `controller_packet_calibration_guard_ok`.
+- `eval/controller_packet_calibration_pipeline.py` now runs the full report-only learning chain in one command: outcome logs -> controller packets -> packet memory bank -> calibration proposals -> calibration guard;
+- `eval/controller_packet_calibration_pipeline_regression.py` verifies the one-command pipeline writes all intermediate artifacts and preserves report-only/non-mutating guarantees;
+- the pipeline smoke run over the local benefit-opportunity log produced 9 packets, 3 clusters, 3 proposals, 1 promotion candidate, 2 review items, and 0 guard-ready promotions;
+- `eval/selector_architecture_gate.py` now requires the one-command pipeline regression as `controller_packet_calibration_pipeline_ok`.
+- `eval/controller_packet_collector.py` now preserves embedded runtime `controller_evidence_packet/v1` payloads when no later linked feedback events need to be joined. This lets the calibration pipeline consume new runtime logs directly while still rebuilding packets for legacy ask/feedback logs that need feedback joins;
+- the pipeline regression now covers this embedded-packet path and verifies embedded feedback summaries remain separable into positive, missing-support, and stale clusters.

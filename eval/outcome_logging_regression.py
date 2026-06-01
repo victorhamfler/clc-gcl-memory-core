@@ -33,6 +33,8 @@ def build_test_api(tmp: Path) -> MemoryApi:
         answer_type_config=api.root_config.get("answer_type"),
         retrieval_signal_config=api.root_config.get("retrieval_signals"),
         evidence_state_config=api.root_config.get("evidence_states"),
+        canonical_memory_config=api.root_config.get("canonical_memory"),
+        resolver_policy_config=api.root_config.get("resolver_policy"),
         llm_config=api.root_config.get("llm"),
         clc_thresholds=api.root_config.get("thresholds"),
     )
@@ -44,6 +46,7 @@ def build_test_api(tmp: Path) -> MemoryApi:
                 "path": str(tmp / "memory_outcomes.jsonl"),
                 "max_text_chars": 400,
                 "max_list_items": 12,
+                "include_controller_packet": True,
             }
         },
     )
@@ -135,6 +138,26 @@ def main() -> int:
                     "source",
                     "text",
                 )
+            ),
+            "ask_has_controller_packet": (
+                by_type["ask"]["payload"]["controller_evidence_packet"]["schema"]
+                == "controller_evidence_packet/v1"
+            ),
+            "controller_packet_operation_matches": (
+                by_type["ask"]["payload"]["controller_evidence_packet"]["operation_id"]
+                == asked["operation_id"]
+            ),
+            "controller_packet_report_only": (
+                by_type["ask"]["payload"]["controller_evidence_packet"]["report_only"] is True
+                and by_type["ask"]["payload"]["controller_evidence_packet"]["mutates_runtime"] is False
+                and by_type["ask"]["payload"]["controller_evidence_packet"]["mutates_config"] is False
+            ),
+            "controller_packet_has_retrieval_context": bool(
+                by_type["ask"]["payload"]["controller_evidence_packet"]["evidence"]["retrieval_context"]
+            ),
+            "controller_packet_selector_decision_matches": (
+                by_type["ask"]["payload"]["controller_evidence_packet"]["selector"]["decision"]
+                == by_type["ask"]["payload"]["selector_snapshot"]["decision"]
             ),
         }
         report = {

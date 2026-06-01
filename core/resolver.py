@@ -12,12 +12,14 @@ from core.evidence_states import (
     requires_sensitive_evidence as _requires_sensitive_evidence,
 )
 from core.evidence_context import float_value, retrieval_row_state
+from core.resolver_policy import normalize_resolver_policy
 
 
 def resolve_answer(
     query: str,
     results: list[dict[str, Any]],
     evidence_state_config: dict[str, Any] | None = None,
+    resolver_policy_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     summary: list[dict[str, Any]] = []
     current: list[dict[str, Any]] = []
@@ -50,8 +52,11 @@ def resolve_answer(
         disputed,
         stale,
         evidence_state_config=evidence_state_config,
+        resolver_policy_config=resolver_policy_config,
     )
-    evidence = preferred[: min(3, len(preferred))]
+    resolver_policy = normalize_resolver_policy(resolver_policy_config)
+    max_evidence = int(resolver_policy["evidence_selection"]["max_selected_evidence"])
+    evidence = preferred[: min(max_evidence, len(preferred))]
     if evidence_is_too_weak(evidence, evidence_state_config):
         evidence = []
     correction_conflict = has_correction_conflict_evidence(evidence)
@@ -61,7 +66,12 @@ def resolve_answer(
     evidence_has_current = any(item.get("memory_state") == "current" for item in evidence)
     evidence_has_stale = any(item.get("memory_state") == "stale" for item in evidence)
     evidence_has_disputed = any(item.get("memory_state") == "disputed" for item in evidence)
-    stored_contradiction_conflict = any(float(item.get("stored_contradiction_score") or 0.0) >= 0.75 for item in evidence)
+    arbitration_policy = resolver_policy["evidence_arbitration"]
+    stored_contradiction_conflict = any(
+        float(item.get("stored_contradiction_score") or 0.0)
+        >= float(arbitration_policy["stored_contradiction_conflict_threshold"])
+        for item in evidence
+    )
     conflict = (
         (bool(evidence_has_current and (evidence_has_stale or stale)) and not summary_only and not summary_answer)
         or evidence_has_disputed
@@ -70,7 +80,7 @@ def resolve_answer(
         or stored_contradiction_conflict
         or bool(live_conflicts)
     )
-    confidence = estimate_confidence(evidence, conflict)
+    confidence = estimate_confidence(evidence, conflict, resolver_policy_config)
     answer = build_extractive_answer(
         query,
         evidence,
@@ -79,12 +89,14 @@ def resolve_answer(
         confidence,
         correction_conflict=correction_conflict,
         live_conflict=bool(live_conflicts),
+        resolver_policy_config=resolver_policy,
     )
     annotated_evidence = annotate_evidence_conflicts(
         evidence,
         live_conflicts=live_conflicts,
         correction_conflict=correction_conflict,
         stored_contradiction_conflict=stored_contradiction_conflict,
+        stored_contradiction_threshold=float(arbitration_policy["stored_contradiction_conflict_threshold"]),
         stale_conflict=bool(evidence_has_current and (evidence_has_stale or stale)),
     )
 
@@ -112,30 +124,36 @@ def choose_preferred_evidence(
     disputed: list[dict[str, Any]],
     stale: list[dict[str, Any]],
     evidence_state_config: dict[str, Any] | None = None,
+    resolver_policy_config: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     if not results:
         return []
-    historical = [item for item in historical if is_relevant_to_query(query, item)]
-    disputed = [item for item in disputed if is_relevant_to_query(query, item)]
-    stale = [item for item in stale if is_relevant_to_query(query, item)]
-    summary = [item for item in summary if is_relevant_to_query(query, item)]
-    historical = order_evidence(query, historical)
-    current = order_evidence(query, current)
-    stale = order_evidence(query, stale)
-    disputed = order_evidence(query, disputed)
-    summary = order_evidence(query, summary)
+    arbitration_policy = normalize_resolver_policy(resolver_policy_config)["evidence_arbitration"]
+    historical = [item for item in historical if is_relevant_to_query(query, item, resolver_policy_config)]
+    disputed = [item for item in disputed if is_relevant_to_query(query, item, resolver_policy_config)]
+    stale = [item for item in stale if is_relevant_to_query(query, item, resolver_policy_config)]
+    summary = [item for item in summary if is_relevant_to_query(query, item, resolver_policy_config)]
+    historical = order_evidence(query, historical, resolver_policy_config)
+    current = order_evidence(query, current, resolver_policy_config)
+    stale = order_evidence(query, stale, resolver_policy_config)
+    disputed = order_evidence(query, disputed, resolver_policy_config)
+    summary = order_evidence(query, summary, resolver_policy_config)
     top_score = max(float(item.get("score") or 0.0) for item in results)
     if summary and (asks_for_multiple(query) or asks_for_summary_mechanism(query)):
-        return order_evidence(query, summary + historical + current)
+        return order_evidence(query, summary + historical + current, resolver_policy_config)
     if historical and current:
-        historical_anchor = max(historical, key=lambda item: evidence_preference_score(query, item))
-        current_anchor = max(current, key=lambda item: evidence_preference_score(query, item))
+        historical_anchor = max(historical, key=lambda item: evidence_preference_score(query, item, resolver_policy_config))
+        current_anchor = max(current, key=lambda item: evidence_preference_score(query, item, resolver_policy_config))
         historical_scope = float(historical_anchor.get("claim_scope_score") or 0.0)
         current_scope = float(current_anchor.get("claim_scope_score") or 0.0)
         historical_score = float(historical_anchor.get("score") or 0.0)
         current_score = float(current_anchor.get("score") or 0.0)
-        if historical_scope >= 0.75 and historical_scope > current_scope and historical_score >= current_score - 0.04:
-            return order_evidence(query, historical)
+        if (
+            historical_scope >= float(arbitration_policy["historical_scope_threshold"])
+            and historical_scope > current_scope
+            and historical_score >= current_score - float(arbitration_policy["historical_score_margin"])
+        ):
+            return order_evidence(query, historical, resolver_policy_config)
     if current and stale:
         stale_ids = {str(item.get("memory_id") or "") for item in stale if item.get("memory_id")}
         correcting_current = [
@@ -144,8 +162,8 @@ def choose_preferred_evidence(
             if stale_ids & {str(memory_id) for memory_id in item.get("supersedes_memory_ids") or []}
         ]
         if correcting_current:
-            best_correcting = max(correcting_current, key=lambda item: evidence_preference_score(query, item))
-            best_current = max(current, key=lambda item: evidence_preference_score(query, item))
+            best_correcting = max(correcting_current, key=lambda item: evidence_preference_score(query, item, resolver_policy_config))
+            best_current = max(current, key=lambda item: evidence_preference_score(query, item, resolver_policy_config))
             best_current_scope = float(best_current.get("claim_scope_score") or 0.0)
             best_correcting_scope = float(best_correcting.get("claim_scope_score") or 0.0)
             if is_scope_deflection_evidence(query, best_correcting):
@@ -155,42 +173,45 @@ def choose_preferred_evidence(
                     if not is_scope_deflection_evidence(query, item) and has_positive_selector_signal(item)
                 ]
                 if non_deflecting_historical:
-                    best_historical = max(non_deflecting_historical, key=lambda item: evidence_preference_score(query, item))
-                    if float(best_historical.get("score") or 0.0) >= float(best_correcting.get("score") or 0.0) - 0.02:
-                        return order_evidence(query, non_deflecting_historical + correcting_current)
+                    best_historical = max(non_deflecting_historical, key=lambda item: evidence_preference_score(query, item, resolver_policy_config))
+                    if float(best_historical.get("score") or 0.0) >= float(best_correcting.get("score") or 0.0) - float(arbitration_policy["nondeflecting_historical_margin"]):
+                        return order_evidence(query, non_deflecting_historical + correcting_current, resolver_policy_config)
             if (
                 best_current not in correcting_current
-                and best_current_scope >= 0.75
+                and best_current_scope >= float(arbitration_policy["current_scope_threshold"])
                 and best_current_scope > best_correcting_scope
-                and float(best_current.get("score") or 0.0) >= float(best_correcting.get("score") or 0.0) - 0.04
+                and float(best_current.get("score") or 0.0) >= float(best_correcting.get("score") or 0.0) - float(arbitration_policy["current_score_margin"])
             ):
-                return order_evidence(query, current)
+                return order_evidence(query, current, resolver_policy_config)
             if allows_stale_definition_context(query):
-                return order_evidence(query, correcting_current + stale)
-            return order_evidence(query, correcting_current)
+                return order_evidence(query, correcting_current + stale, resolver_policy_config)
+            return order_evidence(query, correcting_current, resolver_policy_config)
     if historical:
         session_focused = [
             item
             for item in historical
-            if float(item.get("session_evidence_score") or 0.0) >= 0.50
-            and is_relevant_to_query(query, item)
+            if float(item.get("session_evidence_score") or 0.0) >= float(arbitration_policy["session_focus_threshold"])
+            and is_relevant_to_query(query, item, resolver_policy_config)
         ]
         if session_focused:
             current_score = max((float(item.get("score") or 0.0) for item in current), default=0.0)
             focused_score = max(float(item.get("score") or 0.0) for item in session_focused)
-            if focused_score >= current_score - 0.02:
-                return order_evidence(query, session_focused)
+            if focused_score >= current_score - float(arbitration_policy["session_focus_margin"]):
+                return order_evidence(query, session_focused, resolver_policy_config)
     if current:
         relevant_current = [
             item
             for item in current
-            if is_relevant_to_query(query, item) and not is_scope_deflection_evidence(query, item)
+            if is_relevant_to_query(query, item, resolver_policy_config) and not is_scope_deflection_evidence(query, item)
         ]
         current_pool = relevant_current or (
             [] if (historical or stale or disputed or requires_sensitive_evidence(query, evidence_state_config)) else current
         )
         current_score = max((float(item.get("score") or 0.0) for item in current_pool), default=0.0)
-        relevance_floor = max(0.18, top_score * 0.90)
+        relevance_floor = max(
+            float(arbitration_policy["current_relevance_floor_min"]),
+            top_score * float(arbitration_policy["current_relevance_floor_ratio"]),
+        )
         if current_pool and (current_score >= relevance_floor or not (historical or summary)):
             return current_pool
     if historical:
@@ -199,48 +220,58 @@ def choose_preferred_evidence(
             supplemental_stale = [
                 item
                 for item in stale
-                if evidence_preference_score(query, item) >= evidence_preference_score(query, historical[0]) - 0.08
+                if evidence_preference_score(query, item, resolver_policy_config)
+                >= evidence_preference_score(query, historical[0], resolver_policy_config) - float(arbitration_policy["stale_supplement_margin"])
             ]
-        return order_evidence(query, historical + supplemental_stale)
+        return order_evidence(query, historical + supplemental_stale, resolver_policy_config)
     if stale and allows_stale_definition_context(query):
         return stale
     if requires_sensitive_evidence(query, evidence_state_config):
         return []
-    return order_evidence(query, disputed or stale or current or summary)
+    return order_evidence(query, disputed or stale or current or summary, resolver_policy_config)
 
 
-def order_evidence(query: str, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    ordered = sorted(items, key=lambda item: evidence_preference_score(query, item), reverse=True)
+def order_evidence(
+    query: str,
+    items: list[dict[str, Any]],
+    resolver_policy_config: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    arbitration_policy = normalize_resolver_policy(resolver_policy_config)["evidence_arbitration"]
+    ordered = sorted(items, key=lambda item: evidence_preference_score(query, item, resolver_policy_config), reverse=True)
     rank_one = next((item for item in items if int(item.get("rank") or 0) == 1), None)
     if not rank_one:
         return ordered
-    if not has_positive_selector_signal(rank_one):
+    if not has_positive_selector_signal(rank_one, resolver_policy_config):
         return ordered
     if is_broad_generic_evidence(rank_one) and not asks_for_broad_generic_policy(query):
         return ordered
-    if not is_relevant_to_query(query, rank_one):
+    if not is_relevant_to_query(query, rank_one, resolver_policy_config):
         return ordered
     leader = ordered[0] if ordered else None
     if leader is rank_one:
         return ordered
-    rank_one_score = evidence_preference_score(query, rank_one)
-    leader_score = evidence_preference_score(query, leader) if leader else 0.0
+    rank_one_score = evidence_preference_score(query, rank_one, resolver_policy_config)
+    leader_score = evidence_preference_score(query, leader, resolver_policy_config) if leader else 0.0
     if (
         leader is None
         or is_broad_generic_evidence(leader)
         or float(rank_one.get("answer_type_score") or 0.0) > float(leader.get("answer_type_score") or 0.0)
-        or rank_one_score >= leader_score - 0.15
+        or rank_one_score >= leader_score - float(arbitration_policy["rank_one_takeover_margin"])
     ):
         return [rank_one, *[item for item in ordered if item is not rank_one]]
     return ordered
 
 
-def has_positive_selector_signal(item: dict[str, Any]) -> bool:
+def has_positive_selector_signal(
+    item: dict[str, Any],
+    resolver_policy_config: dict[str, Any] | None = None,
+) -> bool:
+    arbitration_policy = normalize_resolver_policy(resolver_policy_config)["evidence_arbitration"]
     state = retrieval_row_state(item)
     return (
         state.answer_type_score > 0.0
-        or state.claim_scope_score >= 0.50
-        or state.text_match_score >= 0.50
+        or state.claim_scope_score >= float(arbitration_policy["positive_claim_scope_threshold"])
+        or state.text_match_score >= float(arbitration_policy["positive_text_match_threshold"])
     )
 
 
@@ -337,7 +368,12 @@ def classify_memory_state(item: dict[str, Any], config: dict[str, Any] | None = 
     return _classify_memory_state(item, config)
 
 
-def is_relevant_to_query(query: str, item: dict[str, Any]) -> bool:
+def is_relevant_to_query(
+    query: str,
+    item: dict[str, Any],
+    resolver_policy_config: dict[str, Any] | None = None,
+) -> bool:
+    policy = normalize_resolver_policy(resolver_policy_config)["query_relevance"]
     query_terms = normalized_terms(query)
     if not query_terms:
         return True
@@ -360,20 +396,20 @@ def is_relevant_to_query(query: str, item: dict[str, Any]) -> bool:
     state = retrieval_row_state(item)
     text_match = state.text_match_score
     intent_match = state.intent_match_score
-    if intent_match <= -0.40 and text_match < 0.67:
+    if intent_match <= float(policy["negative_intent_threshold"]) and text_match < float(policy["negative_intent_text_match_floor"]):
         return False
-    if text_match >= 0.34:
+    if text_match >= float(policy["text_match_accept_threshold"]):
         return True
-    if intent_match >= 0.65 and normalized_terms(query) & text_terms:
+    if intent_match >= float(policy["intent_accept_threshold"]) and normalized_terms(query) & text_terms:
         return True
     overlap = query_terms & text_terms
-    if state.answer_type_score > 0.0 and len(overlap) >= 2:
+    if state.answer_type_score > 0.0 and len(overlap) >= int(policy["answer_type_min_overlap"]):
         return True
     if len(overlap) >= max(1, len(query_terms) // 2):
         return True
     score = float(item.get("score") or 0.0)
     cosine = float(item.get("cosine") or 0.0)
-    if score >= 0.30 or cosine >= 0.62:
+    if score >= float(policy["vector_score_accept_threshold"]) or cosine >= float(policy["cosine_accept_threshold"]):
         if overlap:
             return True
         if is_identity_query(query):
@@ -384,42 +420,47 @@ def is_relevant_to_query(query: str, item: dict[str, Any]) -> bool:
     return False
 
 
-def evidence_preference_score(query: str, item: dict[str, Any]) -> float:
+def evidence_preference_score(
+    query: str,
+    item: dict[str, Any],
+    resolver_policy_config: dict[str, Any] | None = None,
+) -> float:
+    policy = normalize_resolver_policy(resolver_policy_config)["evidence_preference"]
     text = str(item.get("text") or "")
     clean_text = clean_answer_text(text)
     state = retrieval_row_state(item)
     score = float_value(item.get("score"), 0.0)
-    score += 0.20 * state.text_match_score
-    score += 0.24 * state.claim_scope_score
-    score += 0.28 * state.answer_type_score
-    score += 0.12 * state.intent_match_score
-    score += 0.05 * len(normalized_terms(query) & normalized_terms(clean_text))
+    score += float(policy["text_match_weight"]) * state.text_match_score
+    score += float(policy["claim_scope_weight"]) * state.claim_scope_score
+    score += float(policy["answer_type_weight"]) * state.answer_type_score
+    score += float(policy["intent_match_weight"]) * state.intent_match_score
+    score += float(policy["term_overlap_weight"]) * len(normalized_terms(query) & normalized_terms(clean_text))
     rank = int(item.get("rank") or 0)
-    if rank > 0 and has_positive_selector_signal(item):
-        score += max(0.0, 0.08 - (0.015 * (rank - 1)))
+    if rank > 0 and has_positive_selector_signal(item, resolver_policy_config):
+        score += max(0.0, float(policy["rank_one_bonus"]) - (float(policy["rank_one_decay"]) * (rank - 1)))
     if is_broad_generic_evidence(item) and not asks_for_broad_generic_policy(query):
-        score -= 0.18
+        score -= float(policy["broad_generic_penalty"])
     if is_scope_deflection_evidence(query, item):
-        score -= 0.35
+        score -= float(policy["scope_deflection_penalty"])
     if is_negative_permission_evidence(item):
-        score -= 0.22
+        score -= float(policy["negative_permission_penalty"])
     if state.authority_state == "current":
-        score += 0.35 * max(0.30, state.correction_relevance_score)
+        score += float(policy["current_authority_weight"]) * max(float(policy["current_authority_floor"]), state.correction_relevance_score)
     elif state.authority_state == "superseded" or item.get("superseded_by_memory_ids"):
-        score -= 0.55
+        score -= float(policy["superseded_penalty"])
     lower = text.lower()
     if "does not change" in lower or "doesn't change" in lower:
-        score -= 0.18
+        score -= float(policy["does_not_change_penalty"])
     if re.search(r"\b(is|are|uses|use|equals|=)\b", lower) and not re.search(r"\bdoes not change\b|\bdoesn't change\b", lower):
-        score += 0.08
+        score += float(policy["assignment_statement_bonus"])
     if lower.startswith("memory improvement for"):
-        score -= 0.18
+        score -= float(policy["memory_improvement_penalty"])
     if "original memory preview:" in lower:
-        score -= 0.06
+        score -= float(policy["original_preview_penalty"])
     if clean_text and not clean_text.lower().startswith("this memory is a core definition"):
-        score += 0.04
+        score += float(policy["clean_text_bonus"])
     if str(item.get("memory_state") or "") == "summary" and asks_for_summary_mechanism(query):
-        score += 0.12
+        score += float(policy["summary_mechanism_bonus"])
     return score
 
 
@@ -435,9 +476,14 @@ def has_correction_conflict_evidence(evidence: list[dict[str, Any]]) -> bool:
     return False
 
 
-def estimate_confidence(evidence: list[dict[str, Any]], conflict: bool) -> float:
+def estimate_confidence(
+    evidence: list[dict[str, Any]],
+    conflict: bool,
+    resolver_policy_config: dict[str, Any] | None = None,
+) -> float:
     if not evidence:
         return 0.0
+    policy = normalize_resolver_policy(resolver_policy_config)["answer_confidence"]
     top = evidence[0]
     state = retrieval_row_state(top)
     score = float_value(top.get("score"), 0.0)
@@ -448,23 +494,23 @@ def estimate_confidence(evidence: list[dict[str, Any]], conflict: bool) -> float
     text_match = max(0.0, state.text_match_score)
     usage_count = max(0, int(top.get("usage_count") or 0))
     evidence_count = len(evidence)
-    usage_bonus = min(0.08, 0.025 * usage_count)
-    count_bonus = min(0.06, 0.02 * max(0, evidence_count - 1))
+    usage_bonus = min(float(policy["usage_bonus_cap"]), float(policy["usage_bonus_weight"]) * usage_count)
+    count_bonus = min(float(policy["count_bonus_cap"]), float(policy["count_bonus_weight"]) * max(0, evidence_count - 1))
     confidence = (
-        0.28
-        + min(0.34, score / 1.7)
-        + 0.10 * text_match
-        + 0.12 * feedback
-        + 0.10 * supersession
-        + 0.08 * relation
-        + 0.06 * summary
+        float(policy["base"])
+        + min(float(policy["score_cap"]), score / float(policy["score_divisor"]))
+        + float(policy["text_match_weight"]) * text_match
+        + float(policy["feedback_weight"]) * feedback
+        + float(policy["supersession_weight"]) * supersession
+        + float(policy["relation_weight"]) * relation
+        + float(policy["summary_weight"]) * summary
         + usage_bonus
         + count_bonus
     )
     if conflict:
-        confidence -= 0.14
-    if score < 0.35 and text_match < 0.2 and not summary:
-        confidence -= 0.08
+        confidence -= float(policy["conflict_penalty"])
+    if score < float(policy["weak_score_threshold"]) and text_match < float(policy["weak_text_match_threshold"]) and not summary:
+        confidence -= float(policy["weak_evidence_penalty"])
     return round(max(0.0, min(1.0, confidence)), 4)
 
 
@@ -476,11 +522,12 @@ def build_extractive_answer(
     confidence: float,
     correction_conflict: bool = False,
     live_conflict: bool = False,
+    resolver_policy_config: dict[str, Any] | None = None,
 ) -> str:
     if not evidence:
         return "I do not have enough memory evidence to answer that yet."
 
-    snippets = select_answer_snippets(query, evidence)
+    snippets = select_answer_snippets(query, evidence, resolver_policy_config)
     if not snippets:
         snippets = [str(evidence[0].get("text") or "").strip()[:320]]
 
@@ -497,15 +544,21 @@ def build_extractive_answer(
         answer += " This answer is based on corrected memory evidence."
     elif conflict and live_conflict:
         answer += " Conflicting evidence was retrieved, so this answer should be reviewed or corrected."
-    if confidence < 0.45:
+    policy = normalize_resolver_policy(resolver_policy_config)["answer_composition"]
+    if confidence < float(policy["low_confidence_threshold"]):
         answer += " Confidence is low because the retrieved evidence is weak."
     return answer.strip()
 
 
-def select_answer_snippets(query: str, evidence: list[dict[str, Any]]) -> list[str]:
+def select_answer_snippets(
+    query: str,
+    evidence: list[dict[str, Any]],
+    resolver_policy_config: dict[str, Any] | None = None,
+) -> list[str]:
+    policy = normalize_resolver_policy(resolver_policy_config)["answer_snippets"]
     multi = asks_for_multiple(query)
     if multi:
-        source_aware = select_multi_intent_snippets(query, evidence)
+        source_aware = select_multi_intent_snippets(query, evidence, resolver_policy_config)
         if source_aware:
             return source_aware
 
@@ -513,12 +566,13 @@ def select_answer_snippets(query: str, evidence: list[dict[str, Any]]) -> list[s
     has_current = any(str(item.get("memory_state") or "") == "current" for item in evidence)
     has_stale = any(str(item.get("memory_state") or "") == "stale" for item in evidence)
     require_current = has_current and has_stale and not asks_for_stale_history(query)
-    has_non_deflecting_evidence = any(not is_scope_deflection_evidence(query, item) for item in evidence[:3])
+    max_evidence_scan = int(policy["max_evidence_scan"])
+    has_non_deflecting_evidence = any(not is_scope_deflection_evidence(query, item) for item in evidence[:max_evidence_scan])
     has_non_negative_permission_evidence = any(
         evidence_matches_intent_bucket("upload_policy", item) and not is_negative_permission_evidence(item)
-        for item in evidence[:3]
+        for item in evidence[:max_evidence_scan]
     )
-    for evidence_idx, item in enumerate(evidence[:3]):
+    for evidence_idx, item in enumerate(evidence[:max_evidence_scan]):
         if has_non_deflecting_evidence and is_scope_deflection_evidence(query, item):
             continue
         if has_non_negative_permission_evidence and is_negative_permission_evidence(item):
@@ -526,26 +580,26 @@ def select_answer_snippets(query: str, evidence: list[dict[str, Any]]) -> list[s
         state = str(item.get("memory_state") or "")
         state_bonus = 0.0
         if state == "current":
-            state_bonus = 3.0
+            state_bonus = float(policy["current_state_bonus"])
         elif state == "summary":
-            state_bonus = 1.2
+            state_bonus = float(policy["summary_state_bonus"])
         elif state == "historical":
-            state_bonus = 0.4
+            state_bonus = float(policy["historical_state_bonus"])
         elif state == "stale" and not asks_for_stale_history(query):
-            state_bonus = -2.2
+            state_bonus = -float(policy["stale_state_penalty"])
         if is_broad_generic_evidence(item) and not asks_for_broad_generic_policy(query):
-            state_bonus -= 2.0
+            state_bonus -= float(policy["broad_generic_penalty"])
         if is_scope_deflection_evidence(query, item):
-            state_bonus -= 3.5
-        primary_bonus = 1.2 if evidence_idx == 0 else 0.0
-        for snippet, score in candidate_snippets(query, item.get("text") or ""):
+            state_bonus -= float(policy["scope_deflection_penalty"])
+        primary_bonus = float(policy["primary_evidence_bonus"]) if evidence_idx == 0 else 0.0
+        for snippet, score in candidate_snippets(query, item.get("text") or "", resolver_policy_config):
             if snippet:
                 scored.append((score + state_bonus + primary_bonus, -evidence_idx, 1 if state == "current" else 0, snippet))
     if not scored:
         return []
     scored.sort(reverse=True)
     if multi:
-        out = select_diverse_procedural_snippets(query, scored)
+        out = select_diverse_procedural_snippets(query, scored, resolver_policy_config)
         if out:
             return out
     if require_current:
@@ -558,41 +612,52 @@ def select_answer_snippets(query: str, evidence: list[dict[str, Any]]) -> list[s
             continue
         if multi or (
             not is_simple_fact_question(query)
-            and score >= max(1.6, scored[0][0] * 0.92)
-            and len(out) < 2
+            and score >= max(float(policy["secondary_min_score"]), scored[0][0] * float(policy["secondary_top_ratio"]))
+            and len(out) < int(policy["single_intent_max_snippets"])
         ):
             out.append(snippet)
-        if len(out) >= (3 if multi else 2):
+        max_snippets = int(policy["multi_intent_max_snippets"] if multi else policy["single_intent_max_snippets"])
+        if len(out) >= max_snippets:
             break
     return out
 
 
-def select_multi_intent_snippets(query: str, evidence: list[dict[str, Any]]) -> list[str]:
+def select_multi_intent_snippets(
+    query: str,
+    evidence: list[dict[str, Any]],
+    resolver_policy_config: dict[str, Any] | None = None,
+) -> list[str]:
+    policy = normalize_resolver_policy(resolver_policy_config)["answer_snippets"]
     buckets = query_intent_buckets(query)
     if len(buckets) < 2:
         return []
     selected: list[str] = []
     used_evidence: set[int] = set()
-    has_non_deflecting_evidence = any(not is_scope_deflection_evidence(query, item) for item in evidence[:4])
+    max_evidence_scan = int(policy["multi_intent_max_evidence_scan"])
+    has_non_deflecting_evidence = any(not is_scope_deflection_evidence(query, item) for item in evidence[:max_evidence_scan])
     for bucket in buckets:
         best: tuple[float, int, str] | None = None
-        for evidence_idx, item in enumerate(evidence[:4]):
+        for evidence_idx, item in enumerate(evidence[:max_evidence_scan]):
             if evidence_idx in used_evidence:
                 continue
             if has_non_deflecting_evidence and is_scope_deflection_evidence(query, item):
                 continue
             if not evidence_matches_intent_bucket(bucket, item):
                 continue
-            for snippet, snippet_score in candidate_snippets(query, item.get("text") or ""):
+            for snippet, snippet_score in candidate_snippets(query, item.get("text") or "", resolver_policy_config):
                 if not snippet:
                     continue
                 candidate_score = (
                     snippet_score
-                    + evidence_preference_score(query, item)
-                    + max(0.0, 0.45 - (0.12 * evidence_idx))
+                    + evidence_preference_score(query, item, resolver_policy_config)
+                    + max(
+                        0.0,
+                        float(policy["multi_intent_rank_bonus_base"])
+                        - (float(policy["multi_intent_rank_bonus_decay"]) * evidence_idx),
+                    )
                 )
                 if is_broad_generic_evidence(item) and bucket != "approval_log":
-                    candidate_score -= 0.8
+                    candidate_score -= float(policy["multi_intent_broad_generic_penalty"])
                 if best is None or candidate_score > best[0]:
                     best = (candidate_score, evidence_idx, snippet)
         if best is None:
@@ -602,7 +667,7 @@ def select_multi_intent_snippets(query: str, evidence: list[dict[str, Any]]) -> 
             continue
         selected.append(snippet)
         used_evidence.add(evidence_idx)
-        if len(selected) >= 3:
+        if len(selected) >= int(policy["multi_intent_max_snippets"]):
             break
     return selected if len(selected) >= 2 else []
 
@@ -662,7 +727,13 @@ def evidence_matches_intent_bucket(bucket: str, item: dict[str, Any]) -> bool:
     return False
 
 
-def select_diverse_procedural_snippets(query: str, scored: list[tuple[float, int, int, str]]) -> list[str]:
+def select_diverse_procedural_snippets(
+    query: str,
+    scored: list[tuple[float, int, int, str]],
+    resolver_policy_config: dict[str, Any] | None = None,
+) -> list[str]:
+    policy = normalize_resolver_policy(resolver_policy_config)["answer_snippets"]
+    max_snippets = int(policy["multi_intent_max_snippets"])
     lower_query = str(query or "").lower()
     needs_adaptation_result = "adaptation" in lower_query and any(
         term in lower_query for term in ("change", "instruction", "test", "workflow")
@@ -674,7 +745,7 @@ def select_diverse_procedural_snippets(query: str, scored: list[tuple[float, int
 
     def add_best(predicate) -> None:
         for _score, _idx, _is_current, snippet in scored:
-            if len(out) >= 3:
+            if len(out) >= max_snippets:
                 return
             lower = snippet.lower()
             if not predicate(lower):
@@ -690,7 +761,7 @@ def select_diverse_procedural_snippets(query: str, scored: list[tuple[float, int
     add_best(lambda lower: "measure" in lower or "term score" in lower or "source score" in lower)
 
     for _score, _idx, _is_current, snippet in scored:
-        if len(out) >= 3:
+        if len(out) >= max_snippets:
             break
         lower = snippet.lower()
         if lower.startswith("this document answers") and out:
@@ -698,7 +769,7 @@ def select_diverse_procedural_snippets(query: str, scored: list[tuple[float, int
         if any(snippet == existing or snippet in existing or existing in snippet for existing in out):
             continue
         out.append(snippet)
-    return out[:3]
+    return out[:max_snippets]
 
 
 def best_snippet(query: str, text: str) -> str:
@@ -706,7 +777,12 @@ def best_snippet(query: str, text: str) -> str:
     return snippets[0][0] if snippets else ""
 
 
-def candidate_snippets(query: str, text: str) -> list[tuple[str, float]]:
+def candidate_snippets(
+    query: str,
+    text: str,
+    resolver_policy_config: dict[str, Any] | None = None,
+) -> list[tuple[str, float]]:
+    policy = normalize_resolver_policy(resolver_policy_config)["answer_snippets"]
     cleaned = clean_answer_text(text)
     if not cleaned:
         return []
@@ -735,27 +811,36 @@ def candidate_snippets(query: str, text: str) -> list[tuple[str, float]]:
         piece_terms = normalized_terms(lower)
         hits = len(query_terms & piece_terms)
         coverage = hits / max(1, len(query_terms))
-        correction_bonus = 2 if any(term in lower for term in ("correction", "current", "must", "only when")) else 0
+        correction_bonus = float(policy["correction_bonus"]) if any(term in lower for term in ("correction", "current", "must", "only when")) else 0.0
         procedure_bonus = 0.0
         if procedural_query and any(term in lower for term in ("workflow", "build", "run ", "import", "re-run", "measure", "expected result", "adaptive ranking")):
-            procedure_bonus = 1.4
+            procedure_bonus = float(policy["procedure_bonus"])
         preference_bonus = 0.0
         if "preference" in query.lower() and any(term in lower for term in ("preference", "wants", "does not want", "only when")):
-            preference_bonus = 0.8
+            preference_bonus = float(policy["preference_bonus"])
         generic_intro_penalty = 0.0
         if lower.startswith("this document answers") or lower.startswith("this document restates") or lower.startswith("this document supersedes"):
-            generic_intro_penalty = 4.0
+            generic_intro_penalty = float(policy["generic_intro_penalty"])
         exact_phrase_bonus = 0.0
         for ngram in query_ngrams(query):
             if ngram in lower:
-                exact_phrase_bonus += 0.4
-        score = hits + 2.0 * coverage + correction_bonus + procedure_bonus + preference_bonus + min(1.2, exact_phrase_bonus) - generic_intro_penalty
+                exact_phrase_bonus += float(policy["exact_phrase_bonus_weight"])
+        score = (
+            hits
+            + float(policy["coverage_weight"]) * coverage
+            + correction_bonus
+            + procedure_bonus
+            + preference_bonus
+            + min(float(policy["exact_phrase_bonus_cap"]), exact_phrase_bonus)
+            - generic_intro_penalty
+        )
         scored.append((score, -idx, compact))
     scored.sort(reverse=True)
     out = []
     for score, _idx, snippet in scored:
-        if len(snippet) > 360:
-            snippet = snippet[:357].rstrip() + "..."
+        snippet_max_chars = int(policy["snippet_max_chars"])
+        if len(snippet) > snippet_max_chars:
+            snippet = snippet[: max(0, snippet_max_chars - 3)].rstrip() + "..."
         out.append((snippet, score))
     return out
 
@@ -891,7 +976,8 @@ def annotate_evidence_conflicts(
     live_conflicts: list[dict[str, Any]],
     correction_conflict: bool,
     stored_contradiction_conflict: bool,
-    stale_conflict: bool,
+    stored_contradiction_threshold: float = 0.75,
+    stale_conflict: bool = False,
 ) -> list[dict[str, Any]]:
     if not evidence:
         return []
@@ -913,7 +999,7 @@ def annotate_evidence_conflicts(
         if correction_conflict and item.get("memory_state") in {"current", "stale", "disputed"}:
             reasons.append("correction_context_conflict")
             conflict_with.extend([item_id for item_id in all_ids if item_id != memory_id])
-        if stored_contradiction_conflict and float(item.get("stored_contradiction_score") or 0.0) >= 0.75:
+        if stored_contradiction_conflict and float(item.get("stored_contradiction_score") or 0.0) >= stored_contradiction_threshold:
             reasons.append("stored_csd_contradiction")
             conflict_with.extend([str(item_id) for item_id in item.get("stored_contradiction_memory_ids") or [] if item_id])
         if reasons:

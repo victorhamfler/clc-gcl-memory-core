@@ -26,6 +26,7 @@ from core.retrieval_signals import (
     tokens,
 )
 from core.resolver import compact_evidence, resolve_answer
+from core.resolver_policy import normalize_resolver_policy
 from core.symbolic import build_signal_packet
 from storage.db import MemoryDB, new_id, normalize_namespace, utc_now
 
@@ -79,6 +80,7 @@ class MemoryPipeline:
         retrieval_signal_config: dict[str, Any] | None = None,
         evidence_state_config: dict[str, Any] | None = None,
         canonical_memory_config: dict[str, Any] | None = None,
+        resolver_policy_config: dict[str, Any] | None = None,
         llm_config: dict[str, Any] | None = None,
         clc_thresholds: dict[str, Any] | None = None,
     ):
@@ -98,6 +100,7 @@ class MemoryPipeline:
         self.retrieval_signal_config = self.retrieval_signals.signal_config
         self.evidence_state_config = normalize_evidence_state_config(evidence_state_config)
         self.canonical_memory_config = self._normalize_canonical_memory_config(canonical_memory_config)
+        self.resolver_policy_config = normalize_resolver_policy(resolver_policy_config)
         self.llm_config = dict(llm_config or {})
         self.recall_engine = RecallEngine(self.db, top_k=top_k)
         self.csd = CSDLayer(self.db)
@@ -635,7 +638,12 @@ class MemoryPipeline:
             results = self._apply_session_evidence_boost(results, session_context)[: max(1, int(top_k))]
         else:
             results = results[: max(1, int(top_k))]
-        resolved = resolve_answer(query, results, evidence_state_config=self.evidence_state_config)
+        resolved = resolve_answer(
+            query,
+            results,
+            evidence_state_config=self.evidence_state_config,
+            resolver_policy_config=self.resolver_policy_config,
+        )
         source_context = self._source_diverse_context(retrieval_pool, results, limit=max(1, int(top_k)))
         source_context = self._with_summary_source_context(source_context, results, limit=max(1, int(top_k)))
         stale_context = self._stale_companion_context(resolved["evidence"], resolved["raw_results"])
