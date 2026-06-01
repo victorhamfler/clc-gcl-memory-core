@@ -28,6 +28,9 @@ def main() -> int:
         packet(2, label="answer_missing_support", rating=-0.75, would_override=False),
         packet(3, label="answer_stale", rating=-0.75, would_override=False),
         packet(4, label="answer_bridge_warning_useful", rating=1.0, would_override=False, ogcf_present=False),
+        packet(5, label="answer_bridge_warning_useful", rating=1.0, would_override=False, ogcf_present=True),
+        packet(6, label="answer_bridge_warning_useful", rating=1.0, would_override=False, ogcf_present=True),
+        packet(7, label="ogcf_false_positive", rating=-0.75, would_override=False, ogcf_present=True),
     ]
     PACKETS_JSONL.write_text(
         "\n".join(json.dumps(row, separators=(",", ":")) for row in rows) + "\n",
@@ -45,9 +48,9 @@ def main() -> int:
     }
     checks = {
         "guard_ok": report["ok"] is True,
-        "has_proposals": report["proposal_count"] == 4,
+        "has_proposals": report["proposal_count"] == 6,
         "no_ready_promotions": report["ready_count"] == 0,
-        "blocked_all": report["blocked_count"] == 4,
+        "blocked_all": report["blocked_count"] == 6,
         "review_items_block_candidate": "review_items_present" in blocked_reasons,
         "requires_multiple_logs": "insufficient_source_logs" in blocked_reasons,
         "requires_more_support": "insufficient_support" in blocked_reasons,

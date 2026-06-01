@@ -46,6 +46,11 @@ def proposal_kind(cluster: dict[str, Any]) -> tuple[str, str]:
             "bridge_metadata_gap_review",
             "Bridge-warning feedback appeared without OGCF metadata; review the test harness or runtime call path before using this as bridge calibration evidence.",
         )
+    if any("answer_bridge_warning_useful" in str(label) for label in labels) and int(cluster.get("ogcf_meta_count") or 0) > 0:
+        return (
+            "ogcf_bridge_behavior_candidate",
+            "Repeated positive bridge-warning feedback appears with OGCF metadata; collect independent logs before calibrating bridge warning behavior.",
+        )
     if readiness == "calibration_candidate":
         if int(cluster.get("support") or 0) >= 2 and int(residual_families.get("supported_evidence") or 0) > 0:
             return (
@@ -112,6 +117,8 @@ def build_proposal(cluster: dict[str, Any], index: int) -> dict[str, Any]:
 
 
 def next_test_for_kind(kind: str) -> str:
+    if kind == "ogcf_bridge_behavior_candidate":
+        return "Collect at least one more independent OGCF bridge run and compare bridge-warning-useful/noise separation before proposing any bridge-behavior calibration."
     if kind == "resolver_residual_benefit_candidate":
         return "Replay the same packet family across at least two independent logs and compare residual-benefit helpful/harmful counts before proposing resolver calibration."
     if kind == "missing_support_review":
@@ -130,7 +137,9 @@ def build_report(bank_path: Path) -> dict[str, Any]:
     clusters = [item for item in bank.get("clusters") or [] if isinstance(item, dict)]
     proposals = [build_proposal(cluster, idx) for idx, cluster in enumerate(clusters, start=1)]
     promotion_candidates = [
-        item for item in proposals if item["kind"] in {"resolver_residual_benefit_candidate", "positive_behavior_candidate"}
+        item
+        for item in proposals
+        if item["kind"] in {"resolver_residual_benefit_candidate", "positive_behavior_candidate", "ogcf_bridge_behavior_candidate"}
     ]
     review_items = [item for item in proposals if "review" in item["kind"] or "holdout" in item["kind"]]
     return {

@@ -86,7 +86,23 @@ def readiness_for_cluster(packets: list[dict[str, Any]], *, ready_support: int, 
         summary = packet.get("feedback_summary") if isinstance(packet.get("feedback_summary"), dict) else {}
         packet_labels = summary.get("labels") if isinstance(summary.get("labels"), dict) else {}
         labels.update({norm(label): int(count or 0) for label, count in packet_labels.items()})
-    negative = sum(count for label, count in labels.items() if any(term in label for term in ("wrong", "bad", "stale", "missing", "overconfident", "noise", "irrelevant")))
+    negative = sum(
+        count
+        for label, count in labels.items()
+        if any(
+            term in label
+            for term in (
+                "wrong",
+                "bad",
+                "stale",
+                "missing",
+                "overconfident",
+                "noise",
+                "irrelevant",
+                "false_positive",
+            )
+        )
+    )
     positive = sum(count for label, count in labels.items() if count > 0) - negative
     source_logs = {str(packet.get("source_log") or "") for packet in packets if packet.get("source_log")}
     if negative and positive:

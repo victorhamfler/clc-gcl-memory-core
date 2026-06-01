@@ -16,7 +16,11 @@ DEFAULT_PROPOSALS = REPO_ROOT / "experiments" / "controller_packet_calibration_p
 OUT_JSON = REPO_ROOT / "experiments" / "controller_packet_calibration_guard_results.json"
 OUT_MD = REPO_ROOT / "experiments" / "controller_packet_calibration_guard_report.md"
 
-PROMOTION_KINDS = {"resolver_residual_benefit_candidate", "positive_behavior_candidate"}
+PROMOTION_KINDS = {
+    "resolver_residual_benefit_candidate",
+    "positive_behavior_candidate",
+    "ogcf_bridge_behavior_candidate",
+}
 BLOCKING_KINDS = {
     "missing_support_review",
     "stale_answer_review",
