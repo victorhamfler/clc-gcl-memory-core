@@ -67,6 +67,19 @@ def run_step(name: str, command: list[str], cwd: Path = ROOT, timeout_seconds: i
     }
 
 
+def skip_step(name: str, reason: str) -> dict[str, Any]:
+    return {
+        "name": name,
+        "ok": True,
+        "returncode": 0,
+        "command": ["<skipped>"],
+        "stdout": json.dumps({"ok": True, "skipped": True, "reason": reason}),
+        "stderr": "",
+        "parsed_stdout": {"ok": True, "skipped": True, "reason": reason},
+        "skipped": True,
+    }
+
+
 def parse_last_json(text: str) -> Any:
     text = str(text or "").strip()
     if not text:
@@ -321,6 +334,11 @@ def main() -> int:
     parser.add_argument("--random-cases", type=int, default=64)
     parser.add_argument("--seed", type=int, default=20260520)
     parser.add_argument(
+        "--allow-missing-runtime-artifacts",
+        action="store_true",
+        help="Skip log/DB/model-artifact dependent checks for fresh external-agent clones before they generate runtime logs.",
+    )
+    parser.add_argument(
         "--allow-missing-candidates",
         action="store_true",
         help="If a supplied candidate file is missing, use the default fixture for that family and record the fallback.",
@@ -358,6 +376,12 @@ def main() -> int:
     }
 
     python = sys.executable
+    artifact_skip_reason = "portable sanity mode: runtime logs, local DBs, or local model artifacts may be absent"
+    maybe_artifact_step = (
+        lambda name, command: skip_step(name, artifact_skip_reason)
+        if args.allow_missing_runtime_artifacts
+        else run_step(name, command)
+    )
     steps = [
         run_step(
             "py_compile",
@@ -472,7 +496,7 @@ def main() -> int:
             "canonical_ogcf_shadow_coverage_regression",
             [python, str(ROOT / "eval" / "canonical_ogcf_shadow_coverage_regression.py")],
         ),
-        run_step(
+        maybe_artifact_step(
             "adaptive_context_gemma_shadow_regression",
             [python, str(ROOT / "eval" / "adaptive_context_gemma_shadow_regression.py")],
         ),
@@ -480,15 +504,15 @@ def main() -> int:
             "adaptive_behavior_shadow_runtime_regression",
             [python, str(ROOT / "eval" / "adaptive_behavior_shadow_runtime_regression.py")],
         ),
-        run_step(
+        maybe_artifact_step(
             "adaptive_residual_shadow_runtime_regression",
             [python, str(ROOT / "eval" / "adaptive_residual_shadow_runtime_regression.py")],
         ),
-        run_step(
+        maybe_artifact_step(
             "adaptive_residual_shadow_logged_eval",
             [python, str(ROOT / "eval" / "adaptive_residual_shadow_logged_eval.py")],
         ),
-        run_step(
+        maybe_artifact_step(
             "adaptive_residual_shadow_multi_log_eval",
             [
                 python,
@@ -502,11 +526,11 @@ def main() -> int:
             "adaptive_residual_shadow_suppressor_regression",
             [python, str(ROOT / "eval" / "adaptive_residual_shadow_suppressor_regression.py")],
         ),
-        run_step(
+        maybe_artifact_step(
             "adaptive_residual_shadow_external_failure_replay",
             [python, str(ROOT / "eval" / "adaptive_residual_shadow_external_failure_replay.py")],
         ),
-        run_step(
+        maybe_artifact_step(
             "adaptive_residual_shadow_term_candidate_miner",
             [python, str(ROOT / "eval" / "adaptive_residual_shadow_term_candidate_miner.py")],
         ),
@@ -514,7 +538,7 @@ def main() -> int:
             "adaptive_residual_shadow_term_miner_regression",
             [python, str(ROOT / "eval" / "adaptive_residual_shadow_term_miner_regression.py")],
         ),
-        run_step(
+        maybe_artifact_step(
             "adaptive_residual_shadow_term_patch_proposal",
             [python, str(ROOT / "eval" / "adaptive_residual_shadow_term_patch_proposal.py")],
         ),
@@ -526,15 +550,15 @@ def main() -> int:
             "adaptive_residual_shadow_term_patch_pipeline_regression",
             [python, str(ROOT / "eval" / "adaptive_residual_shadow_term_patch_pipeline_regression.py")],
         ),
-        run_step(
+        maybe_artifact_step(
             "adaptive_residual_shadow_term_patch_guard",
             [python, str(ROOT / "eval" / "adaptive_residual_shadow_term_patch_guard.py")],
         ),
-        run_step(
+        maybe_artifact_step(
             "adaptive_residual_shadow_promotion_readiness",
             [python, str(ROOT / "eval" / "adaptive_residual_shadow_promotion_readiness.py")],
         ),
-        run_step(
+        maybe_artifact_step(
             "adaptive_residual_risk_scorer_regression",
             [python, str(ROOT / "eval" / "adaptive_residual_risk_scorer_regression.py")],
         ),
@@ -542,35 +566,35 @@ def main() -> int:
             "adaptive_residual_risk_disagreement_eval",
             [python, str(ROOT / "eval" / "adaptive_residual_risk_disagreement_eval.py")],
         ),
-        run_step(
+        maybe_artifact_step(
             "adaptive_residual_risk_logged_eval",
             [python, str(ROOT / "eval" / "adaptive_residual_risk_logged_eval.py")],
         ),
-        run_step(
+        maybe_artifact_step(
             "adaptive_residual_risk_overprotection_candidate",
             [python, str(ROOT / "eval" / "adaptive_residual_risk_overprotection_candidate.py")],
         ),
-        run_step(
+        maybe_artifact_step(
             "adaptive_residual_risk_overprotection_recurrence",
             [python, str(ROOT / "eval" / "adaptive_residual_risk_overprotection_recurrence.py")],
         ),
-        run_step(
+        maybe_artifact_step(
             "adaptive_residual_risk_exception_simulation",
             [python, str(ROOT / "eval" / "adaptive_residual_risk_exception_simulation.py")],
         ),
-        run_step(
+        maybe_artifact_step(
             "adaptive_residual_learned_risk_veto_regression",
             [python, str(ROOT / "eval" / "adaptive_residual_learned_risk_veto_regression.py")],
         ),
-        run_step(
+        maybe_artifact_step(
             "adaptive_residual_learned_risk_external_failure_replay",
             [python, str(ROOT / "eval" / "adaptive_residual_learned_risk_external_failure_replay.py")],
         ),
-        run_step(
+        maybe_artifact_step(
             "adaptive_residual_learned_risk_authority_paraphrase_regression",
             [python, str(ROOT / "eval" / "adaptive_residual_learned_risk_authority_paraphrase_regression.py")],
         ),
-        run_step(
+        maybe_artifact_step(
             "adaptive_residual_learned_risk_hermes_authority_boundary_replay",
             [python, str(ROOT / "eval" / "adaptive_residual_learned_risk_hermes_authority_boundary_replay.py")],
         ),
@@ -606,11 +630,11 @@ def main() -> int:
             "evidence_context_selector_runtime_regression",
             [python, str(ROOT / "eval" / "evidence_context_selector_runtime_regression.py")],
         ),
-        run_step(
+        maybe_artifact_step(
             "adaptive_behavior_feature_scorer_regression",
             [python, str(ROOT / "eval" / "adaptive_behavior_feature_scorer_regression.py")],
         ),
-        run_step(
+        maybe_artifact_step(
             "adaptive_behavior_feature_scorer_hybrid_regression",
             [python, str(ROOT / "eval" / "adaptive_behavior_feature_scorer_hybrid_regression.py")],
         ),

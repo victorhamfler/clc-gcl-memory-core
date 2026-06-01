@@ -52,7 +52,7 @@ memory_experiment_180_best.db
 Run:
 
 ```bash
-python3 eval/selector_architecture_gate.py
+python3 eval/selector_architecture_gate.py --allow-missing-runtime-artifacts
 ```
 
 Expected:
@@ -63,7 +63,9 @@ adaptive_residual_learned_risk_hermes_authority_boundary_replay_ok: true
 adaptive_residual_shadow_promotion_readiness_ok: true
 ```
 
-If this fails, stop and return the gate JSON/report.
+This is a portable source/config sanity gate for a fresh Hermes clone. It intentionally skips checks that require pre-existing local runtime logs, Windows-local DBs, or local model artifacts. The full strict gate should be rerun after Hermes creates the fresh runtime outcome log and eval reports.
+
+If this sanity gate fails, stop and return the gate JSON/report.
 
 ## Required Fresh Hermes Runtime Test
 

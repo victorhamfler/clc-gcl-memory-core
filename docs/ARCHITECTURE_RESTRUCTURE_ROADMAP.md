@@ -3288,3 +3288,26 @@ Interpretation:
 - the Hermes run is not a success; it is a valuable external failure that expanded the learned-risk boundary;
 - the fix again supports the roadmap direction: do not grow only a term list, but teach the learned risk layer with paired unsafe/safe examples and preserve every external failure as a replay;
 - the next required evidence step is another fresh Hermes/external run against the post-fix code.
+
+Fifty-second implementation checkpoint:
+
+- Hermes attempted the authority-boundary rerun from a fresh `/home/victo` clone and correctly stopped at the sanity gate because the full architecture gate expected Windows-local experiment logs and model/runtime artifacts that were not present in the fresh clone;
+- `eval/selector_architecture_gate.py` now supports `--allow-missing-runtime-artifacts` for external-agent sanity checks;
+- portable sanity mode still runs source/config and pure regression checks, but skips checks that require pre-existing runtime logs, local DBs, or local model artifacts;
+- the strict evidence-backed local gate remains unchanged by default and still passes in the Windows workspace;
+- `docs/HERMES_AUTHORITY_BOUNDARY_RERUN_HANDOVER.md` now instructs Hermes to use the portable sanity mode before generating fresh runtime logs.
+
+Current gate behavior:
+
+```text
+portable Hermes sanity gate:        passed
+strict local architecture gate:     passed
+runtime promotion ready:            false
+next required evidence:             fresh Hermes authority-boundary runtime rerun
+```
+
+Interpretation:
+
+- this fixes a process/tooling problem, not a model behavior problem;
+- the full architecture gate remains strict where local evidence exists;
+- fresh Hermes clones now have a clean way to verify the checked-out code before creating the external validation artifacts that the strict gate needs.
