@@ -11,6 +11,9 @@ REPO_ROOT = ROOT.parent
 sys.path.insert(0, str(ROOT))
 
 from eval.adaptive_residual_shadow_external_failure_replay import build_report as build_failure_replay_report  # noqa: E402
+from eval.adaptive_residual_learned_risk_hermes_authority_boundary_replay import (  # noqa: E402
+    build_report as build_authority_boundary_replay_report,
+)
 from eval.adaptive_residual_shadow_multi_log_eval import (  # noqa: E402
     PROCESSED_FAILURE_LOG_NAMES,
     build_multi_log_report,
@@ -36,7 +39,8 @@ def log_kind(path: str) -> str:
 def build_report() -> dict[str, Any]:
     logs = discover_logs("adaptive_residual_shadow_*_outcomes.jsonl")
     replay = build_failure_replay_report()
-    processed_failure_logs = set(PROCESSED_FAILURE_LOG_NAMES) if replay.get("ok") else set()
+    authority_boundary_replay = build_authority_boundary_replay_report()
+    processed_failure_logs = set(PROCESSED_FAILURE_LOG_NAMES) if replay.get("ok") and authority_boundary_replay.get("ok") else set()
     clean_logs = filter_logs(logs, processed_failure_logs)
     multi = build_multi_log_report(clean_logs, min_logs=MIN_CLEAN_LOCAL_LOGS)
     log_rows = []
@@ -54,6 +58,7 @@ def build_report() -> dict[str, Any]:
         "clean_local_log_gate_passed": bool(multi.get("ok")),
         "has_min_clean_local_logs": int(totals.get("usable_log_count") or 0) >= MIN_CLEAN_LOCAL_LOGS,
         "processed_failure_replay_passed": bool(replay.get("ok")),
+        "authority_boundary_failure_replay_passed": bool(authority_boundary_replay.get("ok")),
         "zero_harmful_overrides": int(totals.get("harmful_override_count") or 0) == 0,
         "zero_neutral_wrong_overrides": int(totals.get("neutral_wrong_override_count") or 0) == 0,
         "has_helpful_overrides": int(totals.get("helpful_override_count") or 0) > 0,
@@ -64,6 +69,8 @@ def build_report() -> dict[str, Any]:
     promotion_ready = (
         checks["clean_local_log_gate_passed"]
         and checks["has_min_clean_local_logs"]
+        and checks["processed_failure_replay_passed"]
+        and checks["authority_boundary_failure_replay_passed"]
         and checks["zero_harmful_overrides"]
         and checks["zero_neutral_wrong_overrides"]
         and checks["has_helpful_overrides"]
@@ -71,7 +78,11 @@ def build_report() -> dict[str, Any]:
     )
     return {
         "schema": "adaptive_residual_shadow_promotion_readiness/v1",
-        "ok": checks["clean_local_log_gate_passed"] and checks["has_min_clean_local_logs"] and not promotion_ready,
+        "ok": checks["clean_local_log_gate_passed"]
+        and checks["has_min_clean_local_logs"]
+        and checks["processed_failure_replay_passed"]
+        and checks["authority_boundary_failure_replay_passed"]
+        and not promotion_ready,
         "min_clean_local_logs": MIN_CLEAN_LOCAL_LOGS,
         "checks": checks,
         "promotion_ready": promotion_ready,
@@ -84,6 +95,11 @@ def build_report() -> dict[str, Any]:
             "ok": replay.get("ok"),
             "source_eval": replay.get("source_eval"),
             "replayed": len(replay.get("replay_rows") or []),
+        },
+        "authority_boundary_failure_replay": {
+            "ok": authority_boundary_replay.get("ok"),
+            "source_eval": authority_boundary_replay.get("source_eval"),
+            "replayed": len(authority_boundary_replay.get("replay_rows") or []),
         },
         "report_only": True,
         "mutates_runtime": False,

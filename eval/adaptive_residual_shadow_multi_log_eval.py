@@ -20,6 +20,7 @@ OUT_MD = REPO_ROOT / "experiments" / "adaptive_residual_shadow_multi_log_eval_re
 PROCESSED_FAILURE_LOG_NAMES = {
     "adaptive_residual_shadow_hermes_external_outcomes.jsonl",
     "hermes_adaptive_residual_shadow_external_outcomes.jsonl",
+    "hermes_learned_risk_authority_boundary_outcomes.jsonl",
 }
 
 

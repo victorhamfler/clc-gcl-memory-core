@@ -32,15 +32,30 @@ def resolve_candidate_path(raw_path: str | None, default_path: Path, *, allow_mi
     return path, {"requested": raw_path, "resolved": str(path), "used_default": False, "missing": True}
 
 
-def run_step(name: str, command: list[str], cwd: Path = ROOT) -> dict[str, Any]:
-    proc = subprocess.run(
-        command,
-        cwd=str(cwd),
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
+def run_step(name: str, command: list[str], cwd: Path = ROOT, timeout_seconds: int = 240) -> dict[str, Any]:
+    try:
+        proc = subprocess.run(
+            command,
+            cwd=str(cwd),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else str(exc.stdout or "")
+        stderr = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else str(exc.stderr or "")
+        return {
+            "name": name,
+            "ok": False,
+            "returncode": None,
+            "command": command,
+            "stdout": stdout.strip(),
+            "stderr": (stderr.strip() + f"\nTimed out after {timeout_seconds} seconds.").strip(),
+            "parsed_stdout": parse_last_json(stdout),
+            "timed_out": True,
+        }
     return {
         "name": name,
         "ok": proc.returncode == 0,
@@ -167,6 +182,9 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
         "adaptive_residual_learned_risk_authority_paraphrase_ok": bool(
             (step_json(steps, "adaptive_residual_learned_risk_authority_paraphrase_regression") or {}).get("ok")
         ),
+        "adaptive_residual_learned_risk_hermes_authority_boundary_replay_ok": bool(
+            (step_json(steps, "adaptive_residual_learned_risk_hermes_authority_boundary_replay") or {}).get("ok")
+        ),
         "adaptive_behavior_candidate_profile_guard_ok": bool(
             (step_json(steps, "adaptive_behavior_candidate_profile_guard_regression") or {}).get("ok")
         ),
@@ -262,6 +280,7 @@ def write_markdown(report: dict[str, Any], out_md: Path) -> None:
         "adaptive_residual_learned_risk_veto_ok",
         "adaptive_residual_learned_risk_external_failure_replay_ok",
         "adaptive_residual_learned_risk_authority_paraphrase_ok",
+        "adaptive_residual_learned_risk_hermes_authority_boundary_replay_ok",
         "adaptive_behavior_candidate_profile_guard_ok",
         "adaptive_behavior_profile_memory_bank_guard_ok",
         "adaptive_behavior_stale_conflict_candidate_ok",
@@ -391,6 +410,7 @@ def main() -> int:
                 str(ROOT / "eval" / "adaptive_residual_learned_risk_veto_regression.py"),
                 str(ROOT / "eval" / "adaptive_residual_learned_risk_external_failure_replay.py"),
                 str(ROOT / "eval" / "adaptive_residual_learned_risk_authority_paraphrase_regression.py"),
+                str(ROOT / "eval" / "adaptive_residual_learned_risk_hermes_authority_boundary_replay.py"),
                 str(ROOT / "eval" / "adaptive_behavior_shadow_real_log_calibration.py"),
                 str(ROOT / "eval" / "adaptive_behavior_shadow_real_log_rerun.py"),
                 str(ROOT / "eval" / "adaptive_behavior_candidate_profile.py"),
@@ -549,6 +569,10 @@ def main() -> int:
         run_step(
             "adaptive_residual_learned_risk_authority_paraphrase_regression",
             [python, str(ROOT / "eval" / "adaptive_residual_learned_risk_authority_paraphrase_regression.py")],
+        ),
+        run_step(
+            "adaptive_residual_learned_risk_hermes_authority_boundary_replay",
+            [python, str(ROOT / "eval" / "adaptive_residual_learned_risk_hermes_authority_boundary_replay.py")],
         ),
         run_step(
             "adaptive_behavior_candidate_profile_guard_regression",
