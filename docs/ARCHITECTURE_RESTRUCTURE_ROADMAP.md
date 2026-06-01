@@ -3311,3 +3311,33 @@ Interpretation:
 - this fixes a process/tooling problem, not a model behavior problem;
 - the full architecture gate remains strict where local evidence exists;
 - fresh Hermes clones now have a clean way to verify the checked-out code before creating the external validation artifacts that the strict gate needs.
+
+Fifty-third implementation checkpoint:
+
+- Hermes reran the authority-boundary handover at commit `1d37180` and completed the runtime test with 90 asks, but the run returned 0 evidence rows and therefore produced 0 helpful residual would-overrides;
+- residual logged eval had 0 harmful and 0 neutral-wrong overrides, so the safety part of the rerun succeeded, but benefit validation was inconclusive;
+- learned-risk logged eval passed with 305 diagnostic rows, 183 learned beyond-term catches, and 5 term-overprotection signals;
+- `eval/hermes_authority_boundary_rerun_assessment.py` now separates external safety validation from benefit validation. On the Hermes rerun, it reports `safety_passed=true`, `benefit_passed=false`, and `benefit_inconclusive_reason=no_evidence_rows_returned`;
+- `eval/hermes_authority_boundary_evidence_preflight.py` now runs a short evidence-coverage preflight before a full Hermes run, requiring at least three evidence-positive queries;
+- the Hermes rerun handover now requires this preflight and explains that zero-evidence external runs can validate safety but cannot validate helpful residual override benefit.
+
+Current Hermes rerun interpretation:
+
+```text
+Hermes asks:                         90
+evidence-positive asks:              0
+helpful residual overrides:          0
+harmful residual overrides:          0
+neutral-wrong overrides:             0
+learned beyond-term catches:         183
+safety passed:                       true
+benefit passed:                      false
+benefit inconclusive reason:         no_evidence_rows_returned
+promotion ready:                     false
+```
+
+Interpretation:
+
+- the learned-risk authority veto appears externally safe on the rerun;
+- the architecture still needs a benefit-capable external run where retrieval returns evidence rows;
+- the next Hermes step is not another blind 90-ask run, but first fixing/copying the DB or retrieval setup until the evidence preflight passes.
