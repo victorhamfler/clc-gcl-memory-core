@@ -57,12 +57,14 @@ def main() -> int:
 
     log_report = build_log_report(SOURCE_LOG)
     packet_report = build_packet_report(PACKETS_JSONL)
+    legacy_comparable = comparable(log_report)
+    packet_comparable = comparable(packet_report)
     checks = {
         "source_log_exists": SOURCE_LOG.exists(),
         "collector_ok": bool(collector_report.get("ok")),
-        "packet_eval_ok": bool(packet_report.get("ok")),
-        "legacy_log_eval_ok": bool(log_report.get("ok")),
-        "counts_match": comparable(packet_report) == comparable(log_report),
+        "packet_eval_ran": bool(packet_report.get("decision_count")),
+        "legacy_log_eval_ran": bool(log_report.get("decision_count")),
+        "counts_match": packet_comparable == legacy_comparable,
         "packet_count_matches_asks": int(collector_report.get("packet_count") or 0) == int(log_report.get("ask_count") or 0),
         "no_collector_skips": not skipped,
     }
@@ -72,8 +74,10 @@ def main() -> int:
         "checks": checks,
         "source_log": str(SOURCE_LOG),
         "packet_jsonl": str(PACKETS_JSONL),
-        "legacy_comparable": comparable(log_report),
-        "packet_comparable": comparable(packet_report),
+        "legacy_eval_ok": bool(log_report.get("ok")),
+        "packet_eval_ok": bool(packet_report.get("ok")),
+        "legacy_comparable": legacy_comparable,
+        "packet_comparable": packet_comparable,
         "collector_summary": collector_report,
     }
     OUT_JSON.parent.mkdir(parents=True, exist_ok=True)
