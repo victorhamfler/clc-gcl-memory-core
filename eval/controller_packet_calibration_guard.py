@@ -17,7 +17,13 @@ OUT_JSON = REPO_ROOT / "experiments" / "controller_packet_calibration_guard_resu
 OUT_MD = REPO_ROOT / "experiments" / "controller_packet_calibration_guard_report.md"
 
 PROMOTION_KINDS = {"resolver_residual_benefit_candidate", "positive_behavior_candidate"}
-BLOCKING_KINDS = {"missing_support_review", "stale_answer_review", "negative_feedback_review", "mixed_feedback_holdout"}
+BLOCKING_KINDS = {
+    "missing_support_review",
+    "stale_answer_review",
+    "negative_feedback_review",
+    "mixed_feedback_holdout",
+    "bridge_metadata_gap_review",
+}
 
 
 def read_proposals(path: Path) -> dict[str, Any]:
@@ -48,6 +54,8 @@ def proposal_ready(
         reasons.append("insufficient_source_logs")
     if proposal.get("report_only") is not True:
         reasons.append("not_report_only")
+    if proposal.get("bridge_label_without_ogcf"):
+        reasons.append("bridge_label_without_ogcf")
     if proposal.get("mutates_runtime") is not False or proposal.get("mutates_config") is not False:
         reasons.append("mutation_flag_present")
     labels = proposal.get("feedback_labels") if isinstance(proposal.get("feedback_labels"), dict) else {}

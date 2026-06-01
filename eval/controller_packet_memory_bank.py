@@ -98,6 +98,15 @@ def readiness_for_cluster(packets: list[dict[str, Any]], *, ready_support: int, 
     return "hold_collect_more"
 
 
+def has_bridge_label(labels: Counter[str]) -> bool:
+    return any("bridge" in str(label) for label in labels)
+
+
+def has_ogcf_metadata(packet: dict[str, Any]) -> bool:
+    ogcf = packet.get("ogcf") if isinstance(packet.get("ogcf"), dict) else {}
+    return bool(ogcf.get("meta_present"))
+
+
 def freeze_cluster(key: str, packets: list[dict[str, Any]], *, ready_support: int, ready_logs: int) -> dict[str, Any]:
     selector_policies = Counter()
     ogcf_intents = Counter()
@@ -106,12 +115,15 @@ def freeze_cluster(key: str, packets: list[dict[str, Any]], *, ready_support: in
     residual_families = Counter()
     source_logs = set()
     examples = []
+    ogcf_meta_count = 0
     for packet in packets:
         source_logs.add(str(packet.get("source_log") or "runtime_packet"))
         selector = packet.get("selector") if isinstance(packet.get("selector"), dict) else {}
         decision = selector.get("decision") if isinstance(selector.get("decision"), dict) else {}
         selector_policies[norm(decision.get("policy") or decision.get("action"))] += 1
         ogcf = packet.get("ogcf") if isinstance(packet.get("ogcf"), dict) else {}
+        if has_ogcf_metadata(packet):
+            ogcf_meta_count += 1
         ogcf_intents[norm(ogcf.get("intent"))] += 1
         feedback = packet.get("feedback_summary") if isinstance(packet.get("feedback_summary"), dict) else {}
         packet_labels = feedback.get("labels") if isinstance(feedback.get("labels"), dict) else {}
@@ -142,6 +154,8 @@ def freeze_cluster(key: str, packets: list[dict[str, Any]], *, ready_support: in
         "selector_policies": dict(sorted(selector_policies.items())),
         "ogcf_intents": dict(sorted(ogcf_intents.items())),
         "feedback_labels": dict(sorted(labels.items())),
+        "bridge_label_without_ogcf": has_bridge_label(labels) and ogcf_meta_count == 0,
+        "ogcf_meta_count": ogcf_meta_count,
         "resolver_actions": dict(sorted(resolver_actions.items())),
         "residual_families": dict(sorted(residual_families.items())),
         "examples": examples,
@@ -169,6 +183,15 @@ def build_report(packet_paths: list[Path], *, ready_support: int = 2, ready_logs
     feedback_packets = sum(1 for packet in packets if (packet.get("feedback_summary") or {}).get("count"))
     residual_packets = sum(1 for packet in packets if (packet.get("adaptive_residual_shadow") or {}).get("present"))
     ogcf_packets = sum(1 for packet in packets if (packet.get("ogcf") or {}).get("meta_present"))
+    bridge_feedback_packets = 0
+    bridge_feedback_without_ogcf = 0
+    for packet in packets:
+        summary = packet.get("feedback_summary") if isinstance(packet.get("feedback_summary"), dict) else {}
+        labels = summary.get("labels") if isinstance(summary.get("labels"), dict) else {}
+        if any("bridge" in norm(label) for label in labels):
+            bridge_feedback_packets += 1
+            if not has_ogcf_metadata(packet):
+                bridge_feedback_without_ogcf += 1
     return {
         "schema": "controller_packet_memory_bank/v1",
         "description": "Report-only aggregation of controller evidence packets for calibration candidate discovery.",
@@ -180,6 +203,12 @@ def build_report(packet_paths: list[Path], *, ready_support: int = 2, ready_logs
         "feedback_packet_count": feedback_packets,
         "residual_packet_count": residual_packets,
         "ogcf_packet_count": ogcf_packets,
+        "bridge_feedback_packet_count": bridge_feedback_packets,
+        "bridge_feedback_without_ogcf_count": bridge_feedback_without_ogcf,
+        "diagnostics": {
+            "bridge_feedback_without_ogcf": bridge_feedback_without_ogcf,
+            "bridge_feedback_has_ogcf_coverage": bridge_feedback_packets == 0 or bridge_feedback_without_ogcf == 0,
+        },
         "ready_thresholds": {"support": max(1, ready_support), "source_logs": max(1, ready_logs)},
         "readiness_counts": dict(sorted(readiness.items())),
         "clusters": clusters,

@@ -41,6 +41,11 @@ def proposal_kind(cluster: dict[str, Any]) -> tuple[str, str]:
     residual_families = cluster.get("residual_families") if isinstance(cluster.get("residual_families"), dict) else {}
     labels = cluster.get("feedback_labels") if isinstance(cluster.get("feedback_labels"), dict) else {}
     selector = cluster.get("selector_policies") if isinstance(cluster.get("selector_policies"), dict) else {}
+    if cluster.get("bridge_label_without_ogcf"):
+        return (
+            "bridge_metadata_gap_review",
+            "Bridge-warning feedback appeared without OGCF metadata; review the test harness or runtime call path before using this as bridge calibration evidence.",
+        )
     if readiness == "calibration_candidate":
         if int(cluster.get("support") or 0) >= 2 and int(residual_families.get("supported_evidence") or 0) > 0:
             return (
@@ -91,6 +96,8 @@ def build_proposal(cluster: dict[str, Any], index: int) -> dict[str, Any]:
         "support": int(cluster.get("support") or 0),
         "source_log_count": int(cluster.get("source_log_count") or 0),
         "feedback_labels": labels,
+        "bridge_label_without_ogcf": bool(cluster.get("bridge_label_without_ogcf")),
+        "ogcf_meta_count": int(cluster.get("ogcf_meta_count") or 0),
         "selector_policies": cluster.get("selector_policies") if isinstance(cluster.get("selector_policies"), dict) else {},
         "ogcf_intents": cluster.get("ogcf_intents") if isinstance(cluster.get("ogcf_intents"), dict) else {},
         "resolver_actions": cluster.get("resolver_actions") if isinstance(cluster.get("resolver_actions"), dict) else {},
@@ -113,6 +120,8 @@ def next_test_for_kind(kind: str) -> str:
         return "Replay current-vs-stale correction chains and verify current evidence wins unless the query explicitly asks for history."
     if kind == "mixed_feedback_holdout":
         return "Split examples by query shape and build a small holdout before any threshold proposal."
+    if kind == "bridge_metadata_gap_review":
+        return "Rerun bridge-warning cases with explicit ogcf_meta and verify controller packets report ogcf_meta_packets greater than zero."
     return "Collect more controller packets with linked answer and memory feedback."
 
 

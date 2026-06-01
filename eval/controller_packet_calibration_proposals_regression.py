@@ -26,6 +26,7 @@ def main() -> int:
         packet(1, label="answer_correct", rating=1.0, would_override=True),
         packet(2, label="answer_missing_support", rating=-0.75, would_override=False),
         packet(3, label="answer_stale", rating=-0.75, would_override=False),
+        packet(4, label="answer_bridge_warning_useful", rating=1.0, would_override=False, ogcf_present=False),
     ]
     PACKETS_JSONL.write_text(
         "\n".join(json.dumps(row, separators=(",", ":")) for row in rows) + "\n",
@@ -37,12 +38,13 @@ def main() -> int:
     kinds = {item["kind"] for item in report["proposals"]}
     checks = {
         "report_ok": report["ok"] is True,
-        "proposal_count": report["proposal_count"] == 3,
+        "proposal_count": report["proposal_count"] == 4,
         "promotion_candidate_count": report["promotion_candidate_count"] == 1,
-        "review_item_count": report["review_item_count"] == 2,
+        "review_item_count": report["review_item_count"] == 3,
         "benefit_candidate_present": "resolver_residual_benefit_candidate" in kinds,
         "missing_support_review_present": "missing_support_review" in kinds,
         "stale_review_present": "stale_answer_review" in kinds,
+        "bridge_gap_review_present": "bridge_metadata_gap_review" in kinds,
         "report_only": report["report_only"] is True
         and report["mutates_runtime"] is False
         and report["mutates_config"] is False,
