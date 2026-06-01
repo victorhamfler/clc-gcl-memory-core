@@ -11,9 +11,17 @@ ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = ROOT.parent
 sys.path.insert(0, str(ROOT))
 
-from eval.adaptive_behavior_shadow_real_log_calibration import payload, read_jsonl  # noqa: E402
+from eval.adaptive_behavior_shadow_real_log_calibration import (  # noqa: E402
+    expected_advisory,
+    feedback_label,
+    feedback_scope,
+    linked_operation_id,
+    payload,
+    read_jsonl,
+)
 from eval.adaptive_residual_risk_logged_eval import build_report as build_risk_report  # noqa: E402
 from eval.adaptive_residual_shadow_logged_eval import build_report as build_residual_report  # noqa: E402
+from eval.adaptive_residual_shadow_logged_eval import residual_shadow, response, shadow_for_expected  # noqa: E402
 
 
 DEFAULT_LOG = REPO_ROOT / "experiments" / "hermes_authority_boundary_rerun_outcomes.jsonl"
@@ -56,10 +64,59 @@ def ask_rows(log_path: Path) -> list[dict[str, Any]]:
     return [row for row in read_jsonl(log_path) if row.get("event_type") == "ask"]
 
 
+def benefit_opportunity_rows(log_path: Path) -> list[dict[str, Any]]:
+    events = read_jsonl(log_path)
+    asks = {str(row.get("operation_id")): row for row in events if row.get("event_type") == "ask" and row.get("operation_id")}
+    feedback_rows = [
+        row
+        for row in events
+        if row.get("event_type") == "feedback"
+        and feedback_scope(row) == "answer"
+        and linked_operation_id(row) in asks
+    ]
+    opportunities = []
+    for item in feedback_rows:
+        ask = asks.get(linked_operation_id(item))
+        if not ask:
+            continue
+        label = feedback_label(item)
+        query = query_for_event(ask)
+        expected_shadow = shadow_for_expected(ask)
+        for decision in residual_shadow(ask).get("decisions") or []:
+            if not isinstance(decision, dict):
+                continue
+            family = str(decision.get("behavior_family") or "")
+            expected = expected_advisory(label=label, behavior_family=family, ask_event=ask, shadow_payload=expected_shadow)
+            symbolic = str(decision.get("symbolic_advisory") or "")
+            report_only = str(decision.get("report_only_advisory") or "")
+            if expected == "likely_helpful" and report_only == expected and symbolic != expected:
+                opportunities.append(
+                    {
+                        "query": query,
+                        "feedback_label": label,
+                        "behavior_family": family,
+                        "expected_advisory": expected,
+                        "symbolic_advisory": symbolic,
+                        "report_only_advisory": report_only,
+                        "residual_prediction": decision.get("residual_prediction"),
+                        "residual_confidence": decision.get("residual_confidence"),
+                        "family_advisory": decision.get("family_advisory"),
+                        "family_confidence": decision.get("family_confidence"),
+                        "suppression_reasons": decision.get("suppression_reasons") or [],
+                        "learned_risk_label": decision.get("learned_risk_label"),
+                        "learned_risk_confidence": decision.get("learned_risk_confidence"),
+                        "learned_risk_suppressed": decision.get("learned_risk_suppressed"),
+                        "would_override": bool(decision.get("would_override")),
+                    }
+                )
+    return opportunities
+
+
 def build_report(log_path: Path) -> dict[str, Any]:
     residual = build_residual_report(log_path)
     risk = build_risk_report(log_path)
     asks = ask_rows(log_path)
+    opportunities = benefit_opportunity_rows(log_path)
     evidence_counts = [evidence_count_for_event(row) for row in asks]
     prior_rows = []
     for event in asks:
@@ -122,14 +179,20 @@ def build_report(log_path: Path) -> dict[str, Any]:
         )
     )
     benefit_passed = checks["has_evidence_for_benefit_validation"] and checks["has_helpful_overrides"]
+    if benefit_passed:
+        benefit_inconclusive_reason = None
+    elif not checks["has_evidence_for_benefit_validation"]:
+        benefit_inconclusive_reason = "no_evidence_rows_returned"
+    elif not opportunities:
+        benefit_inconclusive_reason = "no_residual_benefit_opportunities"
+    else:
+        benefit_inconclusive_reason = "benefit_opportunities_not_overridden"
     return {
         "schema": "hermes_authority_boundary_rerun_assessment/v1",
         "ok": safety_passed,
         "safety_passed": safety_passed,
         "benefit_passed": benefit_passed,
-        "benefit_inconclusive_reason": None
-        if benefit_passed
-        else "no_evidence_rows_returned" if not checks["has_evidence_for_benefit_validation"] else "no_helpful_overrides",
+        "benefit_inconclusive_reason": benefit_inconclusive_reason,
         "checks": checks,
         "log_path": str(log_path),
         "ask_count": residual.get("ask_count"),
@@ -142,11 +205,17 @@ def build_report(log_path: Path) -> dict[str, Any]:
         "risk_diagnostic_row_count": risk.get("risk_diagnostic_row_count"),
         "learned_beyond_terms_count": risk.get("learned_beyond_terms_count"),
         "term_overprotection_count": risk.get("term_overprotection_count"),
+        "benefit_opportunity_count": len(opportunities),
+        "benefit_opportunity_examples": opportunities[:12],
         "prior_failure_rows": prior_rows,
         "promotion_ready": False,
-        "recommendation": "rerun_with_evidence_preflight_for_benefit_validation"
+        "recommendation": "rerun_with_targeted_benefit_opportunities"
+        if safety_passed and benefit_inconclusive_reason == "no_residual_benefit_opportunities"
+        else "rerun_with_evidence_preflight_for_benefit_validation"
         if safety_passed and not benefit_passed
-        else "review_harmful_or_missing_safety" if not safety_passed else "eligible_for_next_external_review",
+        else "review_harmful_or_missing_safety"
+        if not safety_passed
+        else "eligible_for_next_external_review",
     }
 
 
@@ -173,6 +242,7 @@ def write_report(report: dict[str, Any], out_json: Path, out_md: Path) -> None:
                     "neutral_wrong_override_count",
                     "learned_beyond_terms_count",
                     "term_overprotection_count",
+                    "benefit_opportunity_count",
                 )
             },
             indent=2,
@@ -183,6 +253,9 @@ def write_report(report: dict[str, Any], out_json: Path, out_md: Path) -> None:
         + "\n```\n\n"
         + "## Prior Failure Rows\n\n```json\n"
         + json.dumps(report["prior_failure_rows"], indent=2)
+        + "\n```\n\n"
+        + "## Benefit Opportunities\n\n```json\n"
+        + json.dumps(report["benefit_opportunity_examples"], indent=2)
         + "\n```\n",
         encoding="utf-8",
     )

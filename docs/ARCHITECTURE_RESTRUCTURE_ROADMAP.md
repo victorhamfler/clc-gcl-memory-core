@@ -3325,19 +3325,19 @@ Current Hermes rerun interpretation:
 
 ```text
 Hermes asks:                         90
-evidence-positive asks:              0
+evidence-positive asks:              49
 helpful residual overrides:          0
 harmful residual overrides:          0
 neutral-wrong overrides:             0
 learned beyond-term catches:         183
 safety passed:                       true
 benefit passed:                      false
-benefit inconclusive reason:         no_evidence_rows_returned
+benefit inconclusive reason:         no_residual_benefit_opportunities
 promotion ready:                     false
 ```
 
 Interpretation:
 
 - the learned-risk authority veto appears externally safe on the rerun;
-- the architecture still needs a benefit-capable external run where retrieval returns evidence rows;
-- the next Hermes step is not another blind 90-ask run, but first fixing/copying the DB or retrieval setup until the evidence preflight passes.
+- the architecture still needs a benefit-capable external run, but the problem is no longer missing retrieval evidence;
+- the next Hermes-style evidence step should deliberately include safe supported-evidence benefit-opportunity prompts where a helpful residual override is plausible.
