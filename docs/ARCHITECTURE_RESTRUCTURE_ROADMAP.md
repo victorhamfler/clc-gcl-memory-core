@@ -649,6 +649,14 @@ Regression:
 
 Current result: 7/7 cases passed.
 
+The resolver-shadow config surface now also has a runtime-view regression:
+
+```powershell
+py -3 eval/resolver_shadow_runtime_view_regression.py
+```
+
+It builds a real `MemoryApi`, injects a `resolver_shadow` override, calls `/config`, and verifies that the normalized resolver-shadow config is exposed with schema, thresholds, logging flags, refusal markers, and report-only/non-mutating metadata. The selector architecture gate requires this as `resolver_shadow_runtime_view_ok`.
+
 The next step should be Hermes validation with `include_resolver_shadow: true` during normal work. The memory session should compare shadow annotations with real answer-level feedback before making any user-facing resolver changes.
 
 ## Adaptive Memory Controller Context
@@ -2489,6 +2497,23 @@ logging: explicit request only
 
 This moves the learned residual path from an offline candidate artifact to an observable live controller candidate while preserving the safety rule: the symbolic runtime remains authoritative.
 
+The adaptive residual shadow policy has now become a runtime-visible config contract:
+
+```powershell
+py -3 eval/adaptive_residual_shadow_runtime_view_regression.py
+```
+
+The regression builds a real `MemoryApi`, injects an `adaptive_residual_shadow` override, calls `/config`, and verifies that the active normalized policy is exposed under `adaptive_residual_shadow`. The view includes threshold settings, allowed families, suppressors, term groups, schema, source, and report-only/non-mutating flags.
+
+Architecture meaning:
+
+- the memory runtime exposes the same residual-shadow policy that selector/residual evals use;
+- future Hermes handovers can record the active policy from `/config` instead of inferring it from Python defaults;
+- learned residual candidates can be compared against a clear runtime-visible symbolic/context-suppression baseline;
+- no answer text, memory row, selector policy, runtime state, or config is changed by this exposure.
+
+The selector architecture gate now requires this regression as `adaptive_residual_shadow_runtime_view_ok`.
+
 Eighteenth implementation checkpoint:
 
 - `eval/adaptive_residual_shadow_fourth_holdout_log.py` now creates a fourth live-style local holdout with explicit `include_adaptive_residual_shadow=true` and `log_adaptive_residual_shadow=true`;
@@ -3555,3 +3580,450 @@ Implementation checkpoint:
 - The same real run exposed an important OGCF testing gap: bridge-warning feedback was present, but the collected packets had `ogcf_meta_packets = 0`. The packet bank now reports `bridge_feedback_without_ogcf_count`, the proposal layer converts these clusters into `bridge_metadata_gap_review`, and the guard blocks them with `bridge_label_without_ogcf`. This prevents bridge-warning labels from being treated as true OGCF calibration evidence unless explicit OGCF geometry metadata is present.
 - Next real-log development target: run at least two independent Hermes sessions where bridge-warning prompts include explicit `ogcf_meta`, then compare bridge-warning-useful/noise clusters with `ogcf_meta_packets > 0` against the current metadata-gap clusters. Only after that should OGCF bridge behavior become a calibration candidate.
 - Hermes focused OGCF bridge checkpoint at commit `e4e5fed`: the rich runtime fixture produced 24 packets, 6 OGCF metadata packets, 0 bridge-feedback-without-OGCF packets, and clean bridge-useful/bridge-noise separation. The proposal layer now classifies positive OGCF bridge evidence as `ogcf_bridge_behavior_candidate` and treats `ogcf_false_positive` as negative review evidence instead of mixed feedback. The next target is independent-source-log confirmation, not promotion.
+- Hermes two-log OGCF bridge checkpoint at commit `4aaf6f7`: two independent bridge fixture logs produced an `ogcf_bridge_behavior_candidate` with support 6 and source-log count 2, while the matching OGCF false-positive/noise cluster remained review evidence. The guard now reports readiness tiers, evidence-ready-but-blocked counts, related review item ids, and recommended next actions. This changes the next development direction from "collect enough support" to "model or resolve related review families before promotion." In the current replay, the OGCF bridge candidate is evidence-ready but blocked by related review `proposal_002`, so the next useful improvement is review-aware calibration of useful-vs-noisy bridge warnings rather than raising support thresholds.
+- The packet pipeline now includes `controller_packet_review_separation/v1`, a report-only analyzer for evidence-ready candidates blocked by related review evidence. On the two-log OGCF bridge replay it produced two concrete next actions: train/calibrate a bridge-intent separator for `ogcf_bridge_behavior_candidate` vs `ogcf_false_positive`, and build a citation holdout for good-vs-bad citation labels. This is the first step toward adaptive calibration that learns decision boundaries between positive and negative packet families instead of only counting support.
+- The first report-only separator artifact now exists as `controller_packet_bridge_separator/v1`. It converts review-separation output into a candidate rule for useful OGCF bridge warnings vs false positives. On the two-log bridge replay it produced one holdout-ready separator: positive intent `bridge_geometry_query`, negative intent `ordinary_context`, positive labels `answer_bridge_warning_useful`/`bridge_relevant`, and negative labels `answer_bridge_warning_noise`/`ogcf_false_positive`.
+- The packet pipeline now also includes `controller_packet_bridge_separator_holdout/v1`. It replays bridge separator candidates against packet holdout data before any runtime use. On the two-log OGCF bridge replay it scored 12 bridge-labeled packets with `match_rate: 1.0`, `false_positive_count: 0`, and `false_negative_count: 0`. This is strong evidence that the useful-vs-noisy bridge distinction is learnable from packet labels and intent metadata, but it remains `promotion_ready: false` because the current evidence is still fixture-scale and must be validated on broader unseen real logs before affecting runtime answers or config.
+
+## Development Roadmap: Adaptive Memory Brain
+
+The combined memory and selector system should now be treated as one adaptive memory brain with separable subsystems, not as unrelated retrieval, resolver, OGCF, and selector experiments.
+
+The target mechanism is:
+
+```text
+memory store
+-> retrieval and signal extraction
+-> evidence interpretation
+-> resolver answer policy
+-> selector/controller policy
+-> controller evidence packet
+-> packet memory bank
+-> calibration proposals
+-> promotion guard
+-> review separation
+-> holdout replay
+-> manual promotion or continued collection
+```
+
+### Subsystem Responsibilities
+
+Memory store:
+
+- own facts, corrections, source versions, namespaces, provenance, canonical support, deduplication, and feedback persistence;
+- avoid owning selector, resolver, or adaptive policy decisions;
+- preserve enough runtime fields for `controller_evidence_packet/v1`.
+
+Retrieval and signal layer:
+
+- generate candidates with vector recall, lexical backfill, namespace filters, source grouping, and correction-chain context;
+- compute claim-scope, answer-type, correction relevance, source authority, feedback, CSD, G-CL, and OGCF signal fields;
+- expose evidence candidates with structured fields instead of hidden score math.
+
+Evidence layer:
+
+- classify current, stale, historical, disputed, summary, weak, and sensitive evidence states;
+- detect stale/current conflicts and correction-chain boundaries;
+- provide compact evidence rows for resolver, selector, packets, and logs.
+
+Resolver layer:
+
+- choose evidence and compose answers;
+- keep answer-confidence, ranking, arbitration, snippet selection, and query relevance configurable through `resolver_policy`;
+- later accept calibrated policy proposals only through packet-bank evidence and guard tests.
+
+Selector/controller layer:
+
+- choose conservative memory-operation policy;
+- run adaptive and residual shadows in report-only mode;
+- explain why evidence was trusted, suppressed, reviewed, or held for collection;
+- never silently promote learned behavior.
+
+OGCF layer:
+
+- detect memory geometry pressure, bridge usefulness, bridge noise, maintenance pressure, affected ratios, and duplicate pressure;
+- treat bridge warnings as calibratable behavior only when packets include explicit OGCF metadata;
+- evolve from config-backed intent gates into packet-trained useful-vs-noisy bridge separators.
+
+Packet calibration layer:
+
+- normalize all ask-time context into `controller_evidence_packet/v1`;
+- aggregate packets into memory banks;
+- create calibration proposals;
+- guard promotion readiness;
+- separate candidates from related review evidence;
+- run holdout replay before any runtime/config change.
+
+### Roadmap Improvements From Here
+
+1. Consolidate packet calibration as a first-class subsystem.
+   - The one-command pipeline now emits `controller_packet_calibration_system_manifest/v1`.
+   - This manifest lists each stage, its input/output contract, current status, mutation guarantees, and next development target.
+   - Future tests and handovers should reference this manifest instead of describing the packet bank, proposals, guard, review separation, and holdout as separate experiments.
+
+2. Build broader multi-run packet banks.
+   - Use real Hermes and local runs with linked answer feedback and memory-row feedback.
+   - Require multiple independent source logs before treating any candidate as more than fixture-scale evidence.
+   - Preserve both positive behavior and related negative review families.
+   - Initial implementation now exists as `controller_packet_multirun_calibration/v1`, which aggregates multiple one-command pipeline reports, identifies recurring proposal families, summarizes guard-readiness tiers, checks bridge-holdout stability, and recommends whether to collect broader holdout data or continue gathering independent runs.
+
+3. Advance OGCF from symbolic terms to learned separators.
+   - Current best target: useful OGCF bridge warning vs `ogcf_false_positive`.
+   - Keep the symbolic separator and holdout replay as the safety baseline.
+   - Add a small local learned scorer only after broader unseen packet logs show stable separation.
+
+4. Extract runtime orchestration after packet calibration stabilizes.
+   - Split ask orchestration out of `serve.py` into a small controller service/helper.
+   - Split retrieval row assembly/source context out of `core/pipeline.py`.
+   - Keep behavior-preserving regressions around packet output and answer quality.
+
+5. Turn configurable policy surfaces into calibrated surfaces.
+   - `resolver_policy` should become the first resolver calibration target.
+   - Candidate changes should come from packet-bank evidence, not direct hand tuning.
+   - Promotion requires guard pass, holdout pass, manual review, and rollback path.
+
+6. Preserve the report-only learning discipline.
+   - Adaptive shadows, bridge separators, residual scorers, and calibration proposals must not mutate runtime or config by default.
+   - Runtime use begins only after repeated real-log validation, negative-review separation, and explicit human approval.
+
+### Immediate Architecture Contract
+
+The current packet calibration pipeline should be considered the first architecture contract for the adaptive memory brain:
+
+```powershell
+py -3 eval/controller_packet_calibration_pipeline.py --log <outcome-log.jsonl> --out-prefix <prefix>
+```
+
+It should produce:
+
+- `*_packets.jsonl`;
+- `*_bank.json`;
+- `*_proposals.json`;
+- `*_guard.json`;
+- `*_review_separation.json`;
+- `*_bridge_separator.json`;
+- `*_bridge_separator_holdout.json`;
+- a top-level `calibration_system` manifest in the pipeline result.
+
+The selector architecture gate must continue to protect this full chain. The next development step after this checkpoint should be a broader packet-bank aggregation over several independent logs, followed by a report-only learned scorer prototype for OGCF bridge separation only if the broader holdout remains clean.
+
+## Multi-Run Calibration Checkpoint
+
+The first cross-run calibration layer now exists:
+
+```powershell
+py -3 eval/controller_packet_multirun_calibration.py --pipeline <pipeline-result-a.json> --pipeline <pipeline-result-b.json>
+```
+
+It consumes `controller_packet_calibration_pipeline/v1` reports and writes a `controller_packet_multirun_calibration/v1` artifact.
+
+This layer answers a different question from the single-run pipeline:
+
+```text
+Did the same candidate or review family recur across independent runs?
+```
+
+The artifact reports:
+
+- per-run packet/proposal/guard summaries;
+- recurring proposal clusters;
+- combined support and source-log counts;
+- recurring positive candidates;
+- recurring negative or review families;
+- recurring evidence-ready candidates blocked by related review evidence;
+- bridge holdout match-rate stability across runs;
+- the next development target.
+
+This is the first step toward replacing fixture-scale confidence with cross-run evidence. It remains report-only and cannot mutate runtime or config.
+
+The next development target should be a broader holdout runner for recurring clusters. For OGCF, that means replaying the useful-vs-noisy bridge separator across more independent real or realistic packet logs before attempting a learned bridge scorer.
+
+## Recurring Holdout Checkpoint
+
+The recurring-cluster holdout planner now exists:
+
+```powershell
+py -3 eval/controller_packet_recurring_holdout.py --multirun <controller-packet-multirun-calibration.json>
+```
+
+It consumes `controller_packet_multirun_calibration/v1` and writes `controller_packet_recurring_holdout/v1`.
+
+This layer decides which recurring candidate or review families are mature enough for broader holdout work. It creates task records for:
+
+- useful-vs-noisy OGCF bridge separation;
+- OGCF bridge metadata coverage;
+- missing-support refusal behavior;
+- stale/current arbitration behavior;
+- general answer behavior calibration.
+
+It also makes the learned-scorer decision explicit. A report-only OGCF bridge scorer prototype is considered only when:
+
+- an OGCF bridge task recurs across enough independent runs;
+- combined support is high enough;
+- related negative review evidence has been separated;
+- bridge holdout match rates remain clean across runs;
+- mutation/config flags remain false.
+
+This is the safety bridge between symbolic separator rules and any later small learned scorer. If the recurring holdout artifact reports blockers, the next action is more packet collection or broader holdout replay, not learning.
+
+## Report-Only OGCF Bridge Scorer Prototype
+
+The first learned OGCF bridge scorer prototype now exists:
+
+```powershell
+py -3 eval/controller_packet_ogcf_bridge_scorer.py --packets <controller-packets.jsonl> --separator <bridge-separator.json>
+```
+
+It writes `controller_packet_ogcf_bridge_scorer/v1`.
+
+This scorer is deliberately tiny and local. It trains a transparent logistic model on packet features such as:
+
+- OGCF metadata presence;
+- OGCF bridge overload score;
+- affected-memory ratio;
+- maintenance pressure;
+- answer confidence;
+- answer conflict;
+- selected evidence count;
+- OGCF intent one-hot features.
+
+It uses bridge feedback labels only as ground truth, not as predictive features. It compares the learned prediction against the existing symbolic bridge separator and marks `learned_scorer_candidate: true` only if the learned scorer matches or beats the symbolic baseline on held-out packets.
+
+The first regression produced an important result: on the current tiny fixture, the learned scorer correctly demotes itself because non-label packet features do not yet separate useful and noisy bridge warnings as well as the symbolic separator. This is not a failure of the architecture. It is useful evidence that the next OGCF data collection should include richer non-label features if we want a learned scorer to become competitive:
+
+- distinct bridge intents for useful vs noisy contexts;
+- stronger OGCF geometry fields;
+- richer evidence-context fields;
+- query/domain bridge descriptors;
+- canonical-support and duplicate-pressure features.
+
+The learned scorer remains report-only, promotion-blocked, and protected by the architecture gate.
+
+## OGCF Bridge Feature Enrichment Checkpoint
+
+The OGCF bridge scorer now uses a richer packet feature view rather than only basic OGCF metadata and intent fields. The feature set includes:
+
+- canonical support count and duplicate pressure;
+- evidence-state current/stale flags;
+- top retrieval score;
+- average claim-scope and text-match scores;
+- query bridge/geometry/ordinary term scores;
+- evidence bridge/geometry/noise term scores;
+- OGCF geometry fields and intent features.
+
+Two gate-protected regressions now define the expected behavior:
+
+1. Weak-feature demotion:
+   - When useful and noisy bridge packets have nearly identical non-label features, the learned scorer must demote itself if it underperforms the symbolic separator.
+   - This prevents a learned model from becoming attractive just because labels exist.
+
+2. Rich-feature candidate behavior:
+   - A self-generated richer packet fixture proves the scorer can separate useful bridge geometry warnings from ordinary/noisy lookups when packet context includes enough non-label structure.
+   - The scorer can mark `learned_scorer_candidate: true`, but still stays `promotion_ready: false`.
+
+This gives the roadmap a concrete data requirement for future real logs: if we want a learned OGCF bridge scorer to become competitive, runtime packets must preserve rich non-label context, not just feedback labels.
+
+## OGCF Bridge Feature Audit Checkpoint
+
+The selector side now has a report-only feature-readiness audit:
+
+```powershell
+py -3 eval/controller_packet_ogcf_bridge_feature_audit.py --packets <controller-packets.jsonl>
+```
+
+It writes `controller_packet_ogcf_bridge_feature_audit/v1` and checks whether bridge-labeled packets preserve enough non-label context for learned scoring.
+
+The audit reports:
+
+- required feature coverage;
+- positive-vs-negative feature separability;
+- strong-gap features;
+- blockers such as missing OGCF metadata, one-sided labels, or insufficient non-label feature separation.
+
+Local validation results:
+
+- the generated rich-feature fixture is feature-ready;
+- the current two-log OGCF bridge packet artifact is also feature-ready;
+- the enriched learned scorer matched the symbolic separator on the two-log packet artifact with held-out `match_rate: 1.0`, zero false positives, and zero false negatives.
+
+This is still not a promotion decision. It means the architecture has crossed an important research threshold: the learned scorer can now become competitive when packets contain rich non-label context. The next requirement is broader unseen packet logs, preferably from normal agent work, before any runtime bridge-warning policy changes are considered.
+
+## Artifact Storage Convention
+
+Generated experiment artifacts should not refill the C: partition. The workspace-level artifact folder:
+
+```text
+C:\Users\victo\Desktop\projcod2\experiments
+```
+
+is now a junction to:
+
+```text
+E:\projcod2_artifacts\experiments
+```
+
+Eval scripts can keep writing to the existing `experiments` path, but the generated files land on E:. Source code, docs, committed test corpora, and model files should stay in their normal project locations. Large generated artifacts such as SQLite fixtures, checkpoint JSON files, packet logs, and benchmark result dumps should remain under the experiments path so they are routed to E: automatically.
+
+## OGCF Bridge Source-Holdout Checkpoint
+
+The learned OGCF bridge scorer now has a source-log holdout evaluator:
+
+```powershell
+py -3 eval/controller_packet_ogcf_bridge_source_holdout.py --train-packets <train.jsonl> --test-packets <holdout.jsonl> --separator <bridge-separator.json>
+```
+
+It writes `controller_packet_ogcf_bridge_source_holdout/v1`.
+
+This is stricter than the random packet split because it trains on one packet source and tests on another. The goal is to detect whether the learned scorer generalizes from packet features or merely benefits from near-duplicate examples inside one log.
+
+The current self-generated regression creates two independent rich packet sources with varied wording and scores. The learned scorer and symbolic separator both pass the held-out source with `match_rate: 1.0`, zero false positives, and zero false negatives, while remaining `promotion_ready: false`.
+
+The next real-data requirement is to run this same source-holdout evaluator on independent Hermes or local runtime packet logs. A learned scorer should not be considered for manual promotion review until it passes source-level holdout on real packet sources, not only generated fixtures.
+
+## OGCF Bridge Leave-One-Source-Out Checkpoint
+
+The selector side now has a stricter report-only evaluator for combined multi-source packet logs:
+
+```powershell
+py -3 eval/controller_packet_ogcf_bridge_leave_one_source_out.py --packets <combined-controller-packets.jsonl> --separator <bridge-separator.json>
+```
+
+It writes `controller_packet_ogcf_bridge_leave_one_source_out/v1`.
+
+This evaluator groups packet samples by `source_log`, trains the learned OGCF bridge scorer on all but one source, and tests on the held-out source. It repeats this for every source with enough bridge labels. This is stronger than a random split and more complete than a single train/test source split because every available source must survive as unseen data.
+
+The generated three-source regression now passes:
+
+- `source_count: 3`;
+- `sample_count: 36`;
+- minimum candidate evidence: at least `3` sources and `30` bridge samples;
+- one clean held-out fold per source;
+- learned scorer held-out `match_rate: 1.0`;
+- zero learned false positives and zero learned false negatives;
+- symbolic separator also clean;
+- `learned_scorer_candidate: true`, but `promotion_ready: false`.
+
+The default two-log bridge packet artifact also passes mechanically, but it is now correctly blocked from candidate status:
+
+- `source_count: 2`;
+- `sample_count: 12`;
+- learned and symbolic match rates both `1.0`;
+- `learned_scorer_candidate: false`;
+- readiness blockers: `source_count_below_minimum:2<3` and `sample_count_below_minimum:12<30`.
+
+This keeps the learned bridge scorer aligned with the roadmap: learned behavior can become a candidate only when it generalizes across enough independent sources, and runtime behavior still cannot change without a later manual promotion path. The next real-data requirement is to run leave-one-source-out on several real Hermes/local packet logs collected from normal work, not only generated fixtures.
+
+This checkpoint is now integrated into the broader controller-packet calibration path:
+
+- `controller_packet_calibration_pipeline/v1` writes a `bridge_leave_one_source_out` artifact and includes the stage in the calibration-system manifest;
+- `controller_packet_multirun_calibration/v1` aggregates LOSO candidate runs, source/sample counts, and readiness blocker counts;
+- `controller_packet_recurring_holdout/v1` blocks learned OGCF bridge-scorer candidacy when LOSO evidence is underpowered, even if recurring bridge clusters and separator holdout are otherwise clean.
+
+That changes the next target for small or synthetic runs: the system should collect enough independent bridge packet sources for LOSO before considering any learned bridge scorer as a serious candidate.
+
+The LOSO evidence minimums have now moved from hardcoded evaluator constants into a Level 1 config surface:
+
+```yaml
+controller_packet_calibration:
+  bridge_leave_one_source_out:
+    min_sources_for_candidate: 3
+    min_samples_for_candidate: 30
+```
+
+The evaluator still accepts CLI overrides for controlled experiments, but the calibration pipeline reads the project config by default and reports the active policy in the LOSO artifact. The regression now proves both sides of the contract:
+
+- default config blocks an underpowered two-source/four-sample packet artifact;
+- an explicit low-threshold test config can make that same artifact candidate-worthy;
+- neither path mutates runtime behavior or config.
+
+This is the roadmap pattern we want for later learned controllers: hardcoded guard -> explicit config policy -> report-only evidence artifact -> future calibration/promotion gate.
+
+The learned OGCF bridge scorer candidate rule has also moved to a Level 1 config surface:
+
+```yaml
+controller_packet_calibration:
+  bridge_scorer:
+    min_test_samples_for_candidate: 4
+    require_zero_false_positives: true
+    require_zero_false_negatives: true
+    require_not_worse_than_symbolic: true
+```
+
+This policy is shared by:
+
+- `controller_packet_ogcf_bridge_scorer/v1`;
+- `controller_packet_ogcf_bridge_source_holdout/v1`.
+
+Candidate status now requires more than a non-worse match rate. By default the learned scorer must have enough held-out test examples, must not underperform the symbolic separator, and must produce zero false positives and zero false negatives. The regressions prove that clean rich-feature fixtures remain candidate-worthy, while an intentionally strict config can block the same scorer without changing runtime behavior or config.
+
+The controller-packet calibration config surface now has its own config-view regression:
+
+```powershell
+py -3 eval/controller_packet_calibration_config_regression.py
+```
+
+It writes `controller_packet_calibration_config_regression/v1` and verifies:
+
+- the project `controller_packet_calibration` config section is present;
+- bridge-scorer defaults are loaded from config;
+- LOSO defaults are loaded from config;
+- explicit config overrides are honored;
+- CLI experiment overrides are marked as explicit overrides;
+- the config view remains report-only and non-mutating.
+
+The unified selector architecture gate now requires this regression. This closes the Level 1 requirement for the new bridge-calibration policies: defaults, documentation, config-view report, and architecture-gate protection.
+
+The calibration policy has now moved from eval-local normalization into the shared core/runtime layer:
+
+```powershell
+py -3 eval/controller_packet_calibration_runtime_view_regression.py
+```
+
+The runtime regression builds a real `MemoryApi`, injects a controller-packet calibration override, calls `/config`, and verifies that the normalized policy appears under `controller_packet_calibration` with the same report-only and non-mutating guarantees. This is part of the transition process from patched experiments to a combined adaptive memory architecture:
+
+- memory runtime owns and exposes the active policy surface;
+- selector evaluators consume the same normalized core policy;
+- calibration artifacts can explain which policy produced each result;
+- later learned-controller work can compare candidate behavior against an explicit runtime-visible baseline.
+
+This does not promote learned behavior. It creates the shared contract needed before learned OGCF bridge scoring, resolver calibration, or packet-bank promotion gates can become runtime-adjacent.
+
+## Controller Packet Evidence-Context Export
+
+The combined memory/selector/OGCF path now exports the shared evidence-context feature contract inside every `controller_evidence_packet/v1` built from ask/feedback logs:
+
+```json
+"evidence_context": {
+  "schema": "evidence_context_packet_view/v1",
+  "features": {
+    "retrieval_count": 2,
+    "selected_count": 1,
+    "claim_scope_score": 0.7,
+    "stale_current_conflict": 0.4,
+    "ogcf_bridge_overload_score": 0.81
+  }
+}
+```
+
+This is a structural roadmap step rather than another scorer tweak. The packet builder already joins request, answer, selected evidence, retrieval context, canonical-memory support, OGCF diagnostics, selector decision, resolver/adaptive shadows, residual shadow, and feedback. Adding `EvidenceContextFeatures` makes controller packets a shared neural-symbolic training row for later learned controllers.
+
+The important architecture consequence is:
+
+```text
+memory retrieval rows + canonical/OGCF diagnostics + selector/resolver shadows + feedback
+-> controller_evidence_packet/v1
+-> evidence_context_packet_view/v1
+-> calibration datasets / learned scorers / symbolic promotion gates
+```
+
+The regression now verifies that controller packets preserve selected/retrieval counts, stale-conflict state, and OGCF bridge diagnostics through the shared context feature object while remaining report-only and non-mutating.
+
+The controller-packet memory bank now tracks this shared context feature coverage:
+
+- `evidence_context_feature_packet_count`;
+- `evidence_context_feature_coverage`;
+- `evidence_context_feature_keys`;
+- per-cluster `evidence_context_feature_coverage`;
+- diagnostics for whether feature coverage is present and whether it is complete.
+
+This matters because the memory bank is the first cross-run aggregation layer. It can now distinguish old packet logs that only contain symbolic packet fields from newer packet logs that are suitable for neural-symbolic scorer training. The calibration pipeline carries these diagnostics forward through its `diagnostics` block, so later learned-controller work can require feature coverage before training or promotion review.

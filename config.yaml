@@ -152,6 +152,16 @@ adaptive_residual_shadow:
     ordinary_namespace_profile: ordinary profile,ordinary namespace,profile lookup,namespace lookup,cross-namespace,cross namespaces,namespace crossing
     unsupported_proof: already natural multi-day data,changed live answers,can now mutate,mutate live,mutate live answers,proves residual,result proves,unsupported claim
 
+controller_packet_calibration:
+  bridge_scorer:
+    min_test_samples_for_candidate: 4
+    require_zero_false_positives: true
+    require_zero_false_negatives: true
+    require_not_worse_than_symbolic: true
+  bridge_leave_one_source_out:
+    min_sources_for_candidate: 3
+    min_samples_for_candidate: 30
+
 claim_scope:
   stopwords: about,check,checks,current,currently,does,for,from,help,helps,latest,prefer,prefers,preference,remember,should,that,the,use,what,when,where,which,who,with,victor,hermes,project
   slot_aliases:

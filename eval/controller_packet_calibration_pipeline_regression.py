@@ -56,6 +56,21 @@ def main() -> int:
         "promotion_candidate_count": report["summary"]["promotion_candidate_count"] == 1,
         "guard_blocks_all": report["summary"]["guard_ready_count"] == 0 and report["summary"]["guard_blocked_count"] == 3,
         "artifacts_written": all(Path(path).exists() for path in report["artifacts"].values()),
+        "evidence_context_feature_diagnostics_present": isinstance(report.get("diagnostics"), dict)
+        and "evidence_context_features_present" in report["diagnostics"],
+        "review_separation_present": bool(report.get("review_separation_action_counts") is not None),
+        "bridge_separator_present": report.get("bridge_separator_count") == 0,
+        "bridge_holdout_present": isinstance(report.get("bridge_separator_holdout"), dict),
+        "bridge_loso_present": isinstance(report.get("bridge_leave_one_source_out"), dict)
+        and report["bridge_leave_one_source_out"].get("source_count") is not None
+        and isinstance(report["bridge_leave_one_source_out"].get("readiness_blockers"), list),
+        "bridge_loso_config_policy_honored": report["bridge_leave_one_source_out"].get("minimum_sources_for_candidate") == 3
+        and report["bridge_leave_one_source_out"].get("minimum_samples_for_candidate") == 30,
+        "calibration_manifest_present": (report.get("calibration_system") or {}).get("schema")
+        == "controller_packet_calibration_system_manifest/v1",
+        "calibration_manifest_report_only": (report.get("calibration_system") or {}).get("report_only") is True
+        and (report.get("calibration_system") or {}).get("mutates_runtime") is False
+        and (report.get("calibration_system") or {}).get("mutates_config") is False,
         "report_only": report["report_only"] is True and report["mutates_runtime"] is False and report["mutates_config"] is False,
     }
     result = {

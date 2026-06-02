@@ -78,7 +78,9 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
     miner_regression = read_json(REPO_ROOT / "experiments" / "retrieval_signal_miner_regression_results.json")
     nested_config = read_json(REPO_ROOT / "experiments" / "config_nested_parser_regression_results.json")
     claim_scope_gate = read_json(REPO_ROOT / "experiments" / "claim_scope_promotion_gate_results.json")
-    randomized = read_json(REPO_ROOT / "experiments" / "selector_retrieval_guard_randomized_eval_seed20260520_n64_results.json")
+    randomized = parsed_step(steps, "randomized_guard") or read_json(
+        REPO_ROOT / "experiments" / "selector_retrieval_guard_randomized_eval_seed20260520_n64_results.json"
+    )
     policy_deflection = read_json(REPO_ROOT / "experiments" / "policy_correction_deflection_regression_results.json")
     answer_quality = read_json(REPO_ROOT / "experiments" / "answer_quality_eval_results.json") or parsed_step(
         steps,

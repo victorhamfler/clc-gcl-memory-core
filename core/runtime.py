@@ -90,6 +90,7 @@ def create_pipeline(
         evidence_state_config=config.get("evidence_states"),
         canonical_memory_config=config.get("canonical_memory"),
         resolver_policy_config=config.get("resolver_policy"),
+        controller_packet_calibration_config=config.get("controller_packet_calibration"),
         llm_config=config.get("llm"),
         clc_thresholds=config.get("thresholds"),
     )
@@ -170,6 +171,7 @@ def pipeline_config_view(pipeline: MemoryPipeline) -> dict[str, Any]:
         "evidence_states": pipeline.evidence_state_config,
         "canonical_memory": pipeline.canonical_memory_config,
         "resolver_policy": pipeline.resolver_policy_config,
+        "controller_packet_calibration": pipeline.controller_packet_calibration_config,
         "llm": sanitized_llm_config(pipeline.llm_config),
     }
 

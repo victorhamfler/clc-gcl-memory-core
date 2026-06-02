@@ -18,7 +18,7 @@ from core.learning import learn_from_document, learn_from_text
 from core.maintenance import improvement_plan, memory_review, record_memory_improvement, weak_memories
 from core.outcome_log import OutcomeLogger
 from core.adaptive_behavior import normalize_adaptive_behavior_config
-from core.adaptive_residual_shadow import adaptive_residual_shadow_advisories
+from core.adaptive_residual_shadow import adaptive_residual_shadow_advisories, normalize_adaptive_residual_shadow_policy
 from core.adaptive_behavior_shadow import adaptive_behavior_shadow_advisories
 from core.answer_behavior_shadow import normalize_resolver_shadow_config, resolver_shadow_actions
 from core.runtime import create_pipeline, pipeline_config_view, pipeline_stats
@@ -131,6 +131,7 @@ class MemoryApi:
             "selector": selector_config_view(self.root, self.root_config),
             "resolver_shadow": normalize_resolver_shadow_config(self.root_config.get("resolver_shadow")),
             "adaptive_behavior": normalize_adaptive_behavior_config(self.root_config.get("adaptive_behavior")),
+            "adaptive_residual_shadow": normalize_adaptive_residual_shadow_policy(self.root_config),
         }
 
     def _record_outcome(

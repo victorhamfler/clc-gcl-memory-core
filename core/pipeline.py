@@ -8,6 +8,7 @@ from typing import Any
 
 from core.clc_controller import CLCController, STATE_UPDATE_STRENGTH
 from core.contradiction import store_contradiction_if_needed
+from core.controller_packet_calibration import normalize_controller_packet_calibration_policy
 from core.csd import CSDLayer
 from core.encoder import build_encoder
 from core.gcl_memory import GCLMemoryUpdater
@@ -81,6 +82,7 @@ class MemoryPipeline:
         evidence_state_config: dict[str, Any] | None = None,
         canonical_memory_config: dict[str, Any] | None = None,
         resolver_policy_config: dict[str, Any] | None = None,
+        controller_packet_calibration_config: dict[str, Any] | None = None,
         llm_config: dict[str, Any] | None = None,
         clc_thresholds: dict[str, Any] | None = None,
     ):
@@ -101,6 +103,9 @@ class MemoryPipeline:
         self.evidence_state_config = normalize_evidence_state_config(evidence_state_config)
         self.canonical_memory_config = self._normalize_canonical_memory_config(canonical_memory_config)
         self.resolver_policy_config = normalize_resolver_policy(resolver_policy_config)
+        self.controller_packet_calibration_config = normalize_controller_packet_calibration_policy(
+            {"controller_packet_calibration": controller_packet_calibration_config or {}}
+        )
         self.llm_config = dict(llm_config or {})
         self.recall_engine = RecallEngine(self.db, top_k=top_k)
         self.csd = CSDLayer(self.db)

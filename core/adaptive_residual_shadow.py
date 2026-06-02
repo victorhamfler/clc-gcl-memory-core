@@ -98,9 +98,11 @@ def _as_term_tuple(value: Any, default: tuple[str, ...]) -> tuple[str, ...]:
     return cleaned or default
 
 
-def load_policy(root: Path, override: dict[str, Any] | None = None) -> dict[str, Any]:
+def normalize_adaptive_residual_shadow_policy(
+    config: dict[str, Any] | None = None,
+    override: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     active_policy = dict(DEFAULT_POLICY)
-    config = load_config(root)
     configured = config.get("adaptive_residual_shadow") if isinstance(config, dict) else None
     if isinstance(configured, dict):
         for key in (
@@ -128,7 +130,24 @@ def load_policy(root: Path, override: dict[str, Any] | None = None) -> dict[str,
         active_policy.update({key: value for key, value in override.items() if value is not None})
         if "terms" not in active_policy:
             active_policy["terms"] = dict(TERM_GROUPS)
+    terms = active_policy.get("terms") if isinstance(active_policy.get("terms"), dict) else {}
+    active_policy["terms"] = {
+        str(name): list(_as_term_tuple(value, TERM_GROUPS.get(str(name), ())))
+        for name, value in terms.items()
+    }
+    active_policy["schema"] = "adaptive_residual_shadow_policy/v1"
+    active_policy["source"] = "config_with_runtime_overrides" if isinstance(override, dict) else "config_or_defaults"
+    active_policy["report_only"] = True
+    active_policy["mutates_runtime"] = False
+    active_policy["mutates_answer"] = False
+    active_policy["mutates_selector_policy"] = False
+    active_policy["mutates_memory"] = False
+    active_policy["mutates_config"] = False
     return active_policy
+
+
+def load_policy(root: Path, override: dict[str, Any] | None = None) -> dict[str, Any]:
+    return normalize_adaptive_residual_shadow_policy(load_config(root), override)
 
 
 def _contains_any(text: str, terms: tuple[str, ...]) -> bool:

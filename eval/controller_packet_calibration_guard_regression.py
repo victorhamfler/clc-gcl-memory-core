@@ -46,6 +46,7 @@ def main() -> int:
         for proposal in report["guarded_proposals"]
         for reason in proposal.get("blocked_reasons") or []
     }
+    ogcf_rows = [item for item in report["guarded_proposals"] if item.get("kind") == "ogcf_bridge_behavior_candidate"]
     checks = {
         "guard_ok": report["ok"] is True,
         "has_proposals": report["proposal_count"] == 6,
@@ -55,6 +56,15 @@ def main() -> int:
         "requires_multiple_logs": "insufficient_source_logs" in blocked_reasons,
         "requires_more_support": "insufficient_support" in blocked_reasons,
         "blocks_bridge_gap": "bridge_label_without_ogcf" in blocked_reasons,
+        "tracks_related_review_blockers": "related_review_items_present" in blocked_reasons
+        and bool(ogcf_rows)
+        and ogcf_rows[0].get("family") == "ogcf_bridge"
+        and bool(ogcf_rows[0].get("related_review_item_ids")),
+        "tracks_readiness_tiers": bool(report.get("readiness_tier_counts"))
+        and "collect_more" in report["readiness_tier_counts"]
+        and "review_evidence" in report["readiness_tier_counts"],
+        "tracks_next_actions": isinstance(report.get("next_actions"), list)
+        and any(item.get("readiness_tier") == "metadata_gap" for item in report["next_actions"]),
         "report_only": report["report_only"] is True
         and report["mutates_runtime"] is False
         and report["mutates_config"] is False,

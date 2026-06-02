@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.evidence_context import (
+    build_evidence_context_features,
+    build_evidence_context_summary,
+    evidence_context_features_dict,
+)
 from core.evidence_states import classify_memory_state, evidence_is_too_weak, requires_sensitive_evidence
 
 
@@ -64,6 +69,17 @@ def build_controller_evidence_packet(
     residual = _dict(ask_payload.get("adaptive_residual_shadow")) or _dict(response.get("adaptive_residual_shadow"))
     behavior = _dict(ask_payload.get("adaptive_behavior_shadow")) or _dict(response.get("adaptive_behavior_shadow"))
     resolver = _dict(ask_payload.get("resolver_shadow")) or _dict(response.get("resolver_shadow"))
+    evidence_context = _evidence_context_summary(
+        query=str(request.get("query") or response.get("query") or ""),
+        answer=str(response.get("answer") or ""),
+        evidence_rows=evidence_rows,
+        retrieval_rows=retrieval_rows,
+        response=response,
+        diagnostics=diagnostics,
+        resolver_shadow=resolver,
+        selector_snapshot=selector_snapshot,
+        fallback_features=_dict(adaptive_context.get("features")),
+    )
 
     return {
         "schema": SCHEMA,
@@ -97,6 +113,7 @@ def build_controller_evidence_packet(
             ),
         },
         "canonical": _canonical_summary(retrieval_rows or evidence_rows),
+        "evidence_context": evidence_context,
         "ogcf": _ogcf_summary(diagnostics, selector_snapshot, adaptive_context),
         "selector": {
             "features": _dict(adaptive_context.get("features")),
@@ -109,6 +126,45 @@ def build_controller_evidence_packet(
         "adaptive_residual_shadow": _residual_summary(residual),
         "feedback": feedback,
         "feedback_summary": _feedback_aggregate(feedback),
+        "report_only": True,
+        "mutates_runtime": False,
+        "mutates_config": False,
+    }
+
+
+def _evidence_context_summary(
+    *,
+    query: str,
+    answer: str,
+    evidence_rows: list[dict[str, Any]],
+    retrieval_rows: list[dict[str, Any]],
+    response: dict[str, Any],
+    diagnostics: dict[str, Any],
+    resolver_shadow: dict[str, Any],
+    selector_snapshot: dict[str, Any],
+    fallback_features: dict[str, Any],
+) -> dict[str, Any]:
+    stale_context = _compact_rows(response.get("stale_context"), None, text_limit=120)
+    summary = build_evidence_context_summary(
+        query=query,
+        answer=answer,
+        evidence=evidence_rows,
+        stale_context=stale_context,
+        retrieval_context=retrieval_rows or evidence_rows,
+        diagnostics=diagnostics,
+        resolver_shadow=resolver_shadow,
+        selector_snapshot=selector_snapshot,
+        conflict=bool(response.get("conflict")),
+    )
+    features = build_evidence_context_features(summary, fallback_features=fallback_features)
+    return {
+        "schema": "evidence_context_packet_view/v1",
+        "features": evidence_context_features_dict(features),
+        "ordinary_fact_lookup": summary.ordinary_fact_lookup,
+        "stale_conflict_present": summary.stale_conflict_present,
+        "selected_count": summary.selected_count,
+        "retrieval_count": len(summary.retrieval_context),
+        "stale_context_count": summary.stale_context_count,
         "report_only": True,
         "mutates_runtime": False,
         "mutates_config": False,

@@ -135,6 +135,9 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
         "adaptive_residual_shadow_runtime_ok": bool(
             (step_json(steps, "adaptive_residual_shadow_runtime_regression") or {}).get("ok")
         ),
+        "adaptive_residual_shadow_runtime_view_ok": bool(
+            (step_json(steps, "adaptive_residual_shadow_runtime_view_regression") or {}).get("ok")
+        ),
         "adaptive_residual_shadow_logged_eval_ok": bool(
             (step_json(steps, "adaptive_residual_shadow_logged_eval") or {}).get("ok")
         ),
@@ -228,6 +231,9 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
         "resolver_policy_runtime_view_ok": bool(
             (step_json(steps, "resolver_policy_runtime_view_regression") or {}).get("ok")
         ),
+        "resolver_shadow_runtime_view_ok": bool(
+            (step_json(steps, "resolver_shadow_runtime_view_regression") or {}).get("ok")
+        ),
         "answer_quality_eval_ok": bool(
             (step_json(steps, "answer_quality_eval") or {}).get("ok")
         ),
@@ -255,8 +261,44 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
         "controller_packet_calibration_guard_ok": bool(
             (step_json(steps, "controller_packet_calibration_guard_regression") or {}).get("ok")
         ),
+        "controller_packet_calibration_config_ok": bool(
+            (step_json(steps, "controller_packet_calibration_config_regression") or {}).get("ok")
+        ),
+        "controller_packet_calibration_runtime_view_ok": bool(
+            (step_json(steps, "controller_packet_calibration_runtime_view_regression") or {}).get("ok")
+        ),
         "controller_packet_calibration_pipeline_ok": bool(
             (step_json(steps, "controller_packet_calibration_pipeline_regression") or {}).get("ok")
+        ),
+        "controller_packet_multirun_calibration_ok": bool(
+            (step_json(steps, "controller_packet_multirun_calibration_regression") or {}).get("ok")
+        ),
+        "controller_packet_recurring_holdout_ok": bool(
+            (step_json(steps, "controller_packet_recurring_holdout_regression") or {}).get("ok")
+        ),
+        "controller_packet_review_separation_ok": bool(
+            (step_json(steps, "controller_packet_review_separation_regression") or {}).get("ok")
+        ),
+        "controller_packet_bridge_separator_ok": bool(
+            (step_json(steps, "controller_packet_bridge_separator_regression") or {}).get("ok")
+        ),
+        "controller_packet_bridge_separator_holdout_ok": bool(
+            (step_json(steps, "controller_packet_bridge_separator_holdout_regression") or {}).get("ok")
+        ),
+        "controller_packet_ogcf_bridge_scorer_ok": bool(
+            (step_json(steps, "controller_packet_ogcf_bridge_scorer_regression") or {}).get("ok")
+        ),
+        "controller_packet_ogcf_bridge_scorer_feature_ok": bool(
+            (step_json(steps, "controller_packet_ogcf_bridge_scorer_feature_regression") or {}).get("ok")
+        ),
+        "controller_packet_ogcf_bridge_feature_audit_ok": bool(
+            (step_json(steps, "controller_packet_ogcf_bridge_feature_audit_regression") or {}).get("ok")
+        ),
+        "controller_packet_ogcf_bridge_source_holdout_ok": bool(
+            (step_json(steps, "controller_packet_ogcf_bridge_source_holdout_regression") or {}).get("ok")
+        ),
+        "controller_packet_ogcf_bridge_leave_one_source_out_ok": bool(
+            (step_json(steps, "controller_packet_ogcf_bridge_leave_one_source_out_regression") or {}).get("ok")
         ),
         "adaptive_behavior_feature_scorer_ok": bool(
             (step_json(steps, "adaptive_behavior_feature_scorer_regression") or {}).get("ok")
@@ -309,6 +351,7 @@ def write_markdown(report: dict[str, Any], out_md: Path) -> None:
         "gemma_shadow_regression_ok",
         "adaptive_behavior_shadow_runtime_ok",
         "adaptive_residual_shadow_runtime_ok",
+        "adaptive_residual_shadow_runtime_view_ok",
         "adaptive_residual_shadow_logged_eval_ok",
         "adaptive_residual_shadow_multi_log_eval_ok",
         "adaptive_residual_shadow_suppressor_ok",
@@ -340,6 +383,7 @@ def write_markdown(report: dict[str, Any], out_md: Path) -> None:
         "evidence_context_selector_runtime_ok",
         "resolver_policy_config_ok",
         "resolver_policy_runtime_view_ok",
+        "resolver_shadow_runtime_view_ok",
         "answer_quality_eval_ok",
         "multi_intent_answer_composition_ok",
         "controller_packet_regression_ok",
@@ -349,7 +393,18 @@ def write_markdown(report: dict[str, Any], out_md: Path) -> None:
         "controller_packet_memory_bank_ok",
         "controller_packet_calibration_proposals_ok",
         "controller_packet_calibration_guard_ok",
+        "controller_packet_calibration_config_ok",
         "controller_packet_calibration_pipeline_ok",
+        "controller_packet_multirun_calibration_ok",
+        "controller_packet_recurring_holdout_ok",
+        "controller_packet_review_separation_ok",
+        "controller_packet_bridge_separator_ok",
+        "controller_packet_bridge_separator_holdout_ok",
+        "controller_packet_ogcf_bridge_scorer_ok",
+        "controller_packet_ogcf_bridge_scorer_feature_ok",
+        "controller_packet_ogcf_bridge_feature_audit_ok",
+        "controller_packet_ogcf_bridge_source_holdout_ok",
+        "controller_packet_ogcf_bridge_leave_one_source_out_ok",
         "adaptive_behavior_feature_scorer_ok",
         "adaptive_behavior_feature_scorer_hybrid_ok",
         "adaptive_behavior_feature_challenge_ok",
@@ -457,6 +512,7 @@ def main() -> int:
                 str(ROOT / "eval" / "adaptive_context_gemma_shadow_regression.py"),
                 str(ROOT / "eval" / "adaptive_behavior_shadow_runtime_regression.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_runtime_regression.py"),
+                str(ROOT / "eval" / "adaptive_residual_shadow_runtime_view_regression.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_fourth_holdout_log.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_fifth_holdout_log.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_sixth_natural_holdout_log.py"),
@@ -508,6 +564,7 @@ def main() -> int:
                 str(ROOT / "eval" / "evidence_context_selector_runtime_regression.py"),
                 str(ROOT / "eval" / "resolver_policy_config_regression.py"),
                 str(ROOT / "eval" / "resolver_policy_runtime_view_regression.py"),
+                str(ROOT / "eval" / "resolver_shadow_runtime_view_regression.py"),
                 str(ROOT / "eval" / "answer_quality_eval.py"),
                 str(ROOT / "eval" / "multi_intent_answer_composition_regression.py"),
                 str(ROOT / "eval" / "controller_packet_collector.py"),
@@ -522,8 +579,29 @@ def main() -> int:
                 str(ROOT / "eval" / "controller_packet_calibration_proposals_regression.py"),
                 str(ROOT / "eval" / "controller_packet_calibration_guard.py"),
                 str(ROOT / "eval" / "controller_packet_calibration_guard_regression.py"),
+                str(ROOT / "eval" / "controller_packet_calibration_config_regression.py"),
+                str(ROOT / "eval" / "controller_packet_calibration_runtime_view_regression.py"),
                 str(ROOT / "eval" / "controller_packet_calibration_pipeline.py"),
                 str(ROOT / "eval" / "controller_packet_calibration_pipeline_regression.py"),
+                str(ROOT / "eval" / "controller_packet_multirun_calibration.py"),
+                str(ROOT / "eval" / "controller_packet_multirun_calibration_regression.py"),
+                str(ROOT / "eval" / "controller_packet_recurring_holdout.py"),
+                str(ROOT / "eval" / "controller_packet_recurring_holdout_regression.py"),
+                str(ROOT / "eval" / "controller_packet_review_separation.py"),
+                str(ROOT / "eval" / "controller_packet_review_separation_regression.py"),
+                str(ROOT / "eval" / "controller_packet_bridge_separator.py"),
+                str(ROOT / "eval" / "controller_packet_bridge_separator_regression.py"),
+                str(ROOT / "eval" / "controller_packet_bridge_separator_holdout.py"),
+                str(ROOT / "eval" / "controller_packet_bridge_separator_holdout_regression.py"),
+                str(ROOT / "eval" / "controller_packet_ogcf_bridge_scorer.py"),
+                str(ROOT / "eval" / "controller_packet_ogcf_bridge_scorer_regression.py"),
+                str(ROOT / "eval" / "controller_packet_ogcf_bridge_scorer_feature_regression.py"),
+                str(ROOT / "eval" / "controller_packet_ogcf_bridge_feature_audit.py"),
+                str(ROOT / "eval" / "controller_packet_ogcf_bridge_feature_audit_regression.py"),
+                str(ROOT / "eval" / "controller_packet_ogcf_bridge_source_holdout.py"),
+                str(ROOT / "eval" / "controller_packet_ogcf_bridge_source_holdout_regression.py"),
+                str(ROOT / "eval" / "controller_packet_ogcf_bridge_leave_one_source_out.py"),
+                str(ROOT / "eval" / "controller_packet_ogcf_bridge_leave_one_source_out_regression.py"),
                 str(ROOT / "eval" / "outcome_logging_regression.py"),
                 str(ROOT / "eval" / "selector_architecture_gate.py"),
             ],
@@ -577,6 +655,10 @@ def main() -> int:
         maybe_artifact_step(
             "adaptive_residual_shadow_runtime_regression",
             [python, str(ROOT / "eval" / "adaptive_residual_shadow_runtime_regression.py")],
+        ),
+        run_step(
+            "adaptive_residual_shadow_runtime_view_regression",
+            [python, str(ROOT / "eval" / "adaptive_residual_shadow_runtime_view_regression.py")],
         ),
         maybe_artifact_step(
             "adaptive_residual_shadow_logged_eval",
@@ -709,6 +791,10 @@ def main() -> int:
             [python, str(ROOT / "eval" / "resolver_policy_runtime_view_regression.py")],
         ),
         run_step(
+            "resolver_shadow_runtime_view_regression",
+            [python, str(ROOT / "eval" / "resolver_shadow_runtime_view_regression.py")],
+        ),
+        run_step(
             "answer_quality_eval",
             [python, str(ROOT / "eval" / "answer_quality_eval.py")],
         ),
@@ -745,8 +831,56 @@ def main() -> int:
             [python, str(ROOT / "eval" / "controller_packet_calibration_guard_regression.py")],
         ),
         run_step(
+            "controller_packet_calibration_config_regression",
+            [python, str(ROOT / "eval" / "controller_packet_calibration_config_regression.py")],
+        ),
+        run_step(
+            "controller_packet_calibration_runtime_view_regression",
+            [python, str(ROOT / "eval" / "controller_packet_calibration_runtime_view_regression.py")],
+        ),
+        run_step(
             "controller_packet_calibration_pipeline_regression",
             [python, str(ROOT / "eval" / "controller_packet_calibration_pipeline_regression.py")],
+        ),
+        run_step(
+            "controller_packet_multirun_calibration_regression",
+            [python, str(ROOT / "eval" / "controller_packet_multirun_calibration_regression.py")],
+        ),
+        run_step(
+            "controller_packet_recurring_holdout_regression",
+            [python, str(ROOT / "eval" / "controller_packet_recurring_holdout_regression.py")],
+        ),
+        run_step(
+            "controller_packet_review_separation_regression",
+            [python, str(ROOT / "eval" / "controller_packet_review_separation_regression.py")],
+        ),
+        run_step(
+            "controller_packet_bridge_separator_regression",
+            [python, str(ROOT / "eval" / "controller_packet_bridge_separator_regression.py")],
+        ),
+        run_step(
+            "controller_packet_bridge_separator_holdout_regression",
+            [python, str(ROOT / "eval" / "controller_packet_bridge_separator_holdout_regression.py")],
+        ),
+        run_step(
+            "controller_packet_ogcf_bridge_scorer_regression",
+            [python, str(ROOT / "eval" / "controller_packet_ogcf_bridge_scorer_regression.py")],
+        ),
+        run_step(
+            "controller_packet_ogcf_bridge_scorer_feature_regression",
+            [python, str(ROOT / "eval" / "controller_packet_ogcf_bridge_scorer_feature_regression.py")],
+        ),
+        run_step(
+            "controller_packet_ogcf_bridge_feature_audit_regression",
+            [python, str(ROOT / "eval" / "controller_packet_ogcf_bridge_feature_audit_regression.py")],
+        ),
+        run_step(
+            "controller_packet_ogcf_bridge_source_holdout_regression",
+            [python, str(ROOT / "eval" / "controller_packet_ogcf_bridge_source_holdout_regression.py")],
+        ),
+        run_step(
+            "controller_packet_ogcf_bridge_leave_one_source_out_regression",
+            [python, str(ROOT / "eval" / "controller_packet_ogcf_bridge_leave_one_source_out_regression.py")],
         ),
         maybe_artifact_step(
             "adaptive_behavior_feature_scorer_regression",

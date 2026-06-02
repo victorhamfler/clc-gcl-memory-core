@@ -18,7 +18,7 @@ PACKETS_JSONL = REPO_ROOT / "experiments" / "controller_packet_memory_bank_regre
 
 
 def packet(idx: int, *, label: str, rating: float, would_override: bool = False, ogcf_present: bool = True) -> dict:
-    return {
+    item = {
         "schema": "controller_evidence_packet/v1",
         "operation_id": f"op_packet_bank_{idx}",
         "source_log": f"fixture_log_{idx % 2}.jsonl",
@@ -75,6 +75,21 @@ def packet(idx: int, *, label: str, rating: float, would_override: bool = False,
         "mutates_runtime": False,
         "mutates_config": False,
     }
+    if idx != 3:
+        item["evidence_context"] = {
+            "schema": "evidence_context_packet_view/v1",
+            "features": {
+                "retrieval_count": 2,
+                "selected_count": 1,
+                "claim_scope_score": 0.7,
+                "stale_current_conflict": 0.0,
+                "ogcf_bridge_overload_score": 0.8 if ogcf_present else 0.0,
+            },
+            "report_only": True,
+            "mutates_runtime": False,
+            "mutates_config": False,
+        }
+    return item
 
 
 def main() -> int:
@@ -103,6 +118,11 @@ def main() -> int:
         and report["mutates_config"] is False,
         "tracks_residual_packets": report["residual_packet_count"] == 4,
         "tracks_ogcf_packets": report["ogcf_packet_count"] == 3,
+        "tracks_evidence_context_features": report["evidence_context_feature_packet_count"] == 3
+        and report["evidence_context_feature_coverage"] == 0.75
+        and "claim_scope_score" in report["evidence_context_feature_keys"]
+        and report["diagnostics"]["evidence_context_features_present"] is True
+        and report["diagnostics"]["evidence_context_features_full_coverage"] is False,
         "tracks_bridge_gap": report["bridge_feedback_without_ogcf_count"] == 1
         and report["diagnostics"]["bridge_feedback_has_ogcf_coverage"] is False,
     }

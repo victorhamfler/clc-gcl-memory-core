@@ -222,6 +222,7 @@ def feedback_events() -> list[dict[str, Any]]:
 
 def main() -> int:
     packet = build_controller_evidence_packet(ask_event(), feedback_events())
+    context_features = ((packet.get("evidence_context") or {}).get("features") or {})
     checks = {
         "schema": packet.get("schema") == SCHEMA,
         "request_preserved": packet["request"]["query"].startswith("Why should the selector"),
@@ -231,6 +232,14 @@ def main() -> int:
         and packet["canonical"]["nonkeeper_rows"] == 1,
         "ogcf_fields": packet["ogcf"]["meta_present"] is True
         and packet["ogcf"]["intent"] == "cross_domain_bridge_synthesis",
+        "evidence_context_view": packet["evidence_context"]["schema"] == "evidence_context_packet_view/v1"
+        and packet["evidence_context"]["selected_count"] == 1
+        and packet["evidence_context"]["retrieval_count"] == 2
+        and packet["evidence_context"]["stale_conflict_present"] is True
+        and context_features.get("selected_count") == 1
+        and context_features.get("retrieval_count") == 2
+        and context_features.get("ogcf_bridge_overload_score") == 0.81
+        and context_features.get("ogcf_effective_affected_memory_ratio") == 0.62,
         "selector_decision": packet["selector"]["decision"]["policy"] == "periodic_baseline",
         "residual_summary": packet["adaptive_residual_shadow"]["would_override_count"] == 1
         and packet["adaptive_residual_shadow"]["learned_risk_suppressed_count"] == 1,

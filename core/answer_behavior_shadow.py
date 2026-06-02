@@ -40,6 +40,7 @@ def normalize_resolver_shadow_config(config: dict[str, Any] | None = None) -> di
     else:
         refusal_markers = defaults["refusal_markers"]
     return {
+        "schema": "resolver_shadow_config/v1",
         "enabled": bool(cfg.get("enabled", defaults["enabled"])),
         "include_in_outcome_log": bool(cfg.get("include_in_outcome_log", defaults["include_in_outcome_log"])),
         "bridge_warning_score_threshold": _float(
@@ -51,6 +52,12 @@ def normalize_resolver_shadow_config(config: dict[str, Any] | None = None) -> di
             defaults["bridge_warning_effective_ratio_threshold"],
         ),
         "refusal_markers": refusal_markers,
+        "report_only": True,
+        "mutates_runtime": False,
+        "mutates_answer": False,
+        "mutates_selector_policy": False,
+        "mutates_memory": False,
+        "mutates_config": False,
     }
 
 
