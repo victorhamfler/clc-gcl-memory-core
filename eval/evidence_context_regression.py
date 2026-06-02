@@ -46,6 +46,7 @@ def build_report() -> dict:
             "contradiction_peak": 0.40,
             "ogcf_bridge_overload_score": 0.35,
             "ogcf_effective_affected_memory_ratio": 0.45,
+            "ogcf_structural_pressure": 0.1575,
         }
     }
     resolver_shadow = {"actions": ["emit_ogcf_bridge_warning", "", None, "disclose_stale_conflict"]}
@@ -138,7 +139,8 @@ def build_report() -> dict:
         and feature_summary.stale_current_conflict == 0.25
         and feature_summary.contradiction_peak == 0.40,
         "feature_summary_ogcf": feature_summary.ogcf_bridge_overload_score == 0.35
-        and feature_summary.ogcf_effective_affected_memory_ratio == 0.45,
+        and feature_summary.ogcf_effective_affected_memory_ratio == 0.45
+        and feature_summary.ogcf_structural_pressure == 0.1575,
         "feature_summary_export_dict": feature_dict.get("retrieval_count") == 4
         and feature_dict.get("memory_bad_rate") == 0.27
         and "selected_claim_scope_score" in feature_dict,

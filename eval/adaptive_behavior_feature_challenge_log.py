@@ -89,6 +89,7 @@ def base_diagnostics(rows: list[dict[str, Any]], *, memory_bad_rate: float = 0.1
         "contradiction_peak": max((float(item.get("stored_contradiction_score") or 0.0) for item in rows), default=0.0),
         "ogcf_bridge_overload_score": 0.0,
         "ogcf_effective_affected_memory_ratio": 0.0,
+        "ogcf_structural_pressure": 0.0,
     }
 
 
@@ -128,6 +129,7 @@ def challenge_specs() -> list[dict[str, Any]]:
         diagnostics = base_diagnostics(evidence, memory_bad_rate=0.22)
         diagnostics["ogcf_bridge_overload_score"] = 0.78
         diagnostics["ogcf_effective_affected_memory_ratio"] = 0.72
+        diagnostics["ogcf_structural_pressure"] = 0.5616
         specs.append(
             {
                 "id": f"bridge_useful_low_support_{idx}",

@@ -71,6 +71,19 @@ def main() -> int:
         "calibration_manifest_report_only": (report.get("calibration_system") or {}).get("report_only") is True
         and (report.get("calibration_system") or {}).get("mutates_runtime") is False
         and (report.get("calibration_system") or {}).get("mutates_config") is False,
+        "real_log_readiness_present": (report.get("real_log_readiness") or {}).get("schema")
+        == "controller_packet_real_log_readiness/v1",
+        "real_log_readiness_blocks_small_fixture": (report.get("real_log_readiness") or {}).get("readiness")
+        == "analysis_only"
+        and "packet_count_below_runtime_collection_target" in ((report.get("real_log_readiness") or {}).get("blockers") or [])
+        and "single_source_log_only" in ((report.get("real_log_readiness") or {}).get("blockers") or []),
+        "real_log_readiness_report_only": (report.get("real_log_readiness") or {}).get("report_only") is True
+        and (report.get("real_log_readiness") or {}).get("mutates_runtime") is False
+        and (report.get("real_log_readiness") or {}).get("mutates_config") is False,
+        "real_log_readiness_policy_present": ((report.get("real_log_readiness") or {}).get("policy") or {}).get("schema")
+        == "controller_packet_real_log_readiness_policy/v1"
+        and ((report.get("real_log_readiness") or {}).get("policy") or {}).get("min_packets_for_runtime_collection") == 12
+        and ((report.get("real_log_readiness") or {}).get("policy") or {}).get("min_sources_for_runtime_collection") == 2,
         "report_only": report["report_only"] is True and report["mutates_runtime"] is False and report["mutates_config"] is False,
     }
     result = {

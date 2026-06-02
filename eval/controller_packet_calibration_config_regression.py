@@ -15,6 +15,7 @@ from core.controller_packet_calibration import (  # noqa: E402
     normalize_bridge_loso_policy,
     normalize_bridge_scorer_policy,
     normalize_controller_packet_calibration_policy,
+    normalize_real_log_readiness_policy,
 )
 
 
@@ -26,6 +27,7 @@ def build_report() -> dict[str, Any]:
     config = load_config(ROOT)
     default_scorer = normalize_bridge_scorer_policy(config)
     default_loso = normalize_bridge_loso_policy(config)
+    default_readiness = normalize_real_log_readiness_policy(config)
     default_policy = normalize_controller_packet_calibration_policy(config)
     override_config = {
         "controller_packet_calibration": {
@@ -39,10 +41,19 @@ def build_report() -> dict[str, Any]:
                 "min_sources_for_candidate": 5,
                 "min_samples_for_candidate": 80,
             },
+            "real_log_readiness": {
+                "min_packets_for_runtime_collection": 20,
+                "min_sources_for_runtime_collection": 4,
+                "min_packets_for_learned_scorer_evaluation": 90,
+                "min_sources_for_learned_scorer_evaluation": 6,
+                "require_full_evidence_context_feature_coverage": False,
+                "block_on_review_items": False,
+            },
         }
     }
     override_scorer = normalize_bridge_scorer_policy(override_config)
     override_loso = normalize_bridge_loso_policy(override_config)
+    override_readiness = normalize_real_log_readiness_policy(override_config)
     cli_scorer = normalize_bridge_scorer_policy(override_config, min_test_samples=3)
     cli_loso = normalize_bridge_loso_policy(override_config, min_sources=2, min_samples=10)
     checks = {
@@ -55,15 +66,29 @@ def build_report() -> dict[str, Any]:
         "default_loso_policy": default_loso["schema"] == "controller_packet_bridge_loso_policy/v1"
         and default_loso["min_sources_for_candidate"] == 3
         and default_loso["min_samples_for_candidate"] == 30,
+        "default_readiness_policy": default_readiness["schema"] == "controller_packet_real_log_readiness_policy/v1"
+        and default_readiness["min_packets_for_runtime_collection"] == 12
+        and default_readiness["min_sources_for_runtime_collection"] == 2
+        and default_readiness["min_packets_for_learned_scorer_evaluation"] == 30
+        and default_readiness["min_sources_for_learned_scorer_evaluation"] == 3
+        and default_readiness["require_full_evidence_context_feature_coverage"] is True
+        and default_readiness["block_on_review_items"] is True,
         "combined_policy_view": default_policy["schema"] == "controller_packet_calibration_policy/v1"
         and default_policy["bridge_scorer"] == default_scorer
-        and default_policy["bridge_leave_one_source_out"] == default_loso,
+        and default_policy["bridge_leave_one_source_out"] == default_loso
+        and default_policy["real_log_readiness"] == default_readiness,
         "override_scorer_policy": override_scorer["min_test_samples_for_candidate"] == 9
         and override_scorer["require_zero_false_positives"] is False
         and override_scorer["require_zero_false_negatives"] is False
         and override_scorer["require_not_worse_than_symbolic"] is False,
         "override_loso_policy": override_loso["min_sources_for_candidate"] == 5
         and override_loso["min_samples_for_candidate"] == 80,
+        "override_readiness_policy": override_readiness["min_packets_for_runtime_collection"] == 20
+        and override_readiness["min_sources_for_runtime_collection"] == 4
+        and override_readiness["min_packets_for_learned_scorer_evaluation"] == 90
+        and override_readiness["min_sources_for_learned_scorer_evaluation"] == 6
+        and override_readiness["require_full_evidence_context_feature_coverage"] is False
+        and override_readiness["block_on_review_items"] is False,
         "cli_overrides_are_explicit": cli_scorer["min_test_samples_for_candidate"] == 3
         and cli_scorer["source"] == "config_with_cli_overrides"
         and cli_loso["min_sources_for_candidate"] == 2
@@ -71,10 +96,13 @@ def build_report() -> dict[str, Any]:
         and cli_loso["source"] == "config_with_cli_overrides",
         "report_only": default_scorer["report_only"] is True
         and default_loso["report_only"] is True
+        and default_readiness["report_only"] is True
         and default_scorer["mutates_runtime"] is False
         and default_loso["mutates_runtime"] is False
+        and default_readiness["mutates_runtime"] is False
         and default_scorer["mutates_config"] is False
-        and default_loso["mutates_config"] is False,
+        and default_loso["mutates_config"] is False
+        and default_readiness["mutates_config"] is False,
     }
     return {
         "schema": "controller_packet_calibration_config_regression/v1",
@@ -87,6 +115,7 @@ def build_report() -> dict[str, Any]:
         "override_view": {
             "bridge_scorer": override_scorer,
             "bridge_leave_one_source_out": override_loso,
+            "real_log_readiness": override_readiness,
         },
         "cli_override_view": {
             "bridge_scorer": cli_scorer,

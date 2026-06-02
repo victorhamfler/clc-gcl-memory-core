@@ -27,9 +27,12 @@ class OGCFLoop:
     cluster_a: int
     cluster_b: int
     cluster_c: int
-    holonomy_raw: float
+    polar_holonomy: float
     holonomy_rank_norm: float
-    interaction_excess: float
+    raw_interaction_excess: float
+    polar_interaction_excess: float
+    raw_interaction_z: float
+    polar_interaction_z: float
     interaction_z: float
     local_defect_a: float
     local_defect_b: float
@@ -38,6 +41,26 @@ class OGCFLoop:
     cluster_size_a: int
     cluster_size_b: int
     cluster_size_c: int
+    mean_singular_value: float = 0.0
+    min_singular_value: float = 0.0
+    principal_angle_mean: float = 0.0
+    principal_angle_max: float = 0.0
+
+    @property
+    def holonomy_raw(self) -> float:
+        """Backward-compatible alias for corrected polar holonomy."""
+        return self.polar_holonomy
+
+    @property
+    def interaction_excess(self) -> float:
+        """Backward-compatible alias for raw interaction excess.
+
+        The corrected OGCF v2 documents distinguish raw-overlap interaction
+        excess from corrected polar interaction excess. Existing selector
+        artifacts use `interaction_excess` as the bridge-overload signal, so
+        keep it mapped to the raw diagnostic while exposing explicit names.
+        """
+        return self.raw_interaction_excess
 
 
 @dataclass(frozen=True)
@@ -146,23 +169,30 @@ class OGCFGeometryEngine:
         loop_results: list[OGCFLoop] = []
         for a, b, c in loops:
             U_a, U_b, U_c = bases[a], bases[b], bases[c]
-            U_ab = self._transition_projector(U_a, U_b)
-            U_bc = self._transition_projector(U_b, U_c)
-            U_ac = self._transition_projector(U_a, U_c)
-            U_ca = self._transition_projector(U_c, U_a)
-            U_loop = U_ca @ U_bc @ U_ab
-            holonomy_raw = float(np.linalg.norm(U_loop - np.eye(U_loop.shape[0]), "fro"))
-            holonomy_rank_norm = holonomy_raw / np.sqrt(min(self.rank_k, U_loop.shape[0]))
-            interaction_excess = float(self._interaction_excess(U_ac, U_bc, U_ab))
+            Q_ab, s_ab, M_ab = self._polar_transport(U_a, U_b)
+            Q_bc, s_bc, M_bc = self._polar_transport(U_b, U_c)
+            Q_ac, s_ac, M_ac = self._polar_transport(U_a, U_c)
+            Q_ca, _, _ = self._polar_transport(U_c, U_a)
+            Q_loop = Q_ca @ Q_bc @ Q_ab
+            polar_holonomy = float(np.linalg.norm(Q_loop - np.eye(Q_loop.shape[0]), "fro"))
+            holonomy_rank_norm = polar_holonomy / np.sqrt(min(self.rank_k, Q_loop.shape[0]))
+            raw_interaction_excess = float(self._interaction_excess(M_ac, M_bc, M_ab))
+            polar_interaction_excess = float(self._interaction_excess(Q_ac, Q_bc, Q_ab))
+            singular_values = np.concatenate([s_ab, s_bc, s_ac])
+            clipped_singular_values = np.clip(singular_values, -1.0, 1.0)
+            principal_angles = np.arccos(clipped_singular_values)
             loop_results.append(
                 OGCFLoop(
                     cluster_a=a,
                     cluster_b=b,
                     cluster_c=c,
-                    holonomy_raw=holonomy_raw,
+                    polar_holonomy=polar_holonomy,
                     holonomy_rank_norm=float(holonomy_rank_norm),
-                    interaction_excess=interaction_excess,
-                    interaction_z=0.0,  # filled later
+                    raw_interaction_excess=raw_interaction_excess,
+                    polar_interaction_excess=polar_interaction_excess,
+                    raw_interaction_z=0.0,  # filled later
+                    polar_interaction_z=0.0,  # filled later
+                    interaction_z=0.0,  # backward-compatible raw z, filled later
                     local_defect_a=float(local_defects[a]),
                     local_defect_b=float(local_defects[b]),
                     local_defect_c=float(local_defects[c]),
@@ -170,13 +200,21 @@ class OGCFGeometryEngine:
                     cluster_size_a=cluster_sizes[a],
                     cluster_size_b=cluster_sizes[b],
                     cluster_size_c=cluster_sizes[c],
+                    mean_singular_value=float(np.mean(singular_values)) if len(singular_values) else 0.0,
+                    min_singular_value=float(np.min(singular_values)) if len(singular_values) else 0.0,
+                    principal_angle_mean=float(np.mean(principal_angles)) if len(principal_angles) else 0.0,
+                    principal_angle_max=float(np.max(principal_angles)) if len(principal_angles) else 0.0,
                 )
             )
 
         # Random baselines for z-scores
-        baseline_ie = self._compute_baselines(embeddings, labels, loops)
-        baseline_mean = float(np.mean(baseline_ie)) if baseline_ie else 0.0
-        baseline_std = float(np.std(baseline_ie)) if baseline_ie else 1.0
+        baseline_pairs = self._compute_baselines(embeddings, labels, loops)
+        baseline_raw = [item[0] for item in baseline_pairs]
+        baseline_polar = [item[1] for item in baseline_pairs]
+        baseline_mean = float(np.mean(baseline_raw)) if baseline_raw else 0.0
+        baseline_std = float(np.std(baseline_raw)) if baseline_raw else 1.0
+        polar_baseline_mean = float(np.mean(baseline_polar)) if baseline_polar else 0.0
+        polar_baseline_std = float(np.std(baseline_polar)) if baseline_polar else 1.0
 
         # Defect stats
         all_defects = [local_defects[c] for c in range(self.n_clusters)]
@@ -184,7 +222,9 @@ class OGCFGeometryEngine:
         defect_std = float(np.std(all_defects))
 
         for lr in loop_results:
-            lr.interaction_z = (lr.interaction_excess - baseline_mean) / max(baseline_std, 1e-10)
+            lr.raw_interaction_z = (lr.raw_interaction_excess - baseline_mean) / max(baseline_std, 1e-10)
+            lr.polar_interaction_z = (lr.polar_interaction_excess - polar_baseline_mean) / max(polar_baseline_std, 1e-10)
+            lr.interaction_z = lr.raw_interaction_z
             lr.local_defect_z_mean = np.mean([
                 (lr.local_defect_a - defect_mean) / max(defect_std, 1e-10),
                 (lr.local_defect_b - defect_mean) / max(defect_std, 1e-10),
@@ -242,10 +282,18 @@ class OGCFGeometryEngine:
             local_defect = 1.0
         return U_k, local_defect
 
-    def _transition_projector(self, U_a: np.ndarray, U_b: np.ndarray) -> np.ndarray:
-        M = U_a.T @ U_b
+    def _raw_overlap(self, U_i: np.ndarray, U_j: np.ndarray) -> np.ndarray:
+        return U_j.T @ U_i
+
+    def _polar_transport(self, U_i: np.ndarray, U_j: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        M = self._raw_overlap(U_i, U_j)
         U_m, _, Vt_m = np.linalg.svd(M, full_matrices=False)
-        return U_m @ Vt_m
+        singular_values = np.linalg.svd(M, compute_uv=False)
+        return U_m @ Vt_m, singular_values, M
+
+    def _transition_projector(self, U_a: np.ndarray, U_b: np.ndarray) -> np.ndarray:
+        Q, _, _ = self._polar_transport(U_a, U_b)
+        return Q
 
     def _interaction_excess(self, U_ac: np.ndarray, U_bc: np.ndarray, U_ab: np.ndarray) -> float:
         return float(np.linalg.norm(U_ac - U_bc @ U_ab, "fro"))
@@ -255,8 +303,8 @@ class OGCFGeometryEngine:
         embeddings: np.ndarray,
         labels: np.ndarray,
         loops: list[tuple[int, int, int]],
-    ) -> list[float]:
-        baseline_ie: list[float] = []
+    ) -> list[tuple[float, float]]:
+        baseline_ie: list[tuple[float, float]] = []
         rng = np.random.default_rng(self.seed)
         for r in range(self.random_baselines):
             shuffled = rng.permutation(labels)
@@ -272,11 +320,12 @@ class OGCFGeometryEngine:
             for a, b, c in loops[: min(len(loops), 500)]:
                 if a not in shuffled_bases or b not in shuffled_bases or c not in shuffled_bases:
                     continue
-                U_ab = self._transition_projector(shuffled_bases[a], shuffled_bases[b])
-                U_bc = self._transition_projector(shuffled_bases[b], shuffled_bases[c])
-                U_ac = self._transition_projector(shuffled_bases[a], shuffled_bases[c])
-                ie = self._interaction_excess(U_ac, U_bc, U_ab)
-                baseline_ie.append(ie)
+                Q_ab, _, M_ab = self._polar_transport(shuffled_bases[a], shuffled_bases[b])
+                Q_bc, _, M_bc = self._polar_transport(shuffled_bases[b], shuffled_bases[c])
+                Q_ac, _, M_ac = self._polar_transport(shuffled_bases[a], shuffled_bases[c])
+                raw_ie = self._interaction_excess(M_ac, M_bc, M_ab)
+                polar_ie = self._interaction_excess(Q_ac, Q_bc, Q_ab)
+                baseline_ie.append((raw_ie, polar_ie))
         return baseline_ie
 
     def _top_domain_for_cluster(
@@ -322,6 +371,16 @@ class OGCFMemoryReviewer:
                     "clusters": f"{loop.cluster_a}-{loop.cluster_b}-{loop.cluster_c}",
                     "interaction_z": round(loop.interaction_z, 4),
                     "interaction_excess": round(loop.interaction_excess, 6),
+                    "raw_interaction_z": round(loop.raw_interaction_z, 4),
+                    "raw_interaction_excess": round(loop.raw_interaction_excess, 6),
+                    "polar_interaction_z": round(loop.polar_interaction_z, 4),
+                    "polar_interaction_excess": round(loop.polar_interaction_excess, 6),
+                    "polar_holonomy": round(loop.polar_holonomy, 6),
+                    "holonomy_rank_norm": round(loop.holonomy_rank_norm, 6),
+                    "mean_singular_value": round(loop.mean_singular_value, 6),
+                    "min_singular_value": round(loop.min_singular_value, 6),
+                    "principal_angle_mean": round(loop.principal_angle_mean, 6),
+                    "principal_angle_max": round(loop.principal_angle_max, 6),
                     "local_defect_z_mean": round(loop.local_defect_z_mean, 4),
                     "failure_mode": self._failure_mode(loop),
                     "recommended_action": action,
@@ -345,6 +404,8 @@ class OGCFMemoryReviewer:
             "embedding_norm_stats": geo.embedding_norm_stats,
             "loop_count": len(geo.loops),
             "max_interaction_z": round(max_interaction_z, 4),
+            "max_raw_interaction_z": round(max_interaction_z, 4),
+            "max_polar_interaction_z": round(max((lr.polar_interaction_z for lr in geo.loops), default=0.0), 4),
             "bridge_overload_score": round(bridge_overload_score, 4),
             "risk_regions": sorted(risk_regions, key=lambda x: x["interaction_z"], reverse=True),
             "bridge_clusters": bridge_clusters,

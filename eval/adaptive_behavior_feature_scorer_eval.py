@@ -49,6 +49,7 @@ FEATURE_KEYS = (
     "contradiction_peak",
     "ogcf_bridge_overload_score",
     "ogcf_effective_affected_memory_ratio",
+    "ogcf_structural_pressure",
 )
 FAMILIES = (
     "supported_evidence",

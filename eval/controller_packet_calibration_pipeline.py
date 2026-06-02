@@ -12,6 +12,7 @@ REPO_ROOT = ROOT.parent
 sys.path.insert(0, str(ROOT))
 
 from core.config import load_config  # noqa: E402
+from core.controller_packet_calibration import normalize_real_log_readiness_policy  # noqa: E402
 from eval.controller_packet_calibration_guard import build_report as build_guard_report, write_report as write_guard_report  # noqa: E402
 from eval.controller_packet_calibration_proposals import build_report as build_proposals_report, write_report as write_proposals_report  # noqa: E402
 from eval.controller_packet_bridge_separator import build_report as build_bridge_separator_report, write_report as write_bridge_separator_report  # noqa: E402
@@ -134,6 +135,86 @@ def build_calibration_manifest(
     }
 
 
+def real_log_readiness_report(
+    *,
+    collector_report: dict[str, Any],
+    bank_report: dict[str, Any],
+    guard_report: dict[str, Any],
+    bridge_loso_report: dict[str, Any],
+    log_paths: list[Path],
+    policy_config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    policy = normalize_real_log_readiness_policy(policy_config)
+    packet_count = int(collector_report.get("packet_count") or 0)
+    source_log_count = len({str(path) for path in log_paths})
+    diagnostics = bank_report.get("diagnostics") if isinstance(bank_report.get("diagnostics"), dict) else {}
+    feature_coverage = float(bank_report.get("evidence_context_feature_coverage") or 0.0)
+    if not feature_coverage and diagnostics.get("evidence_context_features_full_coverage"):
+        feature_coverage = 1.0
+    ready_count = int(guard_report.get("ready_count") or 0)
+    review_count = int(guard_report.get("review_item_count") or 0)
+    loso_candidate = bool(bridge_loso_report.get("learned_scorer_candidate"))
+    runtime_packet_min = int(policy["min_packets_for_runtime_collection"])
+    runtime_source_min = int(policy["min_sources_for_runtime_collection"])
+    scorer_packet_min = int(policy["min_packets_for_learned_scorer_evaluation"])
+    scorer_source_min = int(policy["min_sources_for_learned_scorer_evaluation"])
+    require_full_features = bool(policy["require_full_evidence_context_feature_coverage"])
+    block_on_review = bool(policy["block_on_review_items"])
+    blockers: list[str] = []
+    if packet_count <= 0:
+        blockers.append("no_controller_packets")
+    if packet_count < runtime_packet_min:
+        blockers.append("packet_count_below_runtime_collection_target")
+    if source_log_count < runtime_source_min:
+        blockers.append("single_source_log_only")
+    if require_full_features and feature_coverage < 1.0:
+        blockers.append("incomplete_evidence_context_feature_coverage")
+    if block_on_review and review_count:
+        blockers.append("review_items_present")
+    if bridge_loso_report.get("readiness_blockers"):
+        blockers.append("bridge_loso_not_candidate_ready")
+    if (
+        loso_candidate
+        and packet_count >= scorer_packet_min
+        and source_log_count >= scorer_source_min
+        and (not require_full_features or feature_coverage >= 1.0)
+        and (not block_on_review or not review_count)
+    ):
+        readiness = "ready_for_loso_learned_scorer_evaluation"
+        next_action = "run_broader_real_source_holdout_and_manual_review"
+    elif (
+        packet_count >= runtime_packet_min
+        and source_log_count >= runtime_source_min
+        and (not require_full_features or feature_coverage >= 1.0)
+    ):
+        readiness = "ready_for_runtime_collection"
+        next_action = "collect_more_independent_real_logs_with_same_contract"
+    elif packet_count:
+        readiness = "analysis_only"
+        next_action = "use_for_diagnostics_but_do_not_train_or_promote"
+    else:
+        readiness = "not_ready"
+        next_action = "generate_or_collect_controller_packet_logs"
+    return {
+        "schema": "controller_packet_real_log_readiness/v1",
+        "description": "Report-only classifier for deciding whether a packet-calibration run is useful for diagnostics, runtime collection, or learned-scorer evaluation.",
+        "readiness": readiness,
+        "next_action": next_action,
+        "blockers": blockers,
+        "packet_count": packet_count,
+        "source_log_count": source_log_count,
+        "evidence_context_feature_coverage": round(feature_coverage, 6),
+        "guard_ready_count": ready_count,
+        "review_item_count": review_count,
+        "bridge_loso_candidate": loso_candidate,
+        "bridge_loso_readiness_blockers": bridge_loso_report.get("readiness_blockers") or [],
+        "policy": policy,
+        "report_only": True,
+        "mutates_runtime": False,
+        "mutates_config": False,
+    }
+
+
 def build_pipeline(
     log_paths: list[Path],
     *,
@@ -184,7 +265,8 @@ def build_pipeline(
     write_bridge_separator_report(bridge_separator_report, bridge_separator_json, bridge_separator_md)
     bridge_holdout_report = build_bridge_holdout_report(bridge_separator_json, [packets_jsonl])
     write_bridge_holdout_report(bridge_holdout_report, bridge_holdout_json, bridge_holdout_md)
-    bridge_loso_report = build_bridge_loso_report([packets_jsonl], bridge_separator_json, policy_config=load_config(ROOT))
+    policy_config = load_config(ROOT)
+    bridge_loso_report = build_bridge_loso_report([packets_jsonl], bridge_separator_json, policy_config=policy_config)
     write_bridge_loso_report(bridge_loso_report, bridge_loso_json, bridge_loso_md)
     calibration_manifest = build_calibration_manifest(
         collector_report=collector_report,
@@ -195,6 +277,14 @@ def build_pipeline(
         bridge_separator_report=bridge_separator_report,
         bridge_holdout_report=bridge_holdout_report,
         bridge_loso_report=bridge_loso_report,
+    )
+    real_log_readiness = real_log_readiness_report(
+        collector_report=collector_report,
+        bank_report=bank_report,
+        guard_report=guard_report,
+        bridge_loso_report=bridge_loso_report,
+        log_paths=log_paths,
+        policy_config=policy_config,
     )
 
     return {
@@ -252,6 +342,7 @@ def build_pipeline(
             "readiness_blockers": bridge_loso_report.get("readiness_blockers"),
         },
         "calibration_system": calibration_manifest,
+        "real_log_readiness": real_log_readiness,
         "report_only": True,
         "mutates_runtime": False,
         "mutates_config": False,
@@ -323,6 +414,12 @@ def write_pipeline_report(report: dict[str, Any], out_json: Path, out_md: Path) 
             "",
             "```json",
             json.dumps(report.get("calibration_system"), indent=2),
+            "```",
+            "",
+            "## Real Log Readiness",
+            "",
+            "```json",
+            json.dumps(report.get("real_log_readiness"), indent=2),
             "```",
             "",
             "## Logs",

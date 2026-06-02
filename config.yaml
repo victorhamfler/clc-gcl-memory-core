@@ -161,6 +161,13 @@ controller_packet_calibration:
   bridge_leave_one_source_out:
     min_sources_for_candidate: 3
     min_samples_for_candidate: 30
+  real_log_readiness:
+    min_packets_for_runtime_collection: 12
+    min_sources_for_runtime_collection: 2
+    min_packets_for_learned_scorer_evaluation: 30
+    min_sources_for_learned_scorer_evaluation: 3
+    require_full_evidence_context_feature_coverage: true
+    block_on_review_items: true
 
 claim_scope:
   stopwords: about,check,checks,current,currently,does,for,from,help,helps,latest,prefer,prefers,preference,remember,should,that,the,use,what,when,where,which,who,with,victor,hermes,project

@@ -215,6 +215,7 @@ class EvidenceContextFeatures:
     contradiction_peak: float
     ogcf_bridge_overload_score: float
     ogcf_effective_affected_memory_ratio: float
+    ogcf_structural_pressure: float
 
 
 def build_evidence_context_features(
@@ -244,6 +245,11 @@ def build_evidence_context_features(
         ogcf_effective_affected_memory_ratio=float_value(
             diagnostics.get("ogcf_effective_affected_memory_ratio"),
             0.0,
+        ),
+        ogcf_structural_pressure=float_value(
+            diagnostics.get("ogcf_structural_pressure"),
+            float_value(diagnostics.get("ogcf_bridge_overload_score"), 0.0)
+            * float_value(diagnostics.get("ogcf_effective_affected_memory_ratio"), 0.0),
         ),
     )
 

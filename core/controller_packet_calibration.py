@@ -6,6 +6,10 @@ from typing import Any
 DEFAULT_BRIDGE_SCORER_MIN_TEST_SAMPLES = 4
 DEFAULT_BRIDGE_LOSO_MIN_SOURCES = 3
 DEFAULT_BRIDGE_LOSO_MIN_SAMPLES = 30
+DEFAULT_READINESS_MIN_PACKETS_FOR_RUNTIME_COLLECTION = 12
+DEFAULT_READINESS_MIN_SOURCES_FOR_RUNTIME_COLLECTION = 2
+DEFAULT_READINESS_MIN_PACKETS_FOR_LEARNED_SCORER_EVAL = 30
+DEFAULT_READINESS_MIN_SOURCES_FOR_LEARNED_SCORER_EVAL = 3
 
 
 def positive_int(value: Any, default: int) -> int:
@@ -89,11 +93,45 @@ def normalize_bridge_loso_policy(
     }
 
 
+def normalize_real_log_readiness_policy(config: dict[str, Any] | None = None) -> dict[str, Any]:
+    controller = controller_packet_calibration_config(config)
+    readiness = controller.get("real_log_readiness") if isinstance(controller.get("real_log_readiness"), dict) else {}
+    return {
+        "schema": "controller_packet_real_log_readiness_policy/v1",
+        "min_packets_for_runtime_collection": positive_int(
+            readiness.get("min_packets_for_runtime_collection"),
+            DEFAULT_READINESS_MIN_PACKETS_FOR_RUNTIME_COLLECTION,
+        ),
+        "min_sources_for_runtime_collection": positive_int(
+            readiness.get("min_sources_for_runtime_collection"),
+            DEFAULT_READINESS_MIN_SOURCES_FOR_RUNTIME_COLLECTION,
+        ),
+        "min_packets_for_learned_scorer_evaluation": positive_int(
+            readiness.get("min_packets_for_learned_scorer_evaluation"),
+            DEFAULT_READINESS_MIN_PACKETS_FOR_LEARNED_SCORER_EVAL,
+        ),
+        "min_sources_for_learned_scorer_evaluation": positive_int(
+            readiness.get("min_sources_for_learned_scorer_evaluation"),
+            DEFAULT_READINESS_MIN_SOURCES_FOR_LEARNED_SCORER_EVAL,
+        ),
+        "require_full_evidence_context_feature_coverage": bool_value(
+            readiness.get("require_full_evidence_context_feature_coverage"),
+            True,
+        ),
+        "block_on_review_items": bool_value(readiness.get("block_on_review_items"), True),
+        "source": "config_or_defaults",
+        "report_only": True,
+        "mutates_runtime": False,
+        "mutates_config": False,
+    }
+
+
 def normalize_controller_packet_calibration_policy(config: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "schema": "controller_packet_calibration_policy/v1",
         "bridge_scorer": normalize_bridge_scorer_policy(config),
         "bridge_leave_one_source_out": normalize_bridge_loso_policy(config),
+        "real_log_readiness": normalize_real_log_readiness_policy(config),
         "report_only": True,
         "mutates_runtime": False,
         "mutates_config": False,

@@ -3721,6 +3721,24 @@ It should produce:
 
 The selector architecture gate must continue to protect this full chain. The next development step after this checkpoint should be a broader packet-bank aggregation over several independent logs, followed by a report-only learned scorer prototype for OGCF bridge separation only if the broader holdout remains clean.
 
+The one-command pipeline now also emits a real-log readiness classifier:
+
+```json
+"real_log_readiness": {
+  "schema": "controller_packet_real_log_readiness/v1",
+  "readiness": "analysis_only | ready_for_runtime_collection | ready_for_loso_learned_scorer_evaluation",
+  "blockers": ["single_source_log_only", "bridge_loso_not_candidate_ready"]
+}
+```
+
+This is a report-only transition tool for Hermes and local runs. It separates:
+
+- diagnostic fixtures that should not train or promote anything;
+- real runtime logs that are good enough to keep collecting under the current packet contract;
+- multi-source, feature-complete, review-clean bridge logs that are strong enough for LOSO learned-scorer evaluation.
+
+This keeps the roadmap conservative after the portable-gate fix: passing the architecture gate is necessary, but real-log readiness still decides whether the next action is collection, holdout replay, or learned-scorer evaluation.
+
 ## Multi-Run Calibration Checkpoint
 
 The first cross-run calibration layer now exists:
@@ -4041,3 +4059,151 @@ The controller-packet memory bank now tracks this shared context feature coverag
 - diagnostics for whether feature coverage is present and whether it is complete.
 
 This matters because the memory bank is the first cross-run aggregation layer. It can now distinguish old packet logs that only contain symbolic packet fields from newer packet logs that are suitable for neural-symbolic scorer training. The calibration pipeline carries these diagnostics forward through its `diagnostics` block, so later learned-controller work can require feature coverage before training or promotion review.
+
+## Controller Packet Real-Log Readiness Gate
+
+The calibration pipeline now emits an explicit report-only real-log readiness contract:
+
+```text
+controller_packet_real_log_readiness/v1
+```
+
+The readiness classifier answers a narrow architecture question:
+
+```text
+Is this packet-calibration run only useful for diagnostics, ready for runtime collection, or strong enough to justify broader learned-scorer evaluation?
+```
+
+It uses the packet count, independent source-log count, evidence-context feature coverage, guard review state, and OGCF bridge leave-one-source-out blockers. It does not mutate runtime behavior or config. The current small regression fixture is correctly marked `analysis_only` because it has too few packets and only one source log.
+
+The calibration pipeline markdown report now includes the same readiness object that was already present in JSON, so Hermes/local reviews can see the next action without opening the raw artifact. The unified selector architecture gate also has a dedicated required check:
+
+```text
+controller_packet_real_log_readiness_ok
+```
+
+This makes the transition process safer. Future learned-controller work should not use packet logs blindly; it should first pass through this readiness layer, then through LOSO/source-holdout evidence, and only then through manual promotion review.
+
+The readiness contract now has a dedicated branch-coverage regression:
+
+```powershell
+py -3 eval/controller_packet_real_log_readiness_regression.py
+```
+
+It writes `controller_packet_real_log_readiness_regression/v1` and proves that the classifier distinguishes:
+
+- `analysis_only` for small or underpowered logs;
+- `ready_for_runtime_collection` for feature-complete multi-log packet runs that still need more independent evidence;
+- `ready_for_loso_learned_scorer_evaluation` for feature-complete, review-clean, LOSO-candidate packet runs.
+
+It also proves incomplete evidence-context features and review items block scorer-evaluation readiness while preserving report-only and non-mutating guarantees. The unified selector architecture gate now requires both the pipeline-level readiness object and this dedicated branch regression.
+
+The real-log readiness thresholds have now moved from eval-local constants into the shared Level 1 calibration config:
+
+```yaml
+controller_packet_calibration:
+  real_log_readiness:
+    min_packets_for_runtime_collection: 12
+    min_sources_for_runtime_collection: 2
+    min_packets_for_learned_scorer_evaluation: 30
+    min_sources_for_learned_scorer_evaluation: 3
+    require_full_evidence_context_feature_coverage: true
+    block_on_review_items: true
+```
+
+Core normalization lives in:
+
+```text
+core/controller_packet_calibration.py
+```
+
+The memory runtime exposes the normalized policy through `/config`, while the selector calibration pipeline consumes the same policy when classifying logs. The focused readiness regression now includes a config-override case proving that relaxed thresholds and disabled blockers change readiness classification in a controlled report-only run.
+
+This is the combined-architecture restructure pattern working as intended:
+
+```text
+hardcoded eval threshold -> shared config policy -> runtime-visible policy -> selector artifact uses policy -> gate-protected regression
+```
+
+## Corrected OGCF v2 Geometry Checkpoint
+
+The OGCF method documents were updated with an important mathematical correction:
+
+```text
+M_ij = B_j.T @ B_i          # raw overlap diagnostic
+Q_ij = polar(M_ij)          # corrected finite-step transport
+```
+
+The codebase now reflects that distinction in `core/ogcf_geometry.py`:
+
+- raw overlap is computed with the corrected `B_j.T @ B_i` orientation;
+- corrected polar transport is used for polar holonomy and polar interaction excess;
+- raw-overlap interaction excess remains the bridge-overload signal because the memory tests showed it is useful for duplicate/cross-domain bridge pressure;
+- raw and polar interaction diagnostics are now exposed separately;
+- singular-value and principal-angle diagnostics are carried on each loop.
+
+Backward-compatible aliases remain:
+
+```text
+interaction_excess -> raw_interaction_excess
+interaction_z      -> raw_interaction_z
+holonomy_raw       -> polar_holonomy
+```
+
+This avoids breaking existing selector and Hermes artifacts while making the corrected OGCF v2 interpretation explicit. Runtime-adjacent OGCF reports now include:
+
+```text
+raw_interaction_z
+raw_interaction_excess
+polar_interaction_z
+polar_interaction_excess
+polar_holonomy
+mean_singular_value
+min_singular_value
+```
+
+The dedicated guard is:
+
+```powershell
+py -3 eval/ogcf_corrected_geometry_regression.py
+```
+
+and the unified architecture gate now requires `ogcf_corrected_geometry_ok`.
+
+## OGCF Selector-Signal Interpretation Fix
+
+After the corrected OGCF v2 geometry update, the selector signal layer also needed the same interpretation correction. The validated method finding is:
+
+```text
+high raw interaction / bridge overload = structural bridge pressure
+high raw interaction / bridge overload != direct factual contradiction
+```
+
+`core/ogcf_signals.py` now preserves that distinction:
+
+- `adjusted_contradiction_peak` no longer increases from `bridge_overload_score`;
+- `ogcf_structural_pressure` records bridge overload multiplied by effective affected retrieval pressure;
+- selector caution can still increase through memory-bad-rate, probe-drop, CSD-ratio, and explicit OGCF diagnostics;
+- factual contradiction remains owned by evidence/claim/recency/source logic, not raw OGCF geometry.
+
+The guard is:
+
+```powershell
+py -3 eval/ogcf_affected_pressure_calibration_regression.py
+```
+
+It now verifies that a true bridge-overload loop raises structural pressure and memory caution without inventing `contradiction_peak`.
+
+The corrected structural-pressure signal is now part of the shared feature contract:
+
+```text
+EvidenceContextFeatures.ogcf_structural_pressure
+```
+
+This value is exported into controller packets and feature-scorer datasets. For older diagnostics that do not contain the explicit field, the feature builder falls back to:
+
+```text
+ogcf_bridge_overload_score * ogcf_effective_affected_memory_ratio
+```
+
+This gives future learned controllers a direct structural-pressure feature and reduces the temptation to reuse `contradiction_peak` as an OGCF proxy.

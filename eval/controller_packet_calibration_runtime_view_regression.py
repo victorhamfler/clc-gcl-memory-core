@@ -42,6 +42,14 @@ def main() -> int:
             "min_sources_for_candidate": 6,
             "min_samples_for_candidate": 77,
         },
+        "real_log_readiness": {
+            "min_packets_for_runtime_collection": 21,
+            "min_sources_for_runtime_collection": 4,
+            "min_packets_for_learned_scorer_evaluation": 88,
+            "min_sources_for_learned_scorer_evaluation": 7,
+            "require_full_evidence_context_feature_coverage": False,
+            "block_on_review_items": False,
+        },
     }
     expected_policy = normalize_controller_packet_calibration_policy(override_config)
     with tempfile.TemporaryDirectory() as tmp:
@@ -55,6 +63,7 @@ def main() -> int:
     runtime_policy = view.get("controller_packet_calibration")
     bridge_scorer = runtime_policy.get("bridge_scorer") if isinstance(runtime_policy, dict) else {}
     bridge_loso = runtime_policy.get("bridge_leave_one_source_out") if isinstance(runtime_policy, dict) else {}
+    readiness = runtime_policy.get("real_log_readiness") if isinstance(runtime_policy, dict) else {}
     checks = {
         "config_view_has_controller_packet_calibration": isinstance(runtime_policy, dict),
         "runtime_view_matches_normalized_override": runtime_policy == expected_policy,
@@ -64,11 +73,18 @@ def main() -> int:
         and bridge_scorer.get("require_not_worse_than_symbolic") is False,
         "loso_override_visible": bridge_loso.get("min_sources_for_candidate") == 6
         and bridge_loso.get("min_samples_for_candidate") == 77,
+        "readiness_override_visible": readiness.get("min_packets_for_runtime_collection") == 21
+        and readiness.get("min_sources_for_runtime_collection") == 4
+        and readiness.get("min_packets_for_learned_scorer_evaluation") == 88
+        and readiness.get("min_sources_for_learned_scorer_evaluation") == 7
+        and readiness.get("require_full_evidence_context_feature_coverage") is False
+        and readiness.get("block_on_review_items") is False,
         "report_only_and_non_mutating": runtime_policy.get("report_only") is True
         and runtime_policy.get("mutates_runtime") is False
         and runtime_policy.get("mutates_config") is False
         and bridge_scorer.get("mutates_runtime") is False
-        and bridge_loso.get("mutates_runtime") is False,
+        and bridge_loso.get("mutates_runtime") is False
+        and readiness.get("mutates_runtime") is False,
     }
     report = {
         "schema": "controller_packet_calibration_runtime_view_regression/v1",

@@ -156,10 +156,9 @@ class OGCFSignalProvider:
         # If bridge_score is high and affected memories are retrieved,
         # the memory graph has structural instability
         adjusted_stale_ratio = min(1.0, base_stale_ratio + 0.25 * effective_affected_ratio * bridge_score)
-        adjusted_contradiction_peak = max(
-            base_contradiction_peak,
-            bridge_score * 0.5,  # bridge overload contributes to conflict signal
-        )
+        # Corrected OGCF v2 interpretation: bridge overload is structural
+        # cross-domain pressure, not direct factual contradiction evidence.
+        adjusted_contradiction_peak = base_contradiction_peak
 
         # CSD ratio boost from bridge overload
         csd_ratio_boost = 0.3 * bridge_score + 0.2 * effective_affected_ratio
@@ -174,6 +173,7 @@ class OGCFSignalProvider:
             "ogcf_intent_reason": intent.reason,
             "adjusted_stale_ratio": round(adjusted_stale_ratio, 6),
             "adjusted_contradiction_peak": round(adjusted_contradiction_peak, 6),
+            "ogcf_structural_pressure": round(bridge_score * effective_affected_ratio, 6),
             "csd_ratio_boost": round(csd_ratio_boost, 6),
         }
         diagnostics = {**signals, **features}

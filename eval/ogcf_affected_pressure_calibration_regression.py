@@ -102,6 +102,12 @@ def main() -> int:
         )
         > 0.5
         and true_loop["diagnostics"].get("ogcf_memory_bad_rate_delta", 0.0) > 0.0,
+        "bridge_overload_does_not_create_contradiction_peak": true_loop["diagnostics"].get(
+            "adjusted_contradiction_peak"
+        )
+        == true_loop["diagnostics"].get("contradiction_peak")
+        == 0.0
+        and true_loop["diagnostics"].get("ogcf_structural_pressure", 0.0) > 0.0,
     }
     result = {"ok": all(checks.values()), "checks": checks, "weak": weak, "strong": strong, "true_loop": true_loop}
     OUT_JSON.write_text(json.dumps(result, indent=2), encoding="utf-8")

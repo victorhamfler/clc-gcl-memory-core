@@ -132,6 +132,9 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
         "gemma_shadow_regression_ok": bool(
             (step_json(steps, "adaptive_context_gemma_shadow_regression") or {}).get("ok")
         ),
+        "ogcf_corrected_geometry_ok": bool(
+            (step_json(steps, "ogcf_corrected_geometry_regression") or {}).get("ok")
+        ),
         "adaptive_behavior_shadow_runtime_ok": bool(
             (step_json(steps, "adaptive_behavior_shadow_runtime_regression") or {}).get("ok")
         ),
@@ -273,6 +276,24 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
         "controller_packet_calibration_pipeline_ok": bool(
             (step_json(steps, "controller_packet_calibration_pipeline_regression") or {}).get("ok")
         ),
+        "controller_packet_real_log_readiness_ok": bool(
+            (step_json(steps, "controller_packet_calibration_pipeline_regression") or {})
+            .get("checks", {})
+            .get("real_log_readiness_present")
+        )
+        and bool(
+            (step_json(steps, "controller_packet_calibration_pipeline_regression") or {})
+            .get("checks", {})
+            .get("real_log_readiness_blocks_small_fixture")
+        )
+        and bool(
+            (step_json(steps, "controller_packet_calibration_pipeline_regression") or {})
+            .get("checks", {})
+            .get("real_log_readiness_report_only")
+        ),
+        "controller_packet_real_log_readiness_regression_ok": bool(
+            (step_json(steps, "controller_packet_real_log_readiness_regression") or {}).get("ok")
+        ),
         "controller_packet_multirun_calibration_ok": bool(
             (step_json(steps, "controller_packet_multirun_calibration_regression") or {}).get("ok")
         ),
@@ -353,6 +374,7 @@ def write_markdown(report: dict[str, Any], out_md: Path) -> None:
         "shadow_coverage_guard_ok",
         "portable_gate_dependency_ok",
         "gemma_shadow_regression_ok",
+        "ogcf_corrected_geometry_ok",
         "adaptive_behavior_shadow_runtime_ok",
         "adaptive_residual_shadow_runtime_ok",
         "adaptive_residual_shadow_runtime_view_ok",
@@ -399,6 +421,8 @@ def write_markdown(report: dict[str, Any], out_md: Path) -> None:
         "controller_packet_calibration_guard_ok",
         "controller_packet_calibration_config_ok",
         "controller_packet_calibration_pipeline_ok",
+        "controller_packet_real_log_readiness_ok",
+        "controller_packet_real_log_readiness_regression_ok",
         "controller_packet_multirun_calibration_ok",
         "controller_packet_recurring_holdout_ok",
         "controller_packet_review_separation_ok",
@@ -515,6 +539,7 @@ def main() -> int:
                 str(ROOT / "eval" / "portable_gate_dependency_regression.py"),
                 str(ROOT / "eval" / "adaptive_context_gemma_shadow_eval.py"),
                 str(ROOT / "eval" / "adaptive_context_gemma_shadow_regression.py"),
+                str(ROOT / "eval" / "ogcf_corrected_geometry_regression.py"),
                 str(ROOT / "eval" / "adaptive_behavior_shadow_runtime_regression.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_runtime_regression.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_runtime_view_regression.py"),
@@ -588,6 +613,7 @@ def main() -> int:
                 str(ROOT / "eval" / "controller_packet_calibration_runtime_view_regression.py"),
                 str(ROOT / "eval" / "controller_packet_calibration_pipeline.py"),
                 str(ROOT / "eval" / "controller_packet_calibration_pipeline_regression.py"),
+                str(ROOT / "eval" / "controller_packet_real_log_readiness_regression.py"),
                 str(ROOT / "eval" / "controller_packet_multirun_calibration.py"),
                 str(ROOT / "eval" / "controller_packet_multirun_calibration_regression.py"),
                 str(ROOT / "eval" / "controller_packet_recurring_holdout.py"),
@@ -656,6 +682,10 @@ def main() -> int:
         maybe_artifact_step(
             "adaptive_context_gemma_shadow_regression",
             [python, str(ROOT / "eval" / "adaptive_context_gemma_shadow_regression.py")],
+        ),
+        run_step(
+            "ogcf_corrected_geometry_regression",
+            [python, str(ROOT / "eval" / "ogcf_corrected_geometry_regression.py")],
         ),
         run_step(
             "adaptive_behavior_shadow_runtime_regression",
@@ -850,6 +880,10 @@ def main() -> int:
         run_step(
             "controller_packet_calibration_pipeline_regression",
             [python, str(ROOT / "eval" / "controller_packet_calibration_pipeline_regression.py")],
+        ),
+        run_step(
+            "controller_packet_real_log_readiness_regression",
+            [python, str(ROOT / "eval" / "controller_packet_real_log_readiness_regression.py")],
         ),
         run_step(
             "controller_packet_multirun_calibration_regression",
