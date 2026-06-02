@@ -126,6 +126,9 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
         "shadow_coverage_guard_ok": bool(
             (step_json(steps, "canonical_ogcf_shadow_coverage_regression") or {}).get("ok")
         ),
+        "portable_gate_dependency_ok": bool(
+            (step_json(steps, "portable_gate_dependency_regression") or {}).get("ok")
+        ),
         "gemma_shadow_regression_ok": bool(
             (step_json(steps, "adaptive_context_gemma_shadow_regression") or {}).get("ok")
         ),
@@ -348,6 +351,7 @@ def write_markdown(report: dict[str, Any], out_md: Path) -> None:
     lines.extend(["```", "", "## Shadow Guard Regressions", "", "| regression | pass |", "| --- | --- |"])
     for key in (
         "shadow_coverage_guard_ok",
+        "portable_gate_dependency_ok",
         "gemma_shadow_regression_ok",
         "adaptive_behavior_shadow_runtime_ok",
         "adaptive_residual_shadow_runtime_ok",
@@ -508,6 +512,7 @@ def main() -> int:
                 str(ROOT / "eval" / "evidence_state_promotion_gate.py"),
                 str(ROOT / "eval" / "canonical_ogcf_production_shadow_eval.py"),
                 str(ROOT / "eval" / "canonical_ogcf_shadow_coverage_regression.py"),
+                str(ROOT / "eval" / "portable_gate_dependency_regression.py"),
                 str(ROOT / "eval" / "adaptive_context_gemma_shadow_eval.py"),
                 str(ROOT / "eval" / "adaptive_context_gemma_shadow_regression.py"),
                 str(ROOT / "eval" / "adaptive_behavior_shadow_runtime_regression.py"),
@@ -643,6 +648,10 @@ def main() -> int:
         run_step(
             "canonical_ogcf_shadow_coverage_regression",
             [python, str(ROOT / "eval" / "canonical_ogcf_shadow_coverage_regression.py")],
+        ),
+        run_step(
+            "portable_gate_dependency_regression",
+            [python, str(ROOT / "eval" / "portable_gate_dependency_regression.py")],
         ),
         maybe_artifact_step(
             "adaptive_context_gemma_shadow_regression",

@@ -659,6 +659,20 @@ It builds a real `MemoryApi`, injects a `resolver_shadow` override, calls `/conf
 
 The next step should be Hermes validation with `include_resolver_shadow: true` during normal work. The memory session should compare shadow annotations with real answer-level feedback before making any user-facing resolver changes.
 
+Hermes runtime-contract rerun note:
+
+- Hermes validated commit `72de753` and confirmed all requested runtime-contract checks passed after rerun;
+- the remaining gate blocker was isolated to `shadow_coverage_guard_ok`;
+- `eval/canonical_ogcf_shadow_coverage_regression.py` is now self-contained and no longer imports the production shadow evaluator just to test fixture coverage math;
+- `eval/portable_gate_dependency_regression.py` now protects that boundary by checking the portable coverage regression only imports expected standard-library modules;
+- this makes the portable architecture gate less sensitive to WSL/local production-shadow dependencies while preserving the same coverage checks;
+- the same portable architecture-gate command Hermes used now passes locally from both Windows and WSL:
+
+```powershell
+py -3 eval/selector_architecture_gate.py --allow-missing-runtime-artifacts --random-cases 16
+wsl.exe bash -lc "cd /mnt/c/Users/victo/Desktop/projcod2/clc_gcl_memory_core && python3 eval/selector_architecture_gate.py --allow-missing-runtime-artifacts --random-cases 16"
+```
+
 ## Adaptive Memory Controller Context
 
 The first implementation of the shared context layer now exists:
