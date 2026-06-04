@@ -405,7 +405,141 @@ def bridge_cluster_candidates(
         "loop_count": report.get("loop_count"),
         "max_interaction_z": report.get("max_interaction_z"),
         "bridge_overload_score": report.get("bridge_overload_score"),
+        "projector_distance_summary": report.get("projector_distance_summary"),
+        "projector_graph_edges": report.get("projector_graph_edges"),
+        "memory_cluster_map": report.get("memory_cluster_map"),
         "embedding_norm_stats": report.get("embedding_norm_stats"),
+    }
+
+
+def candidate_memory_ids(candidate: dict[str, Any]) -> set[str]:
+    ids = {str(candidate.get("keeper_memory_id") or "").strip()}
+    ids.update(str(item or "").strip() for item in (candidate.get("candidate_memory_ids") or []))
+    return {item for item in ids if item}
+
+
+def annotate_projector_graph_candidates(
+    candidates: list[dict[str, Any]],
+    geometry_summary: dict[str, Any] | None,
+) -> None:
+    """Attach report-only ERG projector graph context to maintenance candidates."""
+    if not isinstance(geometry_summary, dict) or geometry_summary.get("skipped"):
+        return
+    memory_cluster_map = {
+        str(memory_id): int(cluster_id)
+        for memory_id, cluster_id in (geometry_summary.get("memory_cluster_map") or {}).items()
+    }
+    edges = [edge for edge in (geometry_summary.get("projector_graph_edges") or []) if isinstance(edge, dict)]
+    summary = geometry_summary.get("projector_distance_summary") if isinstance(geometry_summary.get("projector_distance_summary"), dict) else {}
+    max_distance = float(summary.get("max_distance") or 0.0)
+    mean_distance = float(summary.get("mean_distance") or 0.0)
+    std_distance = float(summary.get("std_distance") or 0.0)
+    graph_anomaly = 0.0
+    if max_distance > 1e-12:
+        graph_anomaly = max(0.0, min(1.0, (max(0.0, max_distance - mean_distance) + std_distance) / max_distance))
+    for candidate in candidates:
+        clusters: set[int] = set()
+        if candidate.get("cluster_id") is not None:
+            try:
+                clusters.add(int(candidate.get("cluster_id")))
+            except (TypeError, ValueError):
+                pass
+        for memory_id in candidate_memory_ids(candidate):
+            if memory_id in memory_cluster_map:
+                clusters.add(memory_cluster_map[memory_id])
+        incident_edges = [
+            edge
+            for edge in edges
+            if int(edge.get("cluster_a", -1)) in clusters or int(edge.get("cluster_b", -1)) in clusters
+        ]
+        incident_count = len(incident_edges)
+        min_distance = round(
+            min((float(edge.get("projector_distance") or 0.0) for edge in incident_edges), default=0.0),
+            6,
+        )
+        graph_boost = 0.0
+        if clusters:
+            graph_boost += 0.16 * graph_anomaly
+        if incident_count:
+            graph_boost += 0.08
+        if candidate.get("action") in {"bridge_cluster_review", "semantic_conflict_or_update_group", "stale_version_candidate"}:
+            graph_boost += 0.04
+        base_confidence = float(candidate.get("confidence") or 0.0)
+        priority_score = max(0.0, min(1.0, base_confidence + graph_boost))
+        candidate["projector_graph"] = {
+            "schema": "ogcf_projector_graph_candidate_annotation/v1",
+            "cluster_ids": sorted(clusters),
+            "incident_edge_count": incident_count,
+            "min_projector_distance": min_distance,
+            "projector_graph_anomaly": round(graph_anomaly, 6),
+            "edge_samples": incident_edges[:3],
+            "report_only": True,
+        }
+        candidate["maintenance_priority"] = {
+            "schema": "ogcf_maintenance_priority/v1",
+            "base_confidence": round(base_confidence, 6),
+            "projector_graph_boost": round(graph_boost, 6),
+            "priority_score": round(priority_score, 6),
+            "reason": "report_only_projector_graph_annotation",
+            "report_only": True,
+            "mutates_db": False,
+        }
+
+
+def summarize_maintenance_priority(candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    prioritized = [
+        candidate
+        for candidate in candidates
+        if isinstance(candidate.get("maintenance_priority"), dict)
+        and candidate["maintenance_priority"].get("priority_score") is not None
+    ]
+    if not prioritized:
+        return {
+            "schema": "ogcf_maintenance_priority_summary/v1",
+            "candidate_count": len(candidates),
+            "prioritized_candidate_count": 0,
+            "high_priority_count": 0,
+            "medium_priority_count": 0,
+            "max_priority_score": 0.0,
+            "mean_priority_score": 0.0,
+            "readiness": "diagnostic_only",
+            "next_action": "collect_projector_graph_annotations",
+            "report_only": True,
+            "mutates_db": False,
+        }
+    scores = [float(candidate["maintenance_priority"].get("priority_score") or 0.0) for candidate in prioritized]
+    high = [candidate for candidate in prioritized if float(candidate["maintenance_priority"].get("priority_score") or 0.0) >= 0.85]
+    medium = [
+        candidate
+        for candidate in prioritized
+        if 0.65 <= float(candidate["maintenance_priority"].get("priority_score") or 0.0) < 0.85
+    ]
+    if len(high) >= 2:
+        readiness = "ready_for_review"
+        next_action = "review_top_priority_candidates"
+    elif high or len(medium) >= 2:
+        readiness = "ready_for_outcome_collection"
+        next_action = "collect_review_outcomes_before_promotion"
+    else:
+        readiness = "diagnostic_only"
+        next_action = "collect_more_maintenance_candidates"
+    return {
+        "schema": "ogcf_maintenance_priority_summary/v1",
+        "candidate_count": len(candidates),
+        "prioritized_candidate_count": len(prioritized),
+        "high_priority_count": len(high),
+        "medium_priority_count": len(medium),
+        "max_priority_score": round(max(scores), 6),
+        "mean_priority_score": round(sum(scores) / max(1, len(scores)), 6),
+        "top_candidate_ids": [str(candidate.get("id") or "") for candidate in sorted(
+            prioritized,
+            key=lambda item: float((item.get("maintenance_priority") or {}).get("priority_score") or 0.0),
+            reverse=True,
+        )[:5]],
+        "readiness": readiness,
+        "next_action": next_action,
+        "report_only": True,
+        "mutates_db": False,
     }
 
 
@@ -445,6 +579,8 @@ def build_report(
         )
 
     candidates = exact + semantic + stale + bridge
+    annotate_projector_graph_candidates(candidates, geometry_summary)
+    priority_summary = summarize_maintenance_priority(candidates)
     counts: dict[str, int] = defaultdict(int)
     for candidate in candidates:
         counts[str(candidate.get("action"))] += 1
@@ -468,6 +604,7 @@ def build_report(
         },
         "candidate_count": len(candidates),
         "candidate_counts": dict(sorted(counts.items())),
+        "maintenance_priority_summary": priority_summary,
         "geometry_summary": geometry_summary,
         "candidates": candidates,
     }
@@ -489,6 +626,12 @@ def write_report(report: dict[str, Any], out_json: Path, out_md: Path) -> None:
         "",
         "```json",
         json.dumps(report["candidate_counts"], indent=2),
+        "```",
+        "",
+        "## Maintenance Priority Summary",
+        "",
+        "```json",
+        json.dumps(report.get("maintenance_priority_summary"), indent=2),
         "```",
         "",
         "## Geometry Summary",

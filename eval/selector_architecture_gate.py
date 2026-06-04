@@ -135,6 +135,18 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
         "ogcf_corrected_geometry_ok": bool(
             (step_json(steps, "ogcf_corrected_geometry_regression") or {}).get("ok")
         ),
+        "ogcf_erg_curvature_ok": bool(
+            (step_json(steps, "ogcf_erg_curvature_regression") or {}).get("ok")
+        ),
+        "ogcf_erg_signal_provider_ok": bool(
+            (step_json(steps, "ogcf_erg_signal_provider_regression") or {}).get("ok")
+        ),
+        "ogcf_projector_graph_maintenance_ok": bool(
+            (step_json(steps, "ogcf_projector_graph_maintenance_regression") or {}).get("ok")
+        ),
+        "ogcf_maintenance_priority_outcome_ok": bool(
+            (step_json(steps, "ogcf_maintenance_priority_outcome_regression") or {}).get("ok")
+        ),
         "adaptive_behavior_shadow_runtime_ok": bool(
             (step_json(steps, "adaptive_behavior_shadow_runtime_regression") or {}).get("ok")
         ),
@@ -227,6 +239,9 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
         ),
         "evidence_context_regression_ok": bool(
             (step_json(steps, "evidence_context_regression") or {}).get("ok")
+        ),
+        "erg_csd_gcl_clc_feature_export_ok": bool(
+            (step_json(steps, "erg_csd_gcl_clc_feature_export_regression") or {}).get("ok")
         ),
         "evidence_context_selector_runtime_ok": bool(
             (step_json(steps, "evidence_context_selector_runtime_regression") or {}).get("ok")
@@ -375,6 +390,10 @@ def write_markdown(report: dict[str, Any], out_md: Path) -> None:
         "portable_gate_dependency_ok",
         "gemma_shadow_regression_ok",
         "ogcf_corrected_geometry_ok",
+        "ogcf_erg_curvature_ok",
+        "ogcf_erg_signal_provider_ok",
+        "ogcf_projector_graph_maintenance_ok",
+        "ogcf_maintenance_priority_outcome_ok",
         "adaptive_behavior_shadow_runtime_ok",
         "adaptive_residual_shadow_runtime_ok",
         "adaptive_residual_shadow_runtime_view_ok",
@@ -406,6 +425,7 @@ def write_markdown(report: dict[str, Any], out_md: Path) -> None:
         "adaptive_behavior_missing_support_config_ok",
         "adaptive_behavior_wrong_scope_config_ok",
         "evidence_context_regression_ok",
+        "erg_csd_gcl_clc_feature_export_ok",
         "evidence_context_selector_runtime_ok",
         "resolver_policy_config_ok",
         "resolver_policy_runtime_view_ok",
@@ -540,6 +560,10 @@ def main() -> int:
                 str(ROOT / "eval" / "adaptive_context_gemma_shadow_eval.py"),
                 str(ROOT / "eval" / "adaptive_context_gemma_shadow_regression.py"),
                 str(ROOT / "eval" / "ogcf_corrected_geometry_regression.py"),
+                str(ROOT / "eval" / "ogcf_erg_curvature_regression.py"),
+                str(ROOT / "eval" / "ogcf_erg_signal_provider_regression.py"),
+                str(ROOT / "eval" / "ogcf_projector_graph_maintenance_regression.py"),
+                str(ROOT / "eval" / "ogcf_maintenance_priority_outcome_regression.py"),
                 str(ROOT / "eval" / "adaptive_behavior_shadow_runtime_regression.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_runtime_regression.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_runtime_view_regression.py"),
@@ -591,6 +615,7 @@ def main() -> int:
                 str(ROOT / "eval" / "adaptive_behavior_feature_challenge_log.py"),
                 str(ROOT / "eval" / "adaptive_behavior_feature_challenge_regression.py"),
                 str(ROOT / "eval" / "evidence_context_regression.py"),
+                str(ROOT / "eval" / "erg_csd_gcl_clc_feature_export_regression.py"),
                 str(ROOT / "eval" / "evidence_context_selector_runtime_regression.py"),
                 str(ROOT / "eval" / "resolver_policy_config_regression.py"),
                 str(ROOT / "eval" / "resolver_policy_runtime_view_regression.py"),
@@ -686,6 +711,22 @@ def main() -> int:
         run_step(
             "ogcf_corrected_geometry_regression",
             [python, str(ROOT / "eval" / "ogcf_corrected_geometry_regression.py")],
+        ),
+        run_step(
+            "ogcf_erg_curvature_regression",
+            [python, str(ROOT / "eval" / "ogcf_erg_curvature_regression.py")],
+        ),
+        run_step(
+            "ogcf_erg_signal_provider_regression",
+            [python, str(ROOT / "eval" / "ogcf_erg_signal_provider_regression.py")],
+        ),
+        run_step(
+            "ogcf_projector_graph_maintenance_regression",
+            [python, str(ROOT / "eval" / "ogcf_projector_graph_maintenance_regression.py")],
+        ),
+        run_step(
+            "ogcf_maintenance_priority_outcome_regression",
+            [python, str(ROOT / "eval" / "ogcf_maintenance_priority_outcome_regression.py")],
         ),
         run_step(
             "adaptive_behavior_shadow_runtime_regression",
@@ -816,6 +857,10 @@ def main() -> int:
         run_step(
             "evidence_context_regression",
             [python, str(ROOT / "eval" / "evidence_context_regression.py")],
+        ),
+        run_step(
+            "erg_csd_gcl_clc_feature_export_regression",
+            [python, str(ROOT / "eval" / "erg_csd_gcl_clc_feature_export_regression.py")],
         ),
         run_step(
             "evidence_context_selector_runtime_regression",

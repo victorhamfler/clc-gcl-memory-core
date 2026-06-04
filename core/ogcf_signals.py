@@ -10,6 +10,27 @@ from typing import Any
 from core.ogcf_intent import classify_ogcf_intent, normalize_ogcf_intent_config
 
 
+def _float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return float(default)
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _max_region_value(regions: list[Any], *keys: str) -> float:
+    values: list[float] = []
+    for region in regions:
+        if not isinstance(region, dict):
+            continue
+        for key in keys:
+            if key in region:
+                values.append(_float(region.get(key), 0.0))
+                break
+    return max(values, default=0.0)
+
+
 class OGCFSignalProvider:
     """Compute OGCF-derived signals from retrieval context.
 
@@ -48,14 +69,44 @@ class OGCFSignalProvider:
                 "ogcf_cluster_count": 0,
                 "ogcf_affected_memory_ratio": 0.0,
                 "ogcf_weighted_affected_memory_ratio": 0.0,
+                "ogcf_omega_norm": 0.0,
+                "ogcf_core_halo_score": 0.0,
+                "ogcf_core_halo_slope": 0.0,
+                "ogcf_projector_graph_anomaly": 0.0,
             }
 
-        max_z = float(self.meta.get("max_interaction_z", 0.0))
-        bridge_score = float(self.meta.get("bridge_overload_score", 0.0))
+        max_z = _float(self.meta.get("max_interaction_z"), 0.0)
+        bridge_score = _float(self.meta.get("bridge_overload_score"), 0.0)
         loop_count = int(self.meta.get("loop_count", 0))
         risk_regions = list(self.meta.get("risk_regions", []))
         cluster_summary = list(self.meta.get("cluster_summary", []))
         bridge_clusters = list(self.meta.get("bridge_clusters", []))
+        projector_distance_summary = (
+            self.meta.get("projector_distance_summary")
+            if isinstance(self.meta.get("projector_distance_summary"), dict)
+            else {}
+        )
+        omega_norm = max(
+            _float(self.meta.get("ogcf_omega_norm"), 0.0),
+            _float(self.meta.get("omega_norm"), 0.0),
+            _max_region_value(risk_regions, "ogcf_omega_norm", "omega_norm"),
+        )
+        core_halo_score = max(
+            _float(self.meta.get("ogcf_core_halo_score"), 0.0),
+            _float(self.meta.get("core_halo_score"), 0.0),
+            _float(self.meta.get("C4"), 0.0),
+            _max_region_value(risk_regions, "ogcf_core_halo_score", "core_halo_score", "C4"),
+        )
+        core_halo_slope = (
+            _float(self.meta.get("ogcf_core_halo_slope"), 0.0)
+            or _float(self.meta.get("core_halo_slope"), 0.0)
+            or _max_region_value(risk_regions, "ogcf_core_halo_slope", "core_halo_slope")
+        )
+        projector_graph_anomaly = max(
+            _float(self.meta.get("ogcf_projector_graph_anomaly"), 0.0),
+            _float(self.meta.get("projector_graph_anomaly"), 0.0),
+            self._projector_graph_anomaly(projector_distance_summary),
+        )
 
         # Count how many retrieved memories are in high-risk clusters
         risk_cluster_ids: set[int] = set()
@@ -110,7 +161,26 @@ class OGCFSignalProvider:
             "ogcf_cluster_count": len(cluster_summary),
             "ogcf_affected_memory_ratio": round(affected_ratio, 6),
             "ogcf_weighted_affected_memory_ratio": round(weighted_affected_ratio, 6),
+            "ogcf_omega_norm": round(omega_norm, 6),
+            "ogcf_core_halo_score": round(core_halo_score, 6),
+            "ogcf_core_halo_slope": round(core_halo_slope, 6),
+            "ogcf_projector_graph_anomaly": round(projector_graph_anomaly, 6),
         }
+
+    def _projector_graph_anomaly(self, summary: dict[str, Any]) -> float:
+        """Report-only projector graph anomaly from review distance summary.
+
+        The signal is deliberately conservative: it normalizes the distance
+        spread against the observed maximum and does not influence selector
+        policy unless later code explicitly consumes it.
+        """
+        max_distance = _float(summary.get("max_distance"), 0.0)
+        mean_distance = _float(summary.get("mean_distance"), 0.0)
+        std_distance = _float(summary.get("std_distance"), 0.0)
+        if max_distance <= 1e-12:
+            return 0.0
+        spread = max(0.0, max_distance - mean_distance)
+        return max(0.0, min(1.0, (spread + std_distance) / max_distance))
 
     def selector_features(
         self,
@@ -174,6 +244,10 @@ class OGCFSignalProvider:
             "adjusted_stale_ratio": round(adjusted_stale_ratio, 6),
             "adjusted_contradiction_peak": round(adjusted_contradiction_peak, 6),
             "ogcf_structural_pressure": round(bridge_score * effective_affected_ratio, 6),
+            "ogcf_omega_norm": signals.get("ogcf_omega_norm", 0.0),
+            "ogcf_core_halo_score": signals.get("ogcf_core_halo_score", 0.0),
+            "ogcf_core_halo_slope": signals.get("ogcf_core_halo_slope", 0.0),
+            "ogcf_projector_graph_anomaly": signals.get("ogcf_projector_graph_anomaly", 0.0),
             "csd_ratio_boost": round(csd_ratio_boost, 6),
         }
         diagnostics = {**signals, **features}

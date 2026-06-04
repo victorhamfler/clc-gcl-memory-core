@@ -84,6 +84,8 @@ class OGCFGeometryResult:
     baseline_mean: float
     baseline_std: float
     embedding_norm_stats: dict[str, float]
+    projector_distance_summary: dict[str, float]
+    projector_graph_edges: list[dict[str, Any]]
 
 
 class OGCFGeometryEngine:
@@ -246,6 +248,11 @@ class OGCFGeometryEngine:
                 )
             )
 
+        projector_distance_summary, projector_graph_edges = self._projector_distance_graph(
+            bases,
+            cluster_sizes,
+        )
+
         return OGCFGeometryResult(
             n_clusters=self.n_clusters,
             rank_k=self.rank_k,
@@ -258,6 +265,8 @@ class OGCFGeometryEngine:
             baseline_mean=baseline_mean,
             baseline_std=baseline_std,
             embedding_norm_stats=norm_stats,
+            projector_distance_summary=projector_distance_summary,
+            projector_graph_edges=projector_graph_edges,
         )
 
     def _compute_local_geometry(
@@ -281,6 +290,192 @@ class OGCFGeometryEngine:
         else:
             local_defect = 1.0
         return U_k, local_defect
+
+    def _orthonormalize(self, basis: np.ndarray) -> np.ndarray:
+        q, _ = np.linalg.qr(np.asarray(basis, dtype=float))
+        return q[:, : basis.shape[1]]
+
+    def _projector(self, basis: np.ndarray) -> np.ndarray:
+        q = self._orthonormalize(basis)
+        return q @ q.T
+
+    def _top_eigen_projector(self, operator: np.ndarray, rank_k: int | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        rank = int(rank_k or self.rank_k)
+        values, vectors = np.linalg.eigh(np.asarray(operator, dtype=float))
+        order = np.argsort(values)[::-1]
+        selected = order[: min(rank, vectors.shape[1])]
+        basis = self._orthonormalize(vectors[:, selected])
+        projector = self._projector(basis)
+        return projector, basis, values[order]
+
+    def _constrained_projector(
+        self,
+        operator: np.ndarray,
+        constraint_a: np.ndarray,
+        constraint_b: np.ndarray,
+        *,
+        a: float = 0.0,
+        b: float = 0.0,
+        alpha: float = 0.1,
+        rank_k: int | None = None,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        dim = operator.shape[0]
+        eta = np.eye(dim) + alpha * (a * constraint_a + b * constraint_b)
+        constrained = eta @ operator @ eta
+        constrained = 0.5 * (constrained + constrained.T)
+        return self._top_eigen_projector(constrained, rank_k)
+
+    def projector_curvature(
+        self,
+        operator: np.ndarray,
+        constraint_a: np.ndarray,
+        constraint_b: np.ndarray,
+        *,
+        delta: float = 0.05,
+        alpha: float = 0.1,
+        rank_k: int | None = None,
+    ) -> dict[str, Any]:
+        """Compute ERG local projector curvature for two constraint directions.
+
+        This implements Omega_ab = P [partial_a P, partial_b P] P using
+        finite differences over a constrained spectral projector surface.
+        """
+        p0, b0, eigenvalues = self._constrained_projector(
+            operator, constraint_a, constraint_b, alpha=alpha, rank_k=rank_k
+        )
+        p_ap, _, _ = self._constrained_projector(
+            operator, constraint_a, constraint_b, a=delta, alpha=alpha, rank_k=rank_k
+        )
+        p_am, _, _ = self._constrained_projector(
+            operator, constraint_a, constraint_b, a=-delta, alpha=alpha, rank_k=rank_k
+        )
+        p_bp, _, _ = self._constrained_projector(
+            operator, constraint_a, constraint_b, b=delta, alpha=alpha, rank_k=rank_k
+        )
+        p_bm, _, _ = self._constrained_projector(
+            operator, constraint_a, constraint_b, b=-delta, alpha=alpha, rank_k=rank_k
+        )
+        partial_a = (p_ap - p_am) / (2.0 * delta)
+        partial_b = (p_bp - p_bm) / (2.0 * delta)
+        commutator = partial_a @ partial_b - partial_b @ partial_a
+        omega = p0 @ commutator @ p0
+        activity = self.curvature_activity(omega)
+        sectors = self.core_halo_enrichment(p0, activity)
+        gap = 0.0
+        rank = int(rank_k or self.rank_k)
+        if len(eigenvalues) > rank:
+            gap = float(eigenvalues[rank - 1] - eigenvalues[rank])
+        return {
+            "projector": p0,
+            "basis": b0,
+            "omega": omega,
+            "omega_norm": float(np.linalg.norm(omega, "fro")),
+            "curvature_activity": activity,
+            "sectors": sectors,
+            "spectral_gap": gap,
+            "idempotence_error": float(np.linalg.norm(p0 @ p0 - p0, "fro")),
+            "symmetry_error": float(np.linalg.norm(p0.T - p0, "fro")),
+        }
+
+    def curvature_activity(self, omega: np.ndarray) -> np.ndarray:
+        return np.sqrt(np.sum(np.asarray(omega, dtype=float) ** 2, axis=1))
+
+    def core_halo_enrichment(
+        self,
+        projector: np.ndarray,
+        activity: np.ndarray,
+        sector_sizes: tuple[int, ...] = (4, 6, 8, 12),
+    ) -> dict[str, Any]:
+        diag = np.clip(np.diag(projector).astype(float), 0.0, None)
+        activity = np.clip(np.asarray(activity, dtype=float), 0.0, None)
+        leverage = 0.7 * self._normalize_vector(diag) + 0.3 * self._normalize_vector(activity)
+        total_activity = float(np.sum(activity))
+        dim = int(len(activity))
+        order = np.argsort(leverage)[::-1]
+        enriched: dict[str, Any] = {}
+        c_values: list[float] = []
+        for raw_size in sector_sizes:
+            size = min(int(raw_size), dim)
+            if size <= 0:
+                continue
+            sector = order[:size]
+            mass = float(np.sum(activity[sector]) / max(total_activity, 1e-12))
+            enrichment = mass / max(size / max(dim, 1), 1e-12)
+            enriched[f"S{size}"] = [int(x) for x in sector]
+            enriched[f"C{size}"] = round(float(enrichment), 6)
+            c_values.append(float(enrichment))
+        slope = 0.0
+        if len(c_values) >= 2:
+            slope = float(np.polyfit(np.arange(len(c_values), dtype=float), np.asarray(c_values), 1)[0])
+        enriched["core_halo_slope"] = round(slope, 6)
+        enriched["core_halo_present"] = bool(len(c_values) >= 2 and c_values[0] > c_values[-1] and c_values[0] > 1.0)
+        enriched["top_activity_indices"] = [int(x) for x in np.argsort(activity)[::-1][: min(8, dim)]]
+        return enriched
+
+    def projector_distance(self, projector_a: np.ndarray, projector_b: np.ndarray) -> float:
+        return float(np.linalg.norm(np.asarray(projector_a, dtype=float) - np.asarray(projector_b, dtype=float), "fro"))
+
+    def _projector_distance_graph(
+        self,
+        bases: dict[int, np.ndarray],
+        cluster_sizes: list[int],
+        *,
+        nearest_per_cluster: int = 3,
+    ) -> tuple[dict[str, float], list[dict[str, Any]]]:
+        projectors = {
+            cluster_id: self._projector(basis)
+            for cluster_id, basis in bases.items()
+            if cluster_id < len(cluster_sizes) and cluster_sizes[cluster_id] > 0
+        }
+        distances: list[float] = []
+        pair_rows: list[tuple[int, int, float]] = []
+        cluster_ids = sorted(projectors)
+        for idx, cluster_a in enumerate(cluster_ids):
+            for cluster_b in cluster_ids[idx + 1 :]:
+                distance = self.projector_distance(projectors[cluster_a], projectors[cluster_b])
+                distances.append(distance)
+                pair_rows.append((cluster_a, cluster_b, distance))
+        if not distances:
+            return {
+                "edge_count": 0.0,
+                "mean_distance": 0.0,
+                "min_distance": 0.0,
+                "max_distance": 0.0,
+                "std_distance": 0.0,
+            }, []
+        nearest_edges: dict[tuple[int, int], dict[str, Any]] = {}
+        for cluster_id in cluster_ids:
+            incident = [
+                (other, distance)
+                for a, b, distance in pair_rows
+                for other in ([b] if a == cluster_id else [a] if b == cluster_id else [])
+            ]
+            incident.sort(key=lambda item: item[1])
+            for other, distance in incident[:nearest_per_cluster]:
+                a, b = sorted((cluster_id, other))
+                nearest_edges[(a, b)] = {
+                    "cluster_a": a,
+                    "cluster_b": b,
+                    "projector_distance": round(float(distance), 6),
+                    "size_a": int(cluster_sizes[a]),
+                    "size_b": int(cluster_sizes[b]),
+                }
+        distance_array = np.asarray(distances, dtype=float)
+        summary = {
+            "edge_count": float(len(pair_rows)),
+            "mean_distance": round(float(np.mean(distance_array)), 6),
+            "min_distance": round(float(np.min(distance_array)), 6),
+            "max_distance": round(float(np.max(distance_array)), 6),
+            "std_distance": round(float(np.std(distance_array)), 6),
+        }
+        return summary, sorted(nearest_edges.values(), key=lambda item: item["projector_distance"])
+
+    def _normalize_vector(self, values: np.ndarray) -> np.ndarray:
+        values = np.asarray(values, dtype=float)
+        max_value = float(np.max(values)) if len(values) else 0.0
+        if max_value <= 1e-12:
+            return np.zeros_like(values)
+        return values / max_value
 
     def _raw_overlap(self, U_i: np.ndarray, U_j: np.ndarray) -> np.ndarray:
         return U_j.T @ U_i
@@ -407,6 +602,13 @@ class OGCFMemoryReviewer:
             "max_raw_interaction_z": round(max_interaction_z, 4),
             "max_polar_interaction_z": round(max((lr.polar_interaction_z for lr in geo.loops), default=0.0), 4),
             "bridge_overload_score": round(bridge_overload_score, 4),
+            "projector_distance_summary": geo.projector_distance_summary,
+            "projector_graph_edges": geo.projector_graph_edges,
+            "memory_cluster_map": {
+                str(memory_id): int(geo.labels[index])
+                for index, memory_id in enumerate(memory_ids)
+                if index < len(geo.labels)
+            },
             "risk_regions": sorted(risk_regions, key=lambda x: x["interaction_z"], reverse=True),
             "bridge_clusters": bridge_clusters,
             "cluster_summary": [

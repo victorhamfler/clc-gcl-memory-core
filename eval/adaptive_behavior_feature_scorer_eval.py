@@ -50,6 +50,10 @@ FEATURE_KEYS = (
     "ogcf_bridge_overload_score",
     "ogcf_effective_affected_memory_ratio",
     "ogcf_structural_pressure",
+    "ogcf_omega_norm",
+    "ogcf_core_halo_score",
+    "ogcf_core_halo_slope",
+    "ogcf_projector_graph_anomaly",
 )
 FAMILIES = (
     "supported_evidence",

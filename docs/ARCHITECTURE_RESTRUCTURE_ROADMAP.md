@@ -4207,3 +4207,157 @@ ogcf_bridge_overload_score * ogcf_effective_affected_memory_ratio
 ```
 
 This gives future learned controllers a direct structural-pressure feature and reduces the temptation to reuse `contradiction_peak` as an OGCF proxy.
+
+## ERG v3 Integration With CSD, G-CL, CLC, And Neural-Symbolic Control
+
+The updated ERG/OGCF v3 method changes the role of OGCF in the combined architecture. It should no longer be treated only as a bridge-overload warning. It becomes a structural geometry layer that can feed CSD, G-CL, CLC, and learned neural-symbolic controllers while keeping semantic truth and recency resolution in the semantic layers.
+
+The correct division of responsibility is:
+
+```text
+CSD -> semantic novelty, surprise, contradiction, and evidence pressure
+G-CL -> domain anchors, drift, curvature, stability, split/reanchor pressure
+CLC -> policy/action choice under budget, risk, and memory-health signals
+ERG/OGCF -> projector geometry, structural pressure, curvature activity, core-halo sectors, projector graph topology
+```
+
+ERG should improve CSD by separating factual contradiction from structural retrieval contamination:
+
+```text
+CSD contradiction high + ERG stable -> likely factual conflict
+CSD contradiction low + ERG high -> likely duplicate bridge, mixed domain, or retrieval contamination
+CSD novelty high + ERG high -> possible new domain or unstable boundary
+```
+
+ERG is most naturally aligned with G-CL. G-CL already describes anchors, drift, curvature, and stability; ERG gives these concepts measurable projector-geometry fields:
+
+```text
+G-CL domain anchor -> local/cluster projector
+G-CL drift -> projector distance from anchor or neighboring sector
+G-CL curvature -> Omega_ab
+G-CL instability -> curvature activity K_i and core-halo enrichment C_r
+G-CL split/reanchor -> action candidate when projector graph boundary or core-halo pressure is high
+```
+
+CLC should consume ERG only gradually and first in report-only form. Candidate ERG-derived CLC features are:
+
+```text
+ogcf_structural_pressure
+ogcf_omega_norm
+ogcf_core_halo_score
+ogcf_projector_graph_anomaly
+projector_distance_from_domain_anchor
+```
+
+These should not be promoted directly into runtime policy decisions until controller packets and outcome logs show that they improve decisions without over-quarantining useful memories.
+
+The neural-symbolic roadmap should treat ERG as a numeric feature source for learned controllers. The shared controller-packet/evidence-context row should eventually carry:
+
+```json
+{
+  "erg_features": {
+    "omega_norm": 0.42,
+    "core_halo_score": 1.8,
+    "core_halo_slope": -0.05,
+    "projector_graph_anomaly": 0.63,
+    "projector_distance_to_anchor": 0.91,
+    "structural_pressure": 0.56
+  }
+}
+```
+
+The immediate development rule is:
+
+```text
+Add ERG features to shared report-only evidence/context exports first.
+Then evaluate them in controller packets and memory-bank readiness.
+Only after real outcome evidence should they affect selector policy, resolver behavior, or memory mutation.
+```
+
+The next guard should prove that CSD-style semantic signals, G-CL-style geometry signals, CLC policy features, and ERG projector signals can coexist in one shared feature export without mutating runtime behavior.
+
+## ERG Projector Graph Maintenance Priority
+
+The ERG projector graph is now connected to the report-only maintenance candidate path. This is the first practical use of projector-distance graph structure after the shared ERG feature export:
+
+```text
+OGCF/ERG geometry review
+-> memory_cluster_map + projector_graph_edges + projector_distance_summary
+-> dry-run maintenance candidates
+-> report-only projector_graph annotation
+-> report-only maintenance_priority score
+```
+
+The current priority score is intentionally conservative. It combines the existing candidate confidence with a small projector-graph boost from:
+
+```text
+projector_graph_anomaly
+incident projector graph edges near the candidate cluster
+candidate action type such as stale-version, semantic conflict/update, or bridge-cluster review
+```
+
+This score does not mutate the database, alter retrieval ranking, change selector policy, or trigger automatic deprecation. Its purpose is to create an auditable ordering for future human/Hermes review:
+
+```text
+Which duplicate, stale, semantic-conflict, or bridge candidates should be inspected first?
+```
+
+The guard is:
+
+```powershell
+py -3 eval/ogcf_projector_graph_maintenance_regression.py
+```
+
+and the unified architecture gate requires:
+
+```text
+ogcf_projector_graph_maintenance_ok
+```
+
+## ERG Maintenance Priority Outcome Guard
+
+The next useful step for the ERG projector graph was to test whether the report-only maintenance priority score is not merely present, but directionally useful. A controlled outcome regression now builds the projector-graph maintenance fixture, assigns conservative synthetic review labels, and checks that useful maintenance actions rank above lower-value candidates.
+
+The controlled labels currently treat exact duplicate groups, semantic duplicate groups, semantic conflict/update groups, and stale-version candidates as useful review work. Other candidates remain in a needs-more-evidence class. This keeps the priority mechanism honest: it must produce at least a useful top-k ordering before it can be considered for future runtime influence.
+
+The guard checks:
+
+```text
+maintenance_priority_summary/v1 is present
+the report remains dry-run/report-only and mutates no database state
+precision@3 for useful maintenance candidates is at least 0.66
+mean priority for useful candidates is not below lower-value candidates
+top candidate ids match the report summary ordering
+```
+
+The guard is:
+
+```powershell
+py -3 eval/ogcf_maintenance_priority_outcome_regression.py
+```
+
+and the unified architecture gate requires:
+
+```text
+ogcf_maintenance_priority_outcome_ok
+```
+
+This still does not promote ERG priority into retrieval, selector policy, or automatic memory mutation. The next promotion boundary should require real or manually reviewed logs showing that high-priority candidates correspond to genuinely useful memory maintenance decisions.
+
+The next validation should compare this priority score against real maintenance outcomes. Promotion remains blocked until real logs show that high-priority candidates are more likely to be useful reviews and do not over-prioritize clean memories.
+
+The dry-run maintenance report now also emits a report-level priority summary:
+
+```text
+maintenance_priority_summary/v1
+```
+
+It reports prioritized candidate count, high/medium priority counts, max/mean priority, top candidate ids, readiness, and next action. This makes the maintenance run self-describing:
+
+```text
+diagnostic_only -> collect more candidates or graph annotations
+ready_for_outcome_collection -> gather review labels before promotion
+ready_for_review -> inspect top priority candidates manually or with Hermes
+```
+
+This readiness summary is still report-only and non-mutating. It is intended to decide what validation to run next, not to automatically apply memory changes.

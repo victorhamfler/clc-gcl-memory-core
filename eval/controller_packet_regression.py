@@ -107,6 +107,10 @@ def ask_event() -> dict[str, Any]:
                         "ogcf_bridge_overload_score": 0.81,
                         "ogcf_effective_affected_memory_ratio": 0.62,
                         "ogcf_structural_pressure": 0.5022,
+                        "ogcf_omega_norm": 0.42,
+                        "ogcf_core_halo_score": 1.8,
+                        "ogcf_core_halo_slope": -0.05,
+                        "ogcf_projector_graph_anomaly": 0.63,
                     },
                 },
                 "features": {
@@ -123,6 +127,10 @@ def ask_event() -> dict[str, Any]:
                     "ogcf_bridge_overload_score": 0.81,
                     "ogcf_effective_affected_memory_ratio": 0.62,
                     "ogcf_structural_pressure": 0.5022,
+                    "ogcf_omega_norm": 0.42,
+                    "ogcf_core_halo_score": 1.8,
+                    "ogcf_core_halo_slope": -0.05,
+                    "ogcf_projector_graph_anomaly": 0.63,
                 },
                 "retrieval_context": [
                     {
@@ -242,7 +250,11 @@ def main() -> int:
         and context_features.get("retrieval_count") == 2
         and context_features.get("ogcf_bridge_overload_score") == 0.81
         and context_features.get("ogcf_effective_affected_memory_ratio") == 0.62
-        and context_features.get("ogcf_structural_pressure") == 0.5022,
+        and context_features.get("ogcf_structural_pressure") == 0.5022
+        and context_features.get("ogcf_omega_norm") == 0.42
+        and context_features.get("ogcf_core_halo_score") == 1.8
+        and context_features.get("ogcf_core_halo_slope") == -0.05
+        and context_features.get("ogcf_projector_graph_anomaly") == 0.63,
         "selector_decision": packet["selector"]["decision"]["policy"] == "periodic_baseline",
         "residual_summary": packet["adaptive_residual_shadow"]["would_override_count"] == 1
         and packet["adaptive_residual_shadow"]["learned_risk_suppressed_count"] == 1,

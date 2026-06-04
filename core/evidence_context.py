@@ -216,6 +216,10 @@ class EvidenceContextFeatures:
     ogcf_bridge_overload_score: float
     ogcf_effective_affected_memory_ratio: float
     ogcf_structural_pressure: float
+    ogcf_omega_norm: float
+    ogcf_core_halo_score: float
+    ogcf_core_halo_slope: float
+    ogcf_projector_graph_anomaly: float
 
 
 def build_evidence_context_features(
@@ -251,6 +255,10 @@ def build_evidence_context_features(
             float_value(diagnostics.get("ogcf_bridge_overload_score"), 0.0)
             * float_value(diagnostics.get("ogcf_effective_affected_memory_ratio"), 0.0),
         ),
+        ogcf_omega_norm=float_value(diagnostics.get("ogcf_omega_norm"), 0.0),
+        ogcf_core_halo_score=float_value(diagnostics.get("ogcf_core_halo_score"), 0.0),
+        ogcf_core_halo_slope=float_value(diagnostics.get("ogcf_core_halo_slope"), 0.0),
+        ogcf_projector_graph_anomaly=float_value(diagnostics.get("ogcf_projector_graph_anomaly"), 0.0),
     )
 
 
