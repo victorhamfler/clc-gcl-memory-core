@@ -4361,3 +4361,296 @@ ready_for_review -> inspect top priority candidates manually or with Hermes
 ```
 
 This readiness summary is still report-only and non-mutating. It is intended to decide what validation to run next, not to automatically apply memory changes.
+
+## ERG Maintenance Review Label Loop
+
+The ERG maintenance path now has the first report-only review/outcome loop. This is the transition from synthetic priority checks toward real adaptive maintenance evidence:
+
+```text
+dry-run maintenance candidates
+-> priority-ranked review queue
+-> reviewer label template
+-> reviewed outcome labels
+-> label/prioritization evaluation
+-> future multi-run maintenance memory bank
+```
+
+The queue builder is:
+
+```powershell
+py -3 eval/ogcf_maintenance_review_queue.py --candidates-json ..\experiments\ogcf_maintenance_candidates_results.json
+```
+
+It emits:
+
+```text
+ogcf_maintenance_review_queue/v1
+ogcf_maintenance_review_labels/v1 template
+```
+
+Allowed review labels are:
+
+```text
+useful_review
+noisy_review
+needs_more_evidence
+clean_memory
+unsafe_to_act
+already_resolved
+```
+
+The label evaluator is:
+
+```powershell
+py -3 eval/ogcf_maintenance_review_label_eval.py --candidates-json <maintenance-candidates.json> --labels <review-labels.json>
+```
+
+It checks useful-vs-negative priority separation, precision@k, unknown labels, and high-priority negative candidates while preserving the report-only contract. The focused regression is:
+
+```powershell
+py -3 eval/ogcf_maintenance_review_label_loop_regression.py
+```
+
+and the unified architecture gate requires:
+
+```text
+ogcf_maintenance_review_label_loop_ok
+```
+
+This is not a promotion mechanism yet. It is the missing evidence collection layer. The next roadmap stage should aggregate reviewed maintenance labels across independent real/Hermes/local runs, then test whether ERG priority and projector features repeatedly predict useful maintenance actions without over-prioritizing clean or unsafe memories.
+
+## ERG Maintenance Review Memory Bank
+
+The maintenance review loop now has a report-only multi-run memory bank. This is the same architecture pattern used by controller packets and calibration proposals, but focused on memory maintenance outcomes:
+
+```text
+reviewed maintenance run 1
+reviewed maintenance run 2
+...
+-> grouped action/label families
+-> recurring useful/noisy maintenance evidence
+-> readiness summary
+-> future guarded maintenance candidate review
+```
+
+The bank command is:
+
+```powershell
+py -3 eval/ogcf_maintenance_review_memory_bank.py --run <candidates1.json>::<labels1.json> --run <candidates2.json>::<labels2.json>
+```
+
+It emits:
+
+```text
+ogcf_maintenance_review_memory_bank/v1
+```
+
+The bank groups reviewed candidates by maintenance action and label class. Recurring useful families can become `maintenance_candidate_evidence_ready` only when they repeat across enough independent runs and do not contain high-priority negative reviews. Noisy, clean, unsafe, or mixed review families stay blocked for analysis.
+
+The focused guard is:
+
+```powershell
+py -3 eval/ogcf_maintenance_review_memory_bank_regression.py
+```
+
+and the unified architecture gate requires:
+
+```text
+ogcf_maintenance_review_memory_bank_ok
+```
+
+This gives ERG/OGCF a clearer adaptive-memory role. The geometry layer proposes maintenance pressure, the review queue collects human/Hermes/local labels, and the memory bank decides whether the same maintenance family is recurring enough for future guarded candidate review. It still does not mutate memories, retrieval, selector policy, runtime config, or learned artifacts.
+
+## ERG Guarded Maintenance Candidates
+
+The memory bank now feeds a report-only guard that turns recurring reviewed maintenance evidence into explicit manual-review candidates:
+
+```text
+maintenance review memory bank
+-> evidence-ready useful action families
+-> guarded maintenance candidates
+-> manual review required
+-> no automatic memory mutation
+```
+
+The guard command is:
+
+```powershell
+py -3 eval/ogcf_maintenance_candidate_guard.py --memory-bank <review-memory-bank.json>
+```
+
+It emits:
+
+```text
+ogcf_maintenance_candidate_guard/v1
+ogcf_guarded_maintenance_candidate/v1
+```
+
+The guard can prepare candidates such as:
+
+```text
+exact_duplicate_group -> prepare_duplicate_deprecation_candidate_for_manual_review
+semantic_duplicate_group -> prepare_semantic_merge_candidate_for_manual_review
+semantic_conflict_or_update_group -> prepare_conflict_update_candidate_for_manual_review
+stale_version_candidate -> prepare_stale_deprecation_candidate_for_manual_review
+bridge_cluster_review -> prepare_bridge_split_or_canonicalization_review
+```
+
+but only when the action family is recurring, useful, sufficiently supported, above the mean-priority threshold, and free of high-priority negative reviews. Negative, noisy, mixed, or under-supported families remain blocked.
+
+The focused guard is:
+
+```powershell
+py -3 eval/ogcf_maintenance_candidate_guard_regression.py
+```
+
+and the unified architecture gate requires:
+
+```text
+ogcf_maintenance_candidate_guard_ok
+```
+
+This is a combined-function improvement because it gives the memory program and selector/ERG side a shared handoff artifact: the selector/ERG side can explain why a maintenance action is evidence-ready, while the memory side can later decide how to apply, reject, or request more review. Promotion and database mutation remain blocked until a separate manual/runtime-safe mutation path exists.
+
+## Memory-Side Maintenance Candidate Review Plan
+
+The combined architecture needed one more restructuring step: guarded ERG maintenance candidates were still selector/eval-side artifacts. The memory program needs a stable core contract that can consume those candidates without knowing the internals of ERG projector graphs, review-label banks, or selector gates.
+
+The new handoff contract is:
+
+```text
+ogcf_maintenance_candidate_guard/v1
+-> memory_maintenance_candidate_review_plan/v1
+-> memory-side manual review plan
+-> no automatic memory mutation
+```
+
+The core adapter is:
+
+```text
+core/maintenance_candidate_contract.py
+```
+
+It maps selector/ERG maintenance actions into memory-program review kinds:
+
+```text
+exact_duplicate_group -> duplicate_deprecation_review
+semantic_duplicate_group -> semantic_merge_review
+semantic_conflict_or_update_group -> conflict_update_review
+stale_version_candidate -> stale_deprecation_review
+bridge_cluster_review -> bridge_split_or_canonicalization_review
+```
+
+The CLI is:
+
+```powershell
+py -3 eval/memory_maintenance_candidate_review_plan.py --guard <ogcf-maintenance-candidate-guard.json>
+```
+
+and the focused guard is:
+
+```powershell
+py -3 eval/memory_maintenance_candidate_review_plan_regression.py
+```
+
+The unified architecture gate requires:
+
+```text
+memory_maintenance_candidate_review_plan_ok
+```
+
+This is the next important combined-function boundary. The selector/ERG side can keep learning and ranking maintenance pressure, while the memory side receives normalized review kinds it can later connect to safe endpoints such as duplicate review, stale review, semantic merge review, or bridge split/canonicalization review. The current plan is still report-only and explicitly keeps `promotion_ready: false`; the next memory-side restructuring should add manual apply/reject logging for these review-plan items before any automatic mutation path is considered.
+
+## Memory Maintenance Review Outcomes
+
+The memory-side review plan now has a report-only outcome logging contract. This adds the missing feedback loop after a human, Hermes run, or local reviewer inspects guarded maintenance candidates:
+
+```text
+memory_maintenance_candidate_review_plan/v1
+-> memory_maintenance_candidate_review_outcomes/v1
+-> memory_maintenance_candidate_review_outcome_summary/v1
+-> accepted/rejected/needs-more-evidence learning signal
+-> no automatic memory mutation
+```
+
+Allowed manual outcomes are:
+
+```text
+accept
+reject
+needs_more_evidence
+unsafe_to_apply
+already_resolved
+```
+
+The CLI is:
+
+```powershell
+py -3 eval/memory_maintenance_review_outcome_log.py --plan <review-plan.json> --outcomes <review-outcomes.json>
+```
+
+It can also write an empty outcome template:
+
+```powershell
+py -3 eval/memory_maintenance_review_outcome_log.py --plan <review-plan.json> --write-template
+```
+
+The focused guard is:
+
+```powershell
+py -3 eval/memory_maintenance_review_outcome_log_regression.py
+```
+
+and the unified architecture gate requires:
+
+```text
+memory_maintenance_review_outcome_log_ok
+```
+
+This closes the first full report-only adaptive maintenance cycle:
+
+```text
+ERG geometry -> maintenance candidates -> review labels -> memory bank -> guarded candidates -> memory-side review plan -> manual outcomes
+```
+
+The next restructuring step should be a memory-side manual apply/reject endpoint or command that records the final human decision as an auditable event while still defaulting to no mutation. Only after repeated accepted outcomes and a separate apply guard should duplicate deprecation, stale deprecation, semantic merge, or bridge canonicalization be allowed to touch the database.
+
+## Memory Maintenance Manual Apply Decisions
+
+The review-outcome path now feeds a dry-run manual apply/reject decision artifact:
+
+```text
+memory_maintenance_candidate_review_outcomes/v1
+-> memory_maintenance_manual_apply_decisions/v1
+-> ready_for_manual_apply / manual_reject_logged / hold_for_more_evidence
+-> applied_count: 0
+-> no database mutation
+```
+
+The command is:
+
+```powershell
+py -3 eval/memory_maintenance_manual_apply_decisions.py --plan <review-plan.json> --outcomes <review-outcomes.json>
+```
+
+Accepted outcomes become `ready_for_manual_apply`, but they still carry blockers such as `dry_run_enabled` and require an explicit operator command. Rejected or unsafe outcomes become audit records that preserve memory state. Needs-more-evidence outcomes remain held.
+
+The focused guard is:
+
+```powershell
+py -3 eval/memory_maintenance_manual_apply_decisions_regression.py
+```
+
+and the unified architecture gate requires:
+
+```text
+memory_maintenance_manual_apply_decisions_ok
+```
+
+This is the last safe step before designing any real apply path. The codebase now has a complete non-mutating maintenance lifecycle:
+
+```text
+detect -> prioritize -> review -> aggregate -> guard -> plan -> outcome -> dry-run apply/reject decision
+```
+
+The next step before mutation should be an explicit apply backend design for one narrow operation, probably duplicate deprecation, with hard requirements: operator confirmation, source candidate id, before/after audit event, rollback metadata, and a regression proving rejected/held/unsafe decisions cannot mutate the database.

@@ -147,6 +147,24 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
         "ogcf_maintenance_priority_outcome_ok": bool(
             (step_json(steps, "ogcf_maintenance_priority_outcome_regression") or {}).get("ok")
         ),
+        "ogcf_maintenance_review_label_loop_ok": bool(
+            (step_json(steps, "ogcf_maintenance_review_label_loop_regression") or {}).get("ok")
+        ),
+        "ogcf_maintenance_review_memory_bank_ok": bool(
+            (step_json(steps, "ogcf_maintenance_review_memory_bank_regression") or {}).get("ok")
+        ),
+        "ogcf_maintenance_candidate_guard_ok": bool(
+            (step_json(steps, "ogcf_maintenance_candidate_guard_regression") or {}).get("ok")
+        ),
+        "memory_maintenance_candidate_review_plan_ok": bool(
+            (step_json(steps, "memory_maintenance_candidate_review_plan_regression") or {}).get("ok")
+        ),
+        "memory_maintenance_review_outcome_log_ok": bool(
+            (step_json(steps, "memory_maintenance_review_outcome_log_regression") or {}).get("ok")
+        ),
+        "memory_maintenance_manual_apply_decisions_ok": bool(
+            (step_json(steps, "memory_maintenance_manual_apply_decisions_regression") or {}).get("ok")
+        ),
         "adaptive_behavior_shadow_runtime_ok": bool(
             (step_json(steps, "adaptive_behavior_shadow_runtime_regression") or {}).get("ok")
         ),
@@ -394,6 +412,12 @@ def write_markdown(report: dict[str, Any], out_md: Path) -> None:
         "ogcf_erg_signal_provider_ok",
         "ogcf_projector_graph_maintenance_ok",
         "ogcf_maintenance_priority_outcome_ok",
+        "ogcf_maintenance_review_label_loop_ok",
+        "ogcf_maintenance_review_memory_bank_ok",
+        "ogcf_maintenance_candidate_guard_ok",
+        "memory_maintenance_candidate_review_plan_ok",
+        "memory_maintenance_review_outcome_log_ok",
+        "memory_maintenance_manual_apply_decisions_ok",
         "adaptive_behavior_shadow_runtime_ok",
         "adaptive_residual_shadow_runtime_ok",
         "adaptive_residual_shadow_runtime_view_ok",
@@ -564,6 +588,20 @@ def main() -> int:
                 str(ROOT / "eval" / "ogcf_erg_signal_provider_regression.py"),
                 str(ROOT / "eval" / "ogcf_projector_graph_maintenance_regression.py"),
                 str(ROOT / "eval" / "ogcf_maintenance_priority_outcome_regression.py"),
+                str(ROOT / "eval" / "ogcf_maintenance_review_queue.py"),
+                str(ROOT / "eval" / "ogcf_maintenance_review_label_eval.py"),
+                str(ROOT / "eval" / "ogcf_maintenance_review_label_loop_regression.py"),
+                str(ROOT / "eval" / "ogcf_maintenance_review_memory_bank.py"),
+                str(ROOT / "eval" / "ogcf_maintenance_review_memory_bank_regression.py"),
+                str(ROOT / "eval" / "ogcf_maintenance_candidate_guard.py"),
+                str(ROOT / "eval" / "ogcf_maintenance_candidate_guard_regression.py"),
+                str(ROOT / "core" / "maintenance_candidate_contract.py"),
+                str(ROOT / "eval" / "memory_maintenance_candidate_review_plan.py"),
+                str(ROOT / "eval" / "memory_maintenance_candidate_review_plan_regression.py"),
+                str(ROOT / "eval" / "memory_maintenance_review_outcome_log.py"),
+                str(ROOT / "eval" / "memory_maintenance_review_outcome_log_regression.py"),
+                str(ROOT / "eval" / "memory_maintenance_manual_apply_decisions.py"),
+                str(ROOT / "eval" / "memory_maintenance_manual_apply_decisions_regression.py"),
                 str(ROOT / "eval" / "adaptive_behavior_shadow_runtime_regression.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_runtime_regression.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_runtime_view_regression.py"),
@@ -727,6 +765,30 @@ def main() -> int:
         run_step(
             "ogcf_maintenance_priority_outcome_regression",
             [python, str(ROOT / "eval" / "ogcf_maintenance_priority_outcome_regression.py")],
+        ),
+        run_step(
+            "ogcf_maintenance_review_label_loop_regression",
+            [python, str(ROOT / "eval" / "ogcf_maintenance_review_label_loop_regression.py")],
+        ),
+        run_step(
+            "ogcf_maintenance_review_memory_bank_regression",
+            [python, str(ROOT / "eval" / "ogcf_maintenance_review_memory_bank_regression.py")],
+        ),
+        run_step(
+            "ogcf_maintenance_candidate_guard_regression",
+            [python, str(ROOT / "eval" / "ogcf_maintenance_candidate_guard_regression.py")],
+        ),
+        run_step(
+            "memory_maintenance_candidate_review_plan_regression",
+            [python, str(ROOT / "eval" / "memory_maintenance_candidate_review_plan_regression.py")],
+        ),
+        run_step(
+            "memory_maintenance_review_outcome_log_regression",
+            [python, str(ROOT / "eval" / "memory_maintenance_review_outcome_log_regression.py")],
+        ),
+        run_step(
+            "memory_maintenance_manual_apply_decisions_regression",
+            [python, str(ROOT / "eval" / "memory_maintenance_manual_apply_decisions_regression.py")],
         ),
         run_step(
             "adaptive_behavior_shadow_runtime_regression",
