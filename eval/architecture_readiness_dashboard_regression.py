@@ -89,6 +89,10 @@ def main() -> int:
     bad_gate = gate_fixture()
     bad_gate["required_summary"]["memory_maintenance_operator_outcome_capture_ok"] = False
     blocked = build_dashboard(bad_gate, valuation_fixture(), merge_fixture(), transition_fixture())
+    bad_transition = transition_fixture()
+    bad_transition["ok"] = False
+    bad_transition["blocked_subsystems"] = ["rpg_supervised_learning"]
+    transition_blocked = build_dashboard(gate_fixture(), valuation_fixture(), merge_fixture(), bad_transition)
     checks = {
         "schema_ok": good.get("schema") == "architecture_readiness_dashboard/v1",
         "all_chains_ready": good.get("chains_ok") is True
@@ -109,6 +113,9 @@ def main() -> int:
             chain.get("name") == "operator_feedback" and not chain.get("ok")
             for chain in blocked.get("chains") or []
         ),
+        "transition_failure_blocks_readiness": transition_blocked.get("handover_ready") is False
+        and transition_blocked.get("github_upload_ready") is False
+        and transition_blocked.get("transition_map_ok") is False,
         "report_only": good.get("report_only") is True
         and good.get("mutates_db") is False
         and good.get("mutates_runtime") is False

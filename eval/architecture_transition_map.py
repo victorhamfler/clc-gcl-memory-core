@@ -81,6 +81,11 @@ SUBSYSTEMS = [
             "memory_maintenance_rpg_label_quality_report_ok",
             "memory_maintenance_rpg_label_scorer_ok",
             "memory_maintenance_rpg_reviewed_label_batch_ok",
+            "memory_maintenance_rpg_label_collection_plan_ok",
+            "memory_maintenance_rpg_label_review_worksheet_ok",
+            "memory_maintenance_rpg_filled_worksheet_import_ok",
+            "memory_maintenance_rpg_filled_worksheet_learning_loop_ok",
+            "memory_maintenance_rpg_real_use_reviewed_learning_loop_ok",
             "memory_maintenance_rpg_feedback_merge_evaluation_ok",
         ],
         "promotion_blockers": ["label_diversity_and_external_validation_required"],
@@ -184,7 +189,7 @@ def build_transition_map(
         "description": "Report-only neural-symbolic transition map for the combined memory and selector architecture.",
         "architecture_gate_ok": bool(gate.get("ok")),
         "architecture_valuation_ok": bool(valuation.get("ok")),
-        "architecture_dashboard_ready": bool(dashboard.get("handover_ready")),
+        "architecture_dashboard_ready": dashboard.get("handover_ready") if dashboard else None,
         "subsystems": subsystems,
         "blocked_subsystems": blocked_subsystems,
         "hard_blockers": hard_blockers,
@@ -208,8 +213,7 @@ def build_transition_map(
         "ok": bool(gate.get("ok"))
         and bool(valuation.get("ok"))
         and not blocked_subsystems
-        and not hard_blockers
-        and dashboard.get("handover_ready") is not False,
+        and not hard_blockers,
     }
 
 

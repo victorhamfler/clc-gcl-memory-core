@@ -46,10 +46,12 @@ python3 eval/controller_packet_residual_pipeline_regression.py
 python3 eval/memory_maintenance_rpg_reviewed_label_batch_regression.py
 python3 eval/architecture_transition_map_regression.py
 python3 eval/architecture_readiness_dashboard_regression.py
+python3 eval/architecture_valuation_report_regression.py
 python3 eval/selector_architecture_gate.py --allow-missing-runtime-artifacts --random-cases 8
 python3 eval/architecture_valuation_report.py
 python3 eval/architecture_transition_map.py
 python3 eval/architecture_readiness_dashboard.py
+python3 eval/architecture_preflight.py --random-cases 8
 ```
 
 Expected high-level result:
@@ -59,8 +61,10 @@ Expected high-level result:
 - `memory_maintenance_rpg_reviewed_label_batch_ok`: true
 - `architecture_transition_map_ok`: true
 - transition state: `stable_report_only_learning_loop`
+- transition map `ok`: true
 - dashboard handover ready: true
 - dashboard GitHub upload ready: true
+- architecture preflight: ok true
 
 The controller packet residual pipeline can be slow. Give it at least 5 minutes before treating it as failed.
 
@@ -128,6 +132,7 @@ Please report these file paths and key values:
 - `experiments/selector_architecture_gate_results.json`
 - `experiments/architecture_transition_map_results.json`
 - `experiments/architecture_readiness_dashboard_results.json`
+- `experiments/architecture_preflight_results.json`
 - `experiments/memory_maintenance_rpg_reviewed_label_batch_results.json`
 - `experiments/memory_maintenance_rpg_reviewed_label_quality_results.json`
 - `experiments/memory_maintenance_rpg_reviewed_label_scorer_results.json`

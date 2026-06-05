@@ -5693,3 +5693,240 @@ memory_maintenance_rpg_reviewed_label_batch_ok
 ```
 
 This fixture is not real evidence and does not permit policy use. Its purpose is to prove the label-bank, quality, and scorer path can handle a balanced six-label candidate set before Hermes/user labels are collected. The next real architecture step is still to collect reviewed natural RPG labels and operator-derived maintenance outcomes, then compare real label quality against this clean local sanity baseline.
+
+## Architecture Preflight
+
+The architecture now has an ordered preflight command for the whole restructuring readiness chain:
+
+```text
+valuation regression
+-> selector architecture gate
+-> valuation refresh
+-> transition map
+-> readiness dashboard
+-> consistency checks
+```
+
+Validation:
+
+```powershell
+py -3 eval/architecture_preflight_regression.py
+py -3 eval/architecture_preflight.py --random-cases 8
+```
+
+This is the preferred command before GitHub uploads and Hermes handovers because it regenerates artifacts in the right order and checks that:
+
+- the selector gate passes;
+- the valuation report passes;
+- the transition map is `ok: true`;
+- the transition state is `stable_report_only_learning_loop`;
+- the dashboard is handover/upload ready;
+- the dashboard agrees with the transition-map state;
+- runtime policy mutation, real DB mutation by default, and RPG policy use remain blocked.
+
+The next architecture development target remains real evidence collection. The preflight exists to keep that work from being derailed by stale local artifacts or inconsistent readiness reports.
+
+## RPG Label Collection Plan
+
+The RPG supervised-learning path now has a report-only label collection planner:
+
+```text
+natural RPG review packet
+-> label coverage audit
+-> recommended review targets
+-> label-quality/scorer readiness decision
+```
+
+Validation:
+
+```powershell
+py -3 eval/memory_maintenance_rpg_label_collection_plan_regression.py
+```
+
+Architecture gate key:
+
+```text
+memory_maintenance_rpg_label_collection_plan_ok
+```
+
+The planner does not infer labels and does not promote policy. It tells Hermes, the user, or a future operator UI which unlabeled candidate pairs should be reviewed next to satisfy the current quality gates:
+
+- at least 12 labeled examples;
+- at least 4 label classes;
+- at least 4 candidate classes;
+- dominant label ratio no higher than 0.55;
+- report-only and non-mutating packet provenance.
+
+This is the practical next step toward real evidence collection. The reviewed-label fixture proves the scorer path can work under balanced labels; the collection plan tells us how to move sparse natural packets toward that standard.
+
+## Full Memory Brain Real-Use Eval
+
+The roadmap now has an end-to-end real-use smoke for the combined memory brain:
+
+```text
+temporary DB
+-> teach duplicate/current/bridge memories
+-> ask
+-> correct stale memories
+-> ask with session context
+-> record feedback
+-> inspect authority graph
+-> run RPG probe on the written memories
+-> run label collection plan
+-> run architecture preflight
+```
+
+Validation:
+
+```powershell
+py -3 eval/full_memory_brain_real_use_eval.py
+```
+
+The eval is non-destructive. It uses a temporary DB and fast hash embeddings by default, then writes a report to:
+
+```text
+experiments/full_memory_brain_real_use_eval_results.json
+experiments/full_memory_brain_real_use_eval_report.md
+```
+
+The first successful run showed:
+
+- the memory program stored expected memories;
+- corrections linked to stale duplicate targets;
+- the current answer preferred the corrected green-plan memory;
+- stale evidence remained visible rather than being silently deleted;
+- vague follow-up used session context;
+- bridge warning separated Helios routing from robotics actuator checks;
+- retrieval feedback was recorded;
+- RPG diagnostics inspected the resulting memory set report-only;
+- architecture preflight passed.
+
+This confirms the current program is not just a pile of isolated evals: the core memory loop works end-to-end. The next development should connect this real-use pattern to the maintenance rehearsal/operator review lifecycle so duplicate/stale memories created by real use become reviewable RPG label evidence.
+
+## RPG Label Review Worksheet
+
+The label collection plan now has an operator-facing worksheet:
+
+```text
+RPG label collection plan
+-> review worksheet with blank labels, previews, allowed labels, and operator questions
+-> filled labels
+-> label quality + scorer checks
+```
+
+Validation:
+
+```powershell
+py -3 eval/memory_maintenance_rpg_label_review_worksheet_regression.py
+```
+
+Architecture gate key:
+
+```text
+memory_maintenance_rpg_label_review_worksheet_ok
+```
+
+This is the first practical review surface for the supervised RPG path. It still does not infer labels, mutate memory rows, or enable policy use. Its purpose is to make the next real evidence collection step concrete enough for Hermes, a human operator, or a future UI/API endpoint.
+
+## RPG Filled Worksheet Import
+
+The worksheet path now has a report-only importer:
+
+```text
+filled RPG label review worksheet
+-> validated natural-candidate review packet
+-> RPG natural label bank
+-> label quality report
+-> transparent centroid scorer
+```
+
+Validation:
+
+```powershell
+py -3 eval/memory_maintenance_rpg_filled_worksheet_import_regression.py
+py -3 eval/memory_maintenance_rpg_filled_worksheet_import.py --worksheet ..\experiments\memory_maintenance_rpg_label_review_worksheet_results.json
+```
+
+Architecture gate key:
+
+```text
+memory_maintenance_rpg_filled_worksheet_import_ok
+```
+
+The importer converts only labeled worksheet rows and validates allowed labels plus reviewer provenance. It does not mutate memory rows, runtime policy, or configuration. This closes the practical supervised-learning loop for RPG maintenance candidates: the system can nominate examples, create a worksheet, import reviewed labels, and feed the resulting packet into label-bank, quality, and scorer checks while keeping every learned signal shadow-only.
+
+The next development target is to run this importer on real filled worksheet rows, then feed the imported packet through:
+
+```powershell
+py -3 eval/memory_maintenance_rpg_natural_label_bank.py --packet ..\experiments\memory_maintenance_rpg_filled_worksheet_import_results.json
+py -3 eval/memory_maintenance_rpg_label_quality_report.py --packet ..\experiments\memory_maintenance_rpg_filled_worksheet_import_results.json
+py -3 eval/memory_maintenance_rpg_label_scorer.py --label-bank ..\experiments\memory_maintenance_rpg_natural_label_bank_results.json
+```
+
+Until that chain passes on real reviewed examples, RPG label scoring remains shadow-only and unavailable for policy promotion.
+
+## RPG Filled Worksheet Learning Loop
+
+The supervised RPG path now has a local end-to-end learning-loop validation:
+
+```text
+synthetic filled worksheet
+-> filled worksheet import
+-> natural label bank
+-> label quality report
+-> transparent RPG label scorer
+-> shadow-scorer readiness check
+```
+
+Validation:
+
+```powershell
+py -3 eval/memory_maintenance_rpg_filled_worksheet_learning_loop_regression.py
+py -3 eval/memory_maintenance_rpg_filled_worksheet_learning_loop.py
+```
+
+Architecture gate key:
+
+```text
+memory_maintenance_rpg_filled_worksheet_learning_loop_ok
+```
+
+This proves the worksheet path is not only a documentation artifact. Filled review rows can now become a labeled RPG maintenance packet, then a label bank, then a report-only scorer. The test intentionally keeps `synthetic_fixture_not_real_reviewed_outcome` as a promotion blocker, so this does not weaken the safety boundary. It advances the neural-symbolic memory-brain roadmap by giving the system a concrete supervised learning substrate while preserving explicit symbolic labels, provenance, and operator review gates.
+
+The next evidence milestone is to replace the synthetic filled worksheet fixture with real reviewed worksheet rows from Hermes or a human operator. The scorer may become useful as a shadow explanation signal only after real labels pass label quality, scorer accuracy, and real maintenance outcome validation.
+
+## RPG Real-Use Reviewed Learning Loop
+
+The supervised RPG path now has a locally reviewed real-use validation:
+
+```text
+full memory-brain real-use scenario
+-> known duplicate/correction/bridge/related pairs
+-> locally reviewed RPG worksheet labels
+-> filled worksheet import
+-> natural label bank
+-> label quality report
+-> transparent RPG label scorer
+```
+
+Validation:
+
+```powershell
+py -3 eval/memory_maintenance_rpg_real_use_reviewed_learning_loop_regression.py
+py -3 eval/memory_maintenance_rpg_real_use_reviewed_learning_loop.py
+```
+
+Architecture gate key:
+
+```text
+memory_maintenance_rpg_real_use_reviewed_learning_loop_ok
+```
+
+This is stronger than the synthetic filled worksheet fixture because the labels are grounded in the real-use memory-brain eval: duplicate blue-plan memories, a green-plan correction, session summaries, bridge warnings, and robotics separation memories. It still remains report-only. The report keeps `external_reviewer_confirmation_required`, `real_maintenance_outcome_validation_required`, and `policy_ablation_required` as promotion blockers.
+
+The architectural meaning is that the adaptive memory brain now has a complete shadow learning route from actual memory behavior into reviewed RPG maintenance labels. The next development target is external confirmation and outcome validation:
+
+- confirm these real-use labels with Hermes or a human reviewer;
+- run the same learning-loop script on a copied real DB with naturally discovered candidate pairs;
+- measure whether the learned RPG scorer improves review prioritization without increasing unsafe duplicate/stale/bridge decisions;
+- only then consider using the scorer as an explanation or ranking hint, still not as an automatic mutation policy.

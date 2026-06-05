@@ -71,6 +71,11 @@ CHAINS = [
             "memory_maintenance_rpg_label_quality_report_ok",
             "memory_maintenance_rpg_label_scorer_ok",
             "memory_maintenance_rpg_reviewed_label_batch_ok",
+            "memory_maintenance_rpg_label_collection_plan_ok",
+            "memory_maintenance_rpg_label_review_worksheet_ok",
+            "memory_maintenance_rpg_filled_worksheet_import_ok",
+            "memory_maintenance_rpg_filled_worksheet_learning_loop_ok",
+            "memory_maintenance_rpg_real_use_reviewed_learning_loop_ok",
             "memory_maintenance_rpg_feedback_merge_evaluation_ok",
         ],
         "policy": "shadow_learning_only",
@@ -166,6 +171,8 @@ def build_dashboard(
     all_chains_ok = all(item["ok"] for item in chains)
     transition = transition_summary(transition_map or {})
     transition_ok = transition.get("ok")
+    transition_ready = transition_ok is not False
+    ready = bool(gate.get("ok")) and bool(valuation.get("ok")) and all_chains_ok and transition_ready and not hard_blockers
     return {
         "schema": "architecture_readiness_dashboard/v1",
         "description": "Compact readiness dashboard for the combined selector, memory maintenance, RPG, and operator-feedback architecture.",
@@ -184,10 +191,10 @@ def build_dashboard(
             "rpg_signals_are_explanation_or_shadow_only": True,
         },
         "hard_blockers": hard_blockers,
-        "handover_ready": bool(gate.get("ok")) and bool(valuation.get("ok")) and all_chains_ok and not hard_blockers,
-        "github_upload_ready": bool(gate.get("ok")) and bool(valuation.get("ok")) and all_chains_ok and not hard_blockers,
+        "handover_ready": ready,
+        "github_upload_ready": ready,
         "next_action": "handover_or_upload_ready"
-        if bool(gate.get("ok")) and bool(valuation.get("ok")) and all_chains_ok and not hard_blockers
+        if ready
         else "resolve_architecture_readiness_blockers",
         "recommended_next_development": transition.get("recommended_next_development")
         or "collect_real_or_hermes_operator_feedback_and_recheck_merge_evaluation",
@@ -214,8 +221,8 @@ def write_report(dashboard: dict[str, Any], out_json: Path, out_md: Path) -> Non
         f"Chains OK: `{dashboard['chains_ok']}`",
         f"Handover ready: `{dashboard['handover_ready']}`",
         f"GitHub upload ready: `{dashboard['github_upload_ready']}`",
-            f"Next action: `{dashboard['next_action']}`",
-            f"Transition state: `{transition.get('transition_state')}`",
+        f"Next action: `{dashboard['next_action']}`",
+        f"Transition state: `{transition.get('transition_state')}`",
         "",
         "## Chains",
         "",
