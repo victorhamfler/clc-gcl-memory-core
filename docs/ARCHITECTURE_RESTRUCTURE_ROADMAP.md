@@ -30,6 +30,201 @@ into:
 typed modules + configurable policies + logged outcomes + guarded adaptive updates
 ```
 
+## RPG Relational Substrate Layer
+
+The next ERG/OGCF development has been reframed by the RPG memory skill as a relational-substrate layer. RPG should not replace CSD, G-CL, CLC, canonical memory, or the existing maintenance lifecycle. It should sit above the memory store as a report-only geometry-control diagnostic until it proves downstream value.
+
+Current intended RPG role:
+
+```text
+memory rows + embeddings + metadata
+  -> mixed relational substrate A
+  -> constrained projector sectors
+  -> curvature/activity and correlation-island diagnostics
+  -> maintenance/retrieval evidence for guarded selector decisions
+```
+
+The first implementation is deliberately conservative:
+
+- `core/rpg_memory.py` builds a normalized symmetric memory-memory substrate from embedding similarity, domain similarity, source/authority similarity, retrieval-frequency similarity, and a tiny lexical duplicate tie-breaker.
+- `eval/rpg_relational_substrate_probe_regression.py` runs report-only probes for active/deprecated, source-authority/retrieval, duplicate/contradiction, and domain/recency constraint pairs.
+- The probe reports projector stability, curvature activity, sector memory ids, sector statuses, and correlation-island ratios.
+- The probe mutates no database, no runtime behavior, and no config.
+
+This gives the architecture a clean transition from ERG/OGCF bridge diagnostics toward RPG memory attractor diagnostics. The next stage should compare RPG island/activity signals against existing maintenance candidate quality, rehearsal review summaries, and answer/retrieval failures before any RPG score affects a selector policy.
+
+## RPG Maintenance Rehearsal Annotations
+
+The first connection between RPG and the maintenance lifecycle is now report-only inside copied-DB rehearsal:
+
+- `eval/memory_maintenance_copied_db_rehearsal.py` builds RPG records from the rehearsal DB with stored vectors when available and a deterministic lexical fallback when vectors are absent.
+- Rehearsal reports include `memory_maintenance_rpg_rehearsal_annotations/v1`.
+- Each planned operation receives a report-only RPG annotation with target-sector overlap, direct target island ratio, direct target mean relation, duplicate/contradiction overlap, active/deprecated overlap, and the existing target-quality risk flags.
+- `eval/memory_maintenance_rich_copied_db_target_quality_regression.py` verifies that safe exact duplicates carry stronger direct RPG target relation than a stale-as-duplicate blocker, while stale/duplicate-text-mismatch risk remains blocked by the symbolic review summary.
+
+This is an important architecture boundary: RPG can now explain maintenance targets, but it still cannot approve mutation. The next safe improvement is to aggregate these RPG rehearsal annotations across repeated rehearsals in the review memory bank, then learn whether island/activity signals predict safe duplicate canonicalization or bridge/stale risk.
+
+## RPG Rehearsal Memory-Bank Aggregation
+
+RPG rehearsal annotations now flow through the repeated-rehearsal evidence path:
+
+- `eval/memory_maintenance_rehearsal_review_memory_bank.py` attaches matching RPG operation annotations to each symbolic rehearsal review by `candidate_id`.
+- Each memory-bank cluster now carries `memory_maintenance_rehearsal_rpg_cluster_summary/v1`, including target mean relation, target island ratio, sector island ratio, omega norm, target-sector overlap ratio, duplicate/contradiction overlap, active/deprecated overlap, and risk-flag counts.
+- `eval/memory_maintenance_rehearsal_candidate_guard.py` preserves the RPG summary when it builds guarded or blocked operator-review candidates.
+- `eval/memory_maintenance_operator_review_packet.py` exposes the RPG summary in the operator packet, so a human or Hermes can compare symbolic blockers with relational-substrate evidence.
+
+The important result is that RPG can now accumulate repeated evidence across rehearsals without changing the readiness rules. Safe duplicate evidence is still symbolic-and-rehearsal gated; recurrent stale/bridge/semantic risk still blocks the operation family. RPG is becoming a learned diagnostic surface, not an autonomous mutation policy.
+
+The next useful development is a report-only calibration test over mixed rehearsal runs: measure whether high RPG target relation and high target island ratio consistently align with `safe_to_review`, while low relation, low island, active/deprecated overlap, or duplicate/contradiction overlap align with blocked stale/bridge/semantic decisions.
+
+## RPG Rehearsal Calibration Probe
+
+The RPG rehearsal evidence now has a report-only calibration stage:
+
+- `eval/memory_maintenance_rpg_rehearsal_calibration.py` consumes `memory_maintenance_rehearsal_review_memory_bank/v1` and compares RPG cluster metrics against symbolic rehearsal outcomes.
+- The calibration tracks safe-vs-risk means for target relation, target island ratio, and active/deprecated overlap.
+- It emits provisional relation/island thresholds and a prediction-accuracy probe, but always reports `ready_for_policy_use: false`.
+- `eval/memory_maintenance_rpg_rehearsal_calibration_regression.py` plants safe duplicate, stale-risk, bridge-risk, and semantic-risk clusters and verifies that safe duplicate clusters have higher RPG target relation/island than the risk clusters while stale/bridge risk has higher active/deprecated overlap.
+
+This is the first measurable bridge from RPG diagnostics toward a future learned maintenance scorer. It still cannot promote or apply maintenance actions. The next evidence requirement is real or copied-real rehearsal diversity: multiple DBs, multiple domains, and repeated safe/risk clusters before RPG metrics are allowed to become guarded controller features.
+
+## RPG Copied-Real Calibration
+
+The calibration stage now has a copied-real rehearsal eval:
+
+- `eval/memory_maintenance_rpg_copied_real_calibration.py` copies local real/stress memory DBs, augments only the copies with a controlled exact duplicate pair and a controlled stale-as-duplicate pair, runs copied-DB rehearsal, builds a rehearsal memory bank, and calibrates RPG metrics.
+- Original source DBs are not mutated.
+- The eval writes its working DB copies under the external artifact area when available: `E:\projcod2_artifacts_archive\current_rehearsals\rpg_copied_real_calibration`.
+- `eval/memory_maintenance_copied_db_rehearsal.py` is now tolerant of older memory schemas that do not have a `namespace` column when building RPG records.
+- `eval/memory_maintenance_rpg_copied_real_calibration_regression.py` gates this copied-real path.
+
+Current local copied-real result across three DBs:
+
+```text
+run_count = 3
+safe_relation_mean = 0.115608
+blocked_relation_mean = 0.045781
+safe_relation_exceeds_blocked = true
+ready_for_policy_use = false
+```
+
+This is encouraging but still early. It means RPG target relation survived a copied-real DB mix, but the data is still augmented and small. The next development stage should run the same copied-real calibration with richer naturally occurring maintenance candidates or Hermes-collected copied DBs before RPG metrics become even guarded selector features.
+
+## RPG Natural Candidate Calibration
+
+The calibration path now includes naturally mined candidate pairs from local DBs:
+
+- `eval/memory_maintenance_rpg_natural_candidate_calibration.py` scans local memory DBs for exact duplicate, near-duplicate-like, stale/update-like, bridge-like, and cross-domain-related pairs.
+- It computes RPG target relation and target island ratio directly from the memory substrate without building an apply plan and without mutating source DBs.
+- `eval/memory_maintenance_rpg_natural_candidate_calibration_regression.py` gates the local natural-candidate calibration.
+
+Current local result across three DBs:
+
+```text
+all_pair_count = 172
+near_duplicate_like_count = 2
+stale_or_update_like_count = 81
+bridge_like_count = 80
+cross_domain_related_count = 9
+```
+
+Class means:
+
+```text
+near_duplicate_like: relation_mean = 0.016933, island_mean = 1.145536
+stale_or_update_like: relation_mean = 0.022567, island_mean = 1.250643
+bridge_like: relation_mean = 0.018404, island_mean = 1.210213
+cross_domain_related: relation_mean = 0.015767, island_mean = 1.117770
+```
+
+This changed the interpretation of RPG in an important way. High target relation does not mean "safe duplicate" by itself. In natural data, stale/update-like pairs can have stronger RPG relation than near-duplicate-like pairs because they are genuinely related memory attractors. RPG is therefore a relational strength and island/coherence signal, not a standalone safety label. It must be combined with symbolic/semantic labels, source/recency authority, and rehearsal outcomes before it can influence maintenance policy.
+
+Next direction: build a review-labeled natural candidate packet so a human or Hermes can label whether natural RPG candidates are safe duplicates, stale/update conflicts, bridge contamination, or harmless related memories. That labeled data is what can eventually train a guarded RPG maintenance scorer.
+
+## RPG Natural Candidate Review Packet
+
+The natural-candidate calibration now produces a review packet:
+
+- `eval/memory_maintenance_rpg_natural_candidate_review_packet.py` samples representative natural RPG candidate pairs by class and creates `memory_maintenance_rpg_natural_candidate_review_packet/v1`.
+- Each item includes source DB, memory ids, domains, cosine/Jaccard, RPG target relation, RPG target island ratio, previews, and a review hint.
+- Allowed review labels are:
+
+```text
+safe_duplicate
+stale_or_update_conflict
+bridge_contamination
+semantic_near_duplicate
+harmless_related_memory
+uncertain_needs_more_context
+```
+
+- Review labels are intentionally blank. This packet is for human/Hermes annotation and cannot promote, apply, or change policy.
+- `eval/memory_maintenance_rpg_natural_candidate_review_packet_regression.py` gates the packet contract.
+
+This creates the missing supervised data collection surface for the RPG maintenance scorer. The next step after collecting labels is a label-summary/evidence-bank eval that checks whether RPG metrics plus symbolic candidate class can predict the human/Hermes label without overfitting.
+
+## RPG Natural Label Bank
+
+The review packet now has a label-summary/evidence-bank layer:
+
+- `eval/memory_maintenance_rpg_natural_label_bank.py` consumes a filled `memory_maintenance_rpg_natural_candidate_review_packet/v1`.
+- It groups reviewed examples by label and by coarse label family.
+- It summarizes RPG relation/island statistics for each label.
+- It runs a simple report-only prediction probe using RPG thresholds plus symbolic candidate class.
+- It can mark `ready_for_scorer_training` when enough labels and label diversity exist, but it always keeps `ready_for_policy_use: false`.
+- `eval/memory_maintenance_rpg_natural_label_bank_regression.py` gates the contract with synthetic filled labels.
+
+This stage is the handoff from geometry diagnostics into supervised adaptive memory governance. The next stage should be a report-only RPG label scorer trained/evaluated on the label bank. That scorer must remain separate from runtime policy until it is validated on real labeled packets and real maintenance outcomes.
+
+## RPG Label Scorer
+
+The RPG label-bank path now has a transparent report-only scorer:
+
+- `eval/memory_maintenance_rpg_label_scorer.py` trains/evaluates a small nearest-centroid label scorer from `memory_maintenance_rpg_natural_label_bank/v1`.
+- Features are intentionally inspectable: RPG target relation, RPG target island ratio, cosine, Jaccard, same-domain flag, and candidate-class one-hot fields.
+- It runs leave-one-out evaluation and emits a centroid model artifact.
+- It can become `ready_for_shadow_scorer` only when label count, label diversity, and leave-one-out accuracy are sufficient.
+- It always keeps `ready_for_policy_use: false`.
+- `eval/memory_maintenance_rpg_label_scorer_regression.py` confirms the current low-data case remains blocked rather than pretending the scorer is ready.
+
+Current status: the scorer exists as an auditable mechanism, but sparse labels correctly block shadow-scorer readiness. This is the right behavior. The next real development need is labeled natural RPG review packets, not a more aggressive model.
+
+## Architecture Valuation Checkpoint
+
+The codebase has reached a consolidation point. The current architecture is no longer just a selector experiment; it is a staged adaptive memory governance prototype with several non-mutating evidence loops:
+
+```text
+memory store / retrieval context
+-> evidence and controller packets
+-> OGCF/ERG/RPG geometry diagnostics
+-> maintenance candidates
+-> manual review/apply plan
+-> copied DB rehearsal
+-> rehearsal memory bank and guard
+-> operator packet
+-> natural RPG candidate review packet
+-> RPG label bank
+-> report-only RPG label scorer
+```
+
+`eval/architecture_valuation_report.py` now produces `architecture_valuation_report/v1`, a report-only map of the current phases, readiness boundaries, risks, and next steps. `eval/architecture_valuation_report_regression.py` gates the contract.
+
+Current valuation:
+
+- Retrieval/controller context: stable and gate-covered.
+- Maintenance apply lifecycle: safe, copied-DB rehearsal first, operator-gated, real mutation disabled by default.
+- RPG relational substrate: diagnostic-active and useful for relation/island evidence, but not a standalone safety label.
+- RPG supervised path: data-collection ready, scorer implemented, but policy blocked by sparse labels and missing real outcome validation.
+
+The new development direction should be consolidation-first:
+
+1. Collect or simulate reviewed natural RPG packets only when the goal is supervised scorer evidence.
+2. Keep the memory-program session responsible for memory-store/API/UI integration and the selector session responsible for selector/RPG/maintenance evidence contracts.
+3. Before adding new algorithms, keep producing architecture valuation artifacts so the roadmap does not become a loose pile of evals.
+4. Do not enable RPG or maintenance policy mutation until there are real labels, copied-real rehearsals, and real maintenance outcome validations.
+
+The next best engineering improvement after this checkpoint is a handover/test packet for Hermes or the memory session focused on labeling the RPG natural candidate review packet and validating whether the operator packet is usable in the memory-program workflow.
+
 ## Neural-Symbolic Adaptive Memory Brain Direction
 
 The selected development direction is a neural-symbolic controller, not a purely term-based rule system and not a frontier-scale model.
@@ -4654,3 +4849,787 @@ detect -> prioritize -> review -> aggregate -> guard -> plan -> outcome -> dry-r
 ```
 
 The next step before mutation should be an explicit apply backend design for one narrow operation, probably duplicate deprecation, with hard requirements: operator confirmation, source candidate id, before/after audit event, rollback metadata, and a regression proving rejected/held/unsafe decisions cannot mutate the database.
+
+## Memory Maintenance Apply Plan Contract
+
+The maintenance lifecycle now has the first apply-backend design contract, still fully report-only and non-mutating:
+
+```text
+memory_maintenance_manual_apply_decisions/v1
+-> memory_maintenance_apply_plan/v1
+-> planned duplicate deprecation operation / blocked operation
+```
+
+The only supported planned operation is `duplicate_deprecation` for accepted `duplicate_deprecation_review` decisions. Even then, the operation is not executable yet. It must carry:
+
+- explicit operator confirmation requirement;
+- source candidate id and source outcome;
+- before/after audit requirement;
+- rollback metadata requirement;
+- `dry_run: true`;
+- `ready_to_execute_count: 0`;
+- `applied_count: 0`;
+- `mutates_db: false`.
+
+Held, rejected, already-resolved, unsafe, or unsupported review kinds become blocked operations and cannot mutate memory. This creates the transition point from reviewed maintenance evidence into a future safe mutation backend without allowing the current prototype to silently alter the database.
+
+Validation:
+
+```powershell
+py -3 eval/memory_maintenance_apply_plan.py --decisions <manual-apply-decisions.json>
+py -3 eval/memory_maintenance_apply_plan_regression.py
+```
+
+Architecture gate key:
+
+```text
+memory_maintenance_apply_plan_ok
+```
+
+The next development step should be to design a real but still disabled duplicate-deprecation backend interface: define the required memory-store methods, audit event shape, and rollback payload, then test it against a temporary SQLite fixture with mutation disabled by default. Only after that should the system consider an operator-confirmed duplicate-deprecation dry-run that compares before/after rows.
+
+## Disabled Duplicate-Deprecation Backend Interface
+
+The first concrete apply backend now exists as a narrow, guarded interface:
+
+```text
+memory_maintenance_apply_plan/v1
+-> core.maintenance_apply_backend.apply_memory_maintenance_plan(...)
+-> memory_maintenance_apply_backend_batch_result/v1
+```
+
+The backend is still safe by default:
+
+- `dry_run=True`;
+- `mutation_enabled=False`;
+- `operator_confirmed=False`;
+- database mutation blocked unless all three safety conditions are deliberately changed;
+- only `duplicate_deprecation` operations are supported;
+- unsupported operation kinds, missing keeper ids, and missing duplicate ids are blocked;
+- audit events include source candidate id, operator id, before rows, after rows, and rollback metadata.
+
+The regression uses a temporary SQLite fixture and proves three boundary cases:
+
+1. Dry-run mode writes a non-applied audit event and preserves all memory rows.
+2. Operator-confirmed but mutation-disabled mode still preserves all memory rows.
+3. Explicitly confirmed and mutation-enabled fixture mode deprecates only the duplicate row, preserves the keeper and stale rows, and emits before/after audit plus rollback metadata.
+
+Validation:
+
+```powershell
+py -3 eval/memory_maintenance_apply_backend_regression.py
+```
+
+Architecture gate key:
+
+```text
+memory_maintenance_apply_backend_ok
+```
+
+This is not a production mutation path yet. The next step should be a memory-store adapter contract that maps this backend onto the real memory program's DB methods with mutation still disabled by default. After that, a Hermes/local long-run test can verify that reviewed duplicate-deprecation candidates target the intended rows and never touch stale, bridge, or semantic-merge candidates.
+
+## Maintenance Apply Store Adapter Contract
+
+The duplicate-deprecation backend no longer depends directly on raw SQLite access. It now consumes a small memory-store contract:
+
+```text
+MaintenanceApplyStore
+  fetch_memory_rows(memory_ids)
+  mark_memories_deprecated(memory_ids, updated_at=...)
+  write_apply_audit_event(event)
+  commit()
+  close()
+```
+
+`SQLiteMaintenanceApplyStore` implements this contract for the current SQLite fixture path, while `apply_memory_maintenance_plan(...)` can now run against any object that exposes the same methods. This is the boundary the memory-program session can implement around its real DB class without importing selector/ERG internals.
+
+Validation:
+
+```powershell
+py -3 eval/memory_maintenance_apply_store_adapter_regression.py
+```
+
+Architecture gate key:
+
+```text
+memory_maintenance_apply_store_adapter_ok
+```
+
+The adapter regression uses a fake in-memory store to prove that:
+
+- dry-run mode preserves rows and does not call `mark_memories_deprecated`;
+- audit and commit calls go through the adapter;
+- the explicitly enabled fixture path calls `mark_memories_deprecated(["dup_alpha_r2"])`;
+- keeper and stale rows remain unchanged.
+
+The next development step should be a memory-session handoff or local integration shim that implements `MaintenanceApplyStore` around the real memory DB object, with `mutation_enabled=False` by default and a regression that exercises only dry-run/audit behavior against a copied or temporary DB.
+
+## Real MemoryDB Maintenance Apply Adapter
+
+The selector-side backend now includes a concrete adapter for the memory program's DB object:
+
+```text
+MemoryDBMaintenanceApplyStore(storage.db.MemoryDB)
+```
+
+This wrapper uses the real `MemoryDB.conn` object but keeps the apply backend isolated behind the same `MaintenanceApplyStore` contract. The regression initializes the real `storage/schema.sql` into a temporary SQLite DB, inserts fixture memories, and verifies:
+
+- `mutation_enabled=False` preserves all rows even when the operator is confirmed;
+- a non-applied audit event is still recorded;
+- the explicitly enabled fixture path deprecates only the duplicate row;
+- keeper and stale rows remain unchanged;
+- before/after audit and rollback metadata are present.
+
+Validation:
+
+```powershell
+py -3 eval/memory_maintenance_real_db_adapter_regression.py
+```
+
+Architecture gate key:
+
+```text
+memory_maintenance_real_db_adapter_ok
+```
+
+This is the handoff point for the memory-program session. It does not need to import ERG/OGCF internals. It can consume `memory_maintenance_apply_plan/v1`, instantiate `MemoryDBMaintenanceApplyStore(db)`, and run the backend with `mutation_enabled=False` until a separate operator-confirmed command is designed.
+
+## Maintenance Apply Operator Command
+
+The memory-maintenance path now has a local operator-facing command:
+
+```powershell
+py -3 eval/memory_maintenance_apply_operator_command.py --db <memory.db> --apply-plan <memory_maintenance_apply_plan.json>
+```
+
+The command defaults to the safe mode:
+
+- dry-run enabled;
+- mutation disabled;
+- operator not confirmed unless `--confirm-operator` is supplied;
+- no audit write unless `--write-audit` is supplied;
+- blocked operations still return structured audit-ready output.
+
+The only way a fixture can mutate is with all explicit flags:
+
+```powershell
+py -3 eval/memory_maintenance_apply_operator_command.py `
+  --db <fixture.db> `
+  --apply-plan <memory_maintenance_apply_plan.json> `
+  --operator-id <operator> `
+  --confirm-operator `
+  --enable-mutation `
+  --no-dry-run `
+  --write-audit
+```
+
+Validation:
+
+```powershell
+py -3 eval/memory_maintenance_apply_operator_command_regression.py
+```
+
+Architecture gate key:
+
+```text
+memory_maintenance_apply_operator_command_ok
+```
+
+The regression proves the default command preserves rows and writes a blocked audit event, while the explicitly enabled fixture path mutates only the duplicate row. This is still not a recommendation to run mutation on the real memory DB. The next production step should be a copied-DB rehearsal that runs the command against a snapshot of the real database with mutation disabled first, then verifies candidate targeting quality before any real operator-confirmed mutation is considered.
+
+## Copied DB Maintenance Rehearsal
+
+The maintenance apply path now has a copied-DB rehearsal command:
+
+```powershell
+py -3 eval/memory_maintenance_copied_db_rehearsal.py
+```
+
+By default it writes bulky rehearsal artifacts under:
+
+```text
+E:\projcod2_artifacts_archive\current_rehearsals
+```
+
+when the E: partition exists, with a fallback to `experiments/` for machines without E:. This keeps generated copied databases and rehearsal artifacts away from the nearly full C: partition.
+
+The rehearsal either:
+
+- copies a provided source DB and uses a provided apply plan; or
+- generates a real-schema fixture DB and fixture `memory_maintenance_apply_plan/v1`.
+
+It then runs the operator backend in safe rehearsal mode:
+
+- copied DB only;
+- operator confirmation true;
+- mutation disabled;
+- dry-run disabled so `mutation_backend_disabled` is the active blocker;
+- audit write enabled;
+- before/after deprecated maps compared;
+- target IDs checked against the copied DB.
+
+Validation:
+
+```powershell
+py -3 eval/memory_maintenance_copied_db_rehearsal_regression.py
+```
+
+Architecture gate key:
+
+```text
+memory_maintenance_copied_db_rehearsal_ok
+```
+
+This is the correct pre-Hermes/prototype production step: it lets us test candidate targeting and audit behavior on a copied DB without mutating the source DB. The next useful test should run this against a copy of a richer real or Hermes-generated memory database and inspect missing target IDs, duplicate keeper/deprecate quality, and whether the plan accidentally points at stale, bridge, or semantic-merge rows.
+
+## Rich Copied DB Target Quality Rehearsal
+
+The copied-DB rehearsal now checks candidate target quality, not only target existence. For `duplicate_deprecation` operations it inspects the copied DB rows and reports:
+
+- keeper memory id;
+- deprecate memory ids;
+- missing target ids;
+- exact duplicate text match;
+- cross-domain and cross-namespace targeting;
+- stale, bridge, semantic, conflict, and update markers in targeted rows;
+- `candidate_target_quality_ok`.
+
+Validation:
+
+```powershell
+py -3 eval/memory_maintenance_rich_copied_db_target_quality_regression.py
+```
+
+Architecture gate key:
+
+```text
+memory_maintenance_rich_copied_db_target_quality_ok
+```
+
+The rich regression generates a copied real-schema DB with:
+
+- one safe exact duplicate pair;
+- one unsafe stale/current pair incorrectly presented as duplicate deprecation;
+- bridge and semantic rows that should remain untouched.
+
+The rehearsal must preserve the source DB and copied DB rows because mutation is disabled, but it must fail the target-quality check for the unsafe stale candidate. This is an important production-safety boundary: reviewed maintenance candidates are not enough; the operator rehearsal must also verify that the planned target rows match the intended operation kind.
+
+## Rehearsal Review Summary
+
+The copied-DB rehearsal now emits a second operator-facing artifact:
+
+```text
+memory_maintenance_rehearsal_review_summary/v1
+```
+
+This converts raw target-quality diagnostics into action labels:
+
+- `safe_to_review`;
+- `blocked_missing_targets`;
+- `blocked_stale_risk`;
+- `blocked_semantic_risk`;
+- `blocked_bridge_risk`;
+- `blocked_duplicate_text_mismatch`;
+- `blocked_cross_namespace_target`;
+- `needs_operator_review_cross_domain`;
+- `needs_operator_review`;
+- `blocked_unsupported_operation`.
+
+Every review summary remains non-mutating:
+
+```text
+mutation_allowed: false
+report_only: true
+```
+
+Validation:
+
+```powershell
+py -3 eval/memory_maintenance_rehearsal_review_summary_regression.py
+```
+
+Architecture gate key:
+
+```text
+memory_maintenance_rehearsal_review_summary_ok
+```
+
+This makes the rehearsal useful for Hermes and the memory-program session: they can consume stable decision labels instead of hand-reading nested target-quality JSON. The next development step should be a review-summary memory bank that aggregates these rehearsal decisions across copied DB runs, so repeated safe duplicate-deprecation families can be separated from recurring blocked stale/semantic/bridge risks before any operator-confirmed mutation workflow is considered.
+
+## Rehearsal Review Memory Bank
+
+The copied-DB rehearsal path now has a report-only multi-run memory bank:
+
+```text
+memory_maintenance_rehearsal_review_summary/v1
+-> memory_maintenance_rehearsal_review_memory_bank/v1
+```
+
+The bank groups rehearsal operation reviews by:
+
+```text
+operation_kind|decision
+```
+
+and assigns readiness:
+
+- `rehearsal_safe_evidence_ready` for safe decisions recurring across enough runs;
+- `hold_collect_more_safe_rehearsals` for safe decisions with insufficient repetition;
+- `blocked_recurrent_risk` for blocked decisions recurring across enough runs;
+- `hold_monitor_blocked_risk` for blocked decisions seen only once;
+- `needs_operator_review_recurrent` for repeated ambiguous review needs.
+
+Validation:
+
+```powershell
+py -3 eval/memory_maintenance_rehearsal_review_memory_bank_regression.py
+```
+
+Architecture gate key:
+
+```text
+memory_maintenance_rehearsal_review_memory_bank_ok
+```
+
+The regression creates two copied-DB rehearsal summaries with one recurring safe duplicate-deprecation family and one recurring stale-risk family. The bank must mark the safe family as evidence-ready, mark the stale family as recurrent risk, and keep the overall next action blocked because recurring risk is still present.
+
+This gives the architecture a safer local learning loop:
+
+```text
+reviewed maintenance candidates
+-> apply plan
+-> copied DB rehearsal
+-> target-quality review summary
+-> rehearsal review memory bank
+-> future guarded operator-review candidate
+```
+
+The next development step should be a guard on top of this memory bank that emits explicit operator-review candidates only for `rehearsal_safe_evidence_ready` clusters and blocks candidates when any recurrent risk cluster exists for the same operation family.
+
+## Rehearsal Candidate Guard
+
+The rehearsal review memory bank now feeds a report-only guard:
+
+```text
+memory_maintenance_rehearsal_review_memory_bank/v1
+-> memory_maintenance_rehearsal_candidate_guard/v1
+```
+
+The guard emits `memory_maintenance_rehearsal_guarded_candidate/v1` rows only when:
+
+- the source cluster is `rehearsal_safe_evidence_ready`;
+- the cluster has safe review support;
+- the cluster itself has no blocked reviews;
+- the same operation family has no `blocked_recurrent_risk` cluster.
+
+If any recurrent risk exists for the same operation kind, even the safe cluster is blocked with:
+
+```text
+operation_family_has_recurrent_risk
+```
+
+Validation:
+
+```powershell
+py -3 eval/memory_maintenance_rehearsal_candidate_guard_regression.py
+```
+
+Architecture gate key:
+
+```text
+memory_maintenance_rehearsal_candidate_guard_ok
+```
+
+The regression checks two cases:
+
+1. A safe-only rehearsal bank emits one operator-review candidate.
+2. A mixed bank with recurring stale risk blocks all duplicate-deprecation candidates, including the otherwise-safe cluster, because the operation family is still risky.
+
+This closes the current safe local loop:
+
+```text
+maintenance evidence
+-> apply plan
+-> copied DB rehearsal
+-> target-quality review summary
+-> rehearsal review memory bank
+-> rehearsal candidate guard
+```
+
+The next development step should be to connect this guard to a human/Hermes-readable operator review packet. That packet should include candidate id, source runs, target ids, text previews, blockers, and the exact command that would run in safe copied-DB mode. It should still not enable real DB mutation.
+
+## Operator Review Packet
+
+The rehearsal candidate guard now feeds a human/Hermes-readable packet:
+
+```text
+memory_maintenance_rehearsal_candidate_guard/v1
+-> memory_maintenance_operator_review_packet/v1
+```
+
+The packet includes:
+
+- candidate id;
+- operation kind;
+- source cluster key;
+- source runs and support;
+- target ids;
+- target text previews when available;
+- blocked reasons;
+- operator review questions;
+- a safe copied-DB rehearsal command.
+
+The command always points to:
+
+```powershell
+py -3 eval/memory_maintenance_copied_db_rehearsal.py ...
+```
+
+and intentionally does not include mutation-enabling flags such as `--enable-mutation` or `--no-dry-run` for the operator apply command.
+
+Validation:
+
+```powershell
+py -3 eval/memory_maintenance_operator_review_packet_regression.py
+```
+
+Architecture gate key:
+
+```text
+memory_maintenance_operator_review_packet_ok
+```
+
+The regression checks both ready and blocked packets. Ready packets preserve target ids and text previews; blocked packets preserve blockers such as `operation_family_has_recurrent_risk`; both packets keep:
+
+```text
+mutation_allowed: false
+report_only: true
+mutates_db: false
+```
+
+This is the right handoff artifact for Hermes or the memory-program session. The next step should be either a Hermes run over this packet or a memory-session review of how the packet should be surfaced in the agent UI/API, without enabling real DB mutation.
+
+## RPG Label Quality Gate
+
+The RPG supervised path now has a separate label-quality checkpoint between the label bank and any learned scorer:
+
+```text
+natural RPG candidate review packet
+-> RPG natural label bank
+-> RPG label-quality report
+-> report-only RPG label scorer
+```
+
+This prevents the architecture from treating any set of labels as useful learning evidence just because the labels are syntactically valid. The quality report checks:
+
+- enough labeled examples;
+- enough distinct review labels;
+- enough distinct candidate classes;
+- no dominant-label collapse;
+- no invalid labels;
+- no contradictory labels for the same memory pair;
+- a minimum family-level prediction probe;
+- report-only and no-mutation safety flags on the packet and bank.
+
+Validation:
+
+```powershell
+py -3 eval/memory_maintenance_rpg_label_quality_report_regression.py
+```
+
+Architecture gate key:
+
+```text
+memory_maintenance_rpg_label_quality_report_ok
+```
+
+This changes the next learning objective. The next stage is not simply to train the scorer; it is to collect a diverse natural RPG review set that passes the quality gate, then train and evaluate a report-only scorer on that reviewed set. The scorer remains blocked from policy use until:
+
+- label quality passes on real reviewed packets;
+- shadow scoring repeats across copied-real rehearsal data;
+- reviewed maintenance outcomes show that the scorer reduces bad duplicate/stale/bridge proposals;
+- the memory-program side can surface operator-review decisions without mutating the real DB by default.
+
+## Current Development Direction
+
+The architecture should evolve as a neural-symbolic adaptive memory brain with four cooperating layers:
+
+```text
+memory store and retrieval evidence
+-> selector/controller packet context
+-> OGCF/ERG/RPG relational diagnostics
+-> supervised review memory and guarded maintenance actions
+```
+
+The strongest current value is not autonomous mutation. It is the system's ability to inspect memory relations, explain candidate maintenance risks, rehearse changes on copied DBs, and accumulate reviewed outcomes into safer future decisions. The competitive direction is a low-compute adaptive controller that learns from memory-operation outcomes instead of scaling model size.
+
+Near-term development priorities:
+
+1. Collect or synthesize reviewed RPG natural-candidate labels until the label-quality report passes on nontrivial data.
+2. Feed those labels into the transparent report-only scorer and compare scorer predictions against the human/Hermes labels.
+3. Connect scorer and RPG quality signals to operator packets as explanation fields only, not as automatic action gates.
+4. Ask the memory-program session to expose review/label capture hooks so real operator outcomes can flow back into the selector artifacts.
+5. Keep real DB mutation disabled by default until copied-real rehearsals, label quality, and outcome logs all support promotion.
+
+## RPG Learning Context In Operator Packets
+
+The operator review packet now carries RPG supervised-learning readiness as explanation-only context:
+
+```text
+RPG label-quality report
++ RPG label scorer
+-> operator packet rpg_learning_context
+```
+
+This context is included at the packet level and copied into each ready or blocked packet item. It exposes:
+
+- label-quality readiness for shadow scorer training;
+- label counts and quality blockers;
+- scorer shadow readiness;
+- scorer policy readiness;
+- scorer promotion blockers;
+- explicit `operator_use: explanation_only_do_not_auto_apply`;
+- no-mutation safety flags.
+
+Validation:
+
+```powershell
+py -3 eval/memory_maintenance_operator_review_packet_regression.py
+```
+
+Architecture gate key:
+
+```text
+memory_maintenance_operator_review_packet_ok
+```
+
+This is the first integration point where RPG learning artifacts become visible in the maintenance workflow. It still does not let RPG choose or execute any action. Its job is to make operator/Hermes review better informed, while preserving the rule:
+
+```text
+RPG signal explains maintenance candidates; it does not approve maintenance candidates.
+```
+
+The next development step should be to create a non-mutating review-outcome capture artifact for operator packet decisions. That artifact should record which packet items were accepted, rejected, relabeled, or marked uncertain, then feed those outcomes back into the RPG label bank and future calibration reports.
+
+## Operator Outcome Capture
+
+The operator review packet now feeds a report-only outcome-capture artifact:
+
+```text
+operator review packet
+-> operator review outcomes
+-> operator outcome capture
+```
+
+The capture artifact records:
+
+- accepted, rejected, unsafe, already-resolved, needs-more-evidence, or relabel decisions;
+- reviewer, reason, and operator apply note;
+- optional explicit RPG training label;
+- derived RPG training label when the operator does not provide one;
+- target ids;
+- blocked reasons;
+- RPG summary;
+- RPG learning context.
+
+Validation:
+
+```powershell
+py -3 eval/memory_maintenance_operator_outcome_capture_regression.py
+```
+
+Architecture gate key:
+
+```text
+memory_maintenance_operator_outcome_capture_ok
+```
+
+This creates the missing feedback hinge:
+
+```text
+RPG explains maintenance candidates
+-> operator reviews them
+-> outcomes become report-only training feedback
+-> future label-bank integration can learn from reviewed maintenance behavior
+```
+
+The artifact remains non-mutating:
+
+```text
+ready_for_policy_use: false
+promotion_ready: false
+report_only: true
+mutates_db: false
+```
+
+The next development step should be a feedback integration script that takes `memory_maintenance_operator_outcome_capture/v1` and emits RPG label-bank-compatible review items. That will let real operator packet outcomes improve the label bank without manually copying labels or enabling automatic memory mutation.
+
+## Operator Outcome To RPG Feedback
+
+Operator outcome capture now feeds an RPG label-bank-compatible feedback packet:
+
+```text
+operator outcome capture
+-> operator outcome RPG feedback packet
+-> RPG natural label bank
+```
+
+The feedback packet uses the existing schema:
+
+```text
+memory_maintenance_rpg_natural_candidate_review_packet/v1
+```
+
+so the existing RPG label-bank script can consume it without a separate training path. Each feedback item preserves:
+
+- source operator packet item id;
+- source operator outcome;
+- explicit or derived RPG training label;
+- target ids;
+- RPG summary;
+- RPG learning context;
+- reviewer and notes.
+
+Validation:
+
+```powershell
+py -3 eval/memory_maintenance_operator_outcome_rpg_feedback_regression.py
+```
+
+Architecture gate key:
+
+```text
+memory_maintenance_operator_outcome_rpg_feedback_ok
+```
+
+This closes the first report-only supervised feedback loop:
+
+```text
+RPG diagnostics
+-> operator packet
+-> operator outcome capture
+-> RPG feedback packet
+-> label-bank-compatible training evidence
+```
+
+The feedback remains blocked from policy use:
+
+```text
+ready_for_policy_use: false
+promotion_ready: false
+report_only: true
+mutates_db: false
+```
+
+The next development step should be an aggregate label-bank merge/evaluation script that compares:
+
+1. naturally mined RPG review labels;
+2. operator-derived RPG feedback labels;
+3. combined label-bank quality and scorer readiness.
+
+That will tell whether operator feedback materially improves label diversity, quality readiness, and transparent scorer behavior.
+
+## RPG Feedback Merge Evaluation
+
+The architecture now has an aggregate report-only evaluator for the supervised RPG feedback loop:
+
+```text
+natural RPG review packet
++ operator-derived RPG feedback packet
+-> merged RPG review packet
+-> label bank
+-> label-quality report
+-> transparent scorer report
+-> merge comparison
+```
+
+Validation:
+
+```powershell
+py -3 eval/memory_maintenance_rpg_feedback_merge_evaluation_regression.py
+```
+
+Architecture gate key:
+
+```text
+memory_maintenance_rpg_feedback_merge_evaluation_ok
+```
+
+The evaluator compares three variants:
+
+- natural-only labels;
+- operator-feedback-only labels;
+- combined natural + operator-feedback labels.
+
+For each variant it runs the existing label bank, label-quality report, and transparent scorer. The comparison reports:
+
+- label gain from operator feedback;
+- new review-label classes;
+- new candidate classes;
+- family prediction accuracy delta;
+- leave-one-out scorer accuracy delta;
+- whether operator feedback materially improves training evidence.
+
+This is the right next architecture shape because the project goal is a low-compute adaptive memory brain, not an autonomous mutation bot. The combined program should keep improving in this order:
+
+1. collect evidence from memory behavior;
+2. expose that evidence to an operator/Hermes review surface;
+3. capture reviewed outcomes;
+4. convert outcomes into compatible supervised labels;
+5. measure whether the labels improve quality and scorer behavior;
+6. only then consider shadow policy proposals, never direct real DB mutation.
+
+The next development step should be a compact architecture status/readiness dashboard artifact that summarizes the full chain:
+
+```text
+retrieval/controller
+-> RPG diagnostics
+-> maintenance rehearsal
+-> operator packet
+-> outcome capture
+-> RPG feedback merge
+-> label quality
+-> scorer readiness
+```
+
+That dashboard should be used before GitHub uploads or Hermes handovers so both sessions can see what is stable, what is report-only, and what remains blocked.
+
+## Architecture Readiness Dashboard
+
+The codebase now has a compact readiness dashboard:
+
+```text
+selector architecture gate
++ architecture valuation
++ RPG feedback merge evaluation
+-> architecture readiness dashboard
+```
+
+Validation:
+
+```powershell
+py -3 eval/architecture_readiness_dashboard_regression.py
+```
+
+Architecture gate key:
+
+```text
+architecture_readiness_dashboard_ok
+```
+
+The dashboard summarizes:
+
+- retrieval/controller chain;
+- RPG diagnostics chain;
+- maintenance rehearsal chain;
+- operator feedback chain;
+- RPG supervised-learning chain;
+- RPG feedback merge results;
+- policy boundary;
+- handover readiness;
+- GitHub upload readiness;
+- next development recommendation.
+
+This is now the preferred pre-handover and pre-upload check. The dashboard keeps the architecture honest by showing that the current system is stable as a report-only adaptive memory learning loop, while real DB mutation and RPG policy use remain blocked.
+
+The next development step should be to run the dashboard on real/Hermes-generated artifacts after the next extended test, then use its summary to decide whether the memory session needs UI/API hooks for operator outcome capture or whether the selector side needs more scorer/quality work first.

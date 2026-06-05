@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import sys
 from pathlib import Path
@@ -36,20 +38,23 @@ def comparable(report: dict[str, Any]) -> dict[str, Any]:
 
 
 def main() -> int:
-    if not SOURCE_LOG.exists():
+    generated_stdout = ""
+    with contextlib.redirect_stdout(io.StringIO()) as buffer:
         generated = generate_source_log()
-        if generated != 0:
-            print(
-                json.dumps(
-                    {
-                        "ok": False,
-                        "error": "failed_to_generate_source_log",
-                        "source_log": str(SOURCE_LOG),
-                    },
-                    indent=2,
-                )
+        generated_stdout = buffer.getvalue().strip()
+    if generated != 0:
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "error": "failed_to_generate_source_log",
+                    "source_log": str(SOURCE_LOG),
+                    "generator_stdout": generated_stdout,
+                },
+                indent=2,
             )
-            return 1
+        )
+        return 1
 
     packets, skipped = collect_packets([SOURCE_LOG])
     collector_report = summarize(packets, skipped, [SOURCE_LOG])
@@ -60,6 +65,7 @@ def main() -> int:
     legacy_comparable = comparable(log_report)
     packet_comparable = comparable(packet_report)
     checks = {
+        "source_log_regenerated": generated == 0,
         "source_log_exists": SOURCE_LOG.exists(),
         "collector_ok": bool(collector_report.get("ok")),
         "packet_eval_ran": bool(packet_report.get("decision_count")),
@@ -79,6 +85,7 @@ def main() -> int:
         "legacy_comparable": legacy_comparable,
         "packet_comparable": packet_comparable,
         "collector_summary": collector_report,
+        "generator_stdout": generated_stdout,
     }
     OUT_JSON.parent.mkdir(parents=True, exist_ok=True)
     OUT_JSON.write_text(json.dumps(report, indent=2), encoding="utf-8")

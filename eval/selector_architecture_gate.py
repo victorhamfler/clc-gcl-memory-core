@@ -138,6 +138,9 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
         "ogcf_erg_curvature_ok": bool(
             (step_json(steps, "ogcf_erg_curvature_regression") or {}).get("ok")
         ),
+        "rpg_relational_substrate_probe_ok": bool(
+            (step_json(steps, "rpg_relational_substrate_probe_regression") or {}).get("ok")
+        ),
         "ogcf_erg_signal_provider_ok": bool(
             (step_json(steps, "ogcf_erg_signal_provider_regression") or {}).get("ok")
         ),
@@ -164,6 +167,75 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
         ),
         "memory_maintenance_manual_apply_decisions_ok": bool(
             (step_json(steps, "memory_maintenance_manual_apply_decisions_regression") or {}).get("ok")
+        ),
+        "memory_maintenance_apply_plan_ok": bool(
+            (step_json(steps, "memory_maintenance_apply_plan_regression") or {}).get("ok")
+        ),
+        "memory_maintenance_apply_backend_ok": bool(
+            (step_json(steps, "memory_maintenance_apply_backend_regression") or {}).get("ok")
+        ),
+        "memory_maintenance_apply_store_adapter_ok": bool(
+            (step_json(steps, "memory_maintenance_apply_store_adapter_regression") or {}).get("ok")
+        ),
+        "memory_maintenance_real_db_adapter_ok": bool(
+            (step_json(steps, "memory_maintenance_real_db_adapter_regression") or {}).get("ok")
+        ),
+        "memory_maintenance_apply_operator_command_ok": bool(
+            (step_json(steps, "memory_maintenance_apply_operator_command_regression") or {}).get("ok")
+        ),
+        "memory_maintenance_copied_db_rehearsal_ok": bool(
+            (step_json(steps, "memory_maintenance_copied_db_rehearsal_regression") or {}).get("ok")
+        ),
+        "memory_maintenance_rich_copied_db_target_quality_ok": bool(
+            (step_json(steps, "memory_maintenance_rich_copied_db_target_quality_regression") or {}).get("ok")
+        ),
+        "memory_maintenance_rehearsal_review_summary_ok": bool(
+            (step_json(steps, "memory_maintenance_rehearsal_review_summary_regression") or {}).get("ok")
+        ),
+        "memory_maintenance_rehearsal_review_memory_bank_ok": bool(
+            (step_json(steps, "memory_maintenance_rehearsal_review_memory_bank_regression") or {}).get("ok")
+        ),
+        "memory_maintenance_rehearsal_candidate_guard_ok": bool(
+            (step_json(steps, "memory_maintenance_rehearsal_candidate_guard_regression") or {}).get("ok")
+        ),
+        "memory_maintenance_rpg_rehearsal_calibration_ok": bool(
+            (step_json(steps, "memory_maintenance_rpg_rehearsal_calibration_regression") or {}).get("ok")
+        ),
+        "memory_maintenance_rpg_copied_real_calibration_ok": bool(
+            (step_json(steps, "memory_maintenance_rpg_copied_real_calibration_regression") or {}).get("ok")
+        ),
+        "memory_maintenance_rpg_natural_candidate_calibration_ok": bool(
+            (step_json(steps, "memory_maintenance_rpg_natural_candidate_calibration_regression") or {}).get("ok")
+        ),
+        "memory_maintenance_rpg_natural_candidate_review_packet_ok": bool(
+            (step_json(steps, "memory_maintenance_rpg_natural_candidate_review_packet_regression") or {}).get("ok")
+        ),
+        "memory_maintenance_rpg_natural_label_bank_ok": bool(
+            (step_json(steps, "memory_maintenance_rpg_natural_label_bank_regression") or {}).get("ok")
+        ),
+        "memory_maintenance_rpg_label_scorer_ok": bool(
+            (step_json(steps, "memory_maintenance_rpg_label_scorer_regression") or {}).get("ok")
+        ),
+        "memory_maintenance_rpg_label_quality_report_ok": bool(
+            (step_json(steps, "memory_maintenance_rpg_label_quality_report_regression") or {}).get("ok")
+        ),
+        "memory_maintenance_operator_review_packet_ok": bool(
+            (step_json(steps, "memory_maintenance_operator_review_packet_regression") or {}).get("ok")
+        ),
+        "memory_maintenance_operator_outcome_capture_ok": bool(
+            (step_json(steps, "memory_maintenance_operator_outcome_capture_regression") or {}).get("ok")
+        ),
+        "memory_maintenance_operator_outcome_rpg_feedback_ok": bool(
+            (step_json(steps, "memory_maintenance_operator_outcome_rpg_feedback_regression") or {}).get("ok")
+        ),
+        "memory_maintenance_rpg_feedback_merge_evaluation_ok": bool(
+            (step_json(steps, "memory_maintenance_rpg_feedback_merge_evaluation_regression") or {}).get("ok")
+        ),
+        "architecture_valuation_report_ok": bool(
+            (step_json(steps, "architecture_valuation_report_regression") or {}).get("ok")
+        ),
+        "architecture_readiness_dashboard_ok": bool(
+            (step_json(steps, "architecture_readiness_dashboard_regression") or {}).get("ok")
         ),
         "adaptive_behavior_shadow_runtime_ok": bool(
             (step_json(steps, "adaptive_behavior_shadow_runtime_regression") or {}).get("ok")
@@ -409,6 +481,7 @@ def write_markdown(report: dict[str, Any], out_md: Path) -> None:
         "gemma_shadow_regression_ok",
         "ogcf_corrected_geometry_ok",
         "ogcf_erg_curvature_ok",
+        "rpg_relational_substrate_probe_ok",
         "ogcf_erg_signal_provider_ok",
         "ogcf_projector_graph_maintenance_ok",
         "ogcf_maintenance_priority_outcome_ok",
@@ -418,6 +491,29 @@ def write_markdown(report: dict[str, Any], out_md: Path) -> None:
         "memory_maintenance_candidate_review_plan_ok",
         "memory_maintenance_review_outcome_log_ok",
         "memory_maintenance_manual_apply_decisions_ok",
+        "memory_maintenance_apply_plan_ok",
+        "memory_maintenance_apply_backend_ok",
+        "memory_maintenance_apply_store_adapter_ok",
+        "memory_maintenance_real_db_adapter_ok",
+        "memory_maintenance_apply_operator_command_ok",
+        "memory_maintenance_copied_db_rehearsal_ok",
+        "memory_maintenance_rich_copied_db_target_quality_ok",
+        "memory_maintenance_rehearsal_review_summary_ok",
+        "memory_maintenance_rehearsal_review_memory_bank_ok",
+        "memory_maintenance_rehearsal_candidate_guard_ok",
+        "memory_maintenance_rpg_rehearsal_calibration_ok",
+        "memory_maintenance_rpg_copied_real_calibration_ok",
+        "memory_maintenance_rpg_natural_candidate_calibration_ok",
+        "memory_maintenance_rpg_natural_candidate_review_packet_ok",
+        "memory_maintenance_rpg_natural_label_bank_ok",
+        "memory_maintenance_rpg_label_scorer_ok",
+        "memory_maintenance_rpg_label_quality_report_ok",
+        "memory_maintenance_operator_review_packet_ok",
+        "memory_maintenance_operator_outcome_capture_ok",
+        "memory_maintenance_operator_outcome_rpg_feedback_ok",
+        "memory_maintenance_rpg_feedback_merge_evaluation_ok",
+        "architecture_valuation_report_ok",
+        "architecture_readiness_dashboard_ok",
         "adaptive_behavior_shadow_runtime_ok",
         "adaptive_residual_shadow_runtime_ok",
         "adaptive_residual_shadow_runtime_view_ok",
@@ -585,6 +681,8 @@ def main() -> int:
                 str(ROOT / "eval" / "adaptive_context_gemma_shadow_regression.py"),
                 str(ROOT / "eval" / "ogcf_corrected_geometry_regression.py"),
                 str(ROOT / "eval" / "ogcf_erg_curvature_regression.py"),
+                str(ROOT / "core" / "rpg_memory.py"),
+                str(ROOT / "eval" / "rpg_relational_substrate_probe_regression.py"),
                 str(ROOT / "eval" / "ogcf_erg_signal_provider_regression.py"),
                 str(ROOT / "eval" / "ogcf_projector_graph_maintenance_regression.py"),
                 str(ROOT / "eval" / "ogcf_maintenance_priority_outcome_regression.py"),
@@ -596,12 +694,54 @@ def main() -> int:
                 str(ROOT / "eval" / "ogcf_maintenance_candidate_guard.py"),
                 str(ROOT / "eval" / "ogcf_maintenance_candidate_guard_regression.py"),
                 str(ROOT / "core" / "maintenance_candidate_contract.py"),
+                str(ROOT / "core" / "maintenance_apply_backend.py"),
                 str(ROOT / "eval" / "memory_maintenance_candidate_review_plan.py"),
                 str(ROOT / "eval" / "memory_maintenance_candidate_review_plan_regression.py"),
                 str(ROOT / "eval" / "memory_maintenance_review_outcome_log.py"),
                 str(ROOT / "eval" / "memory_maintenance_review_outcome_log_regression.py"),
                 str(ROOT / "eval" / "memory_maintenance_manual_apply_decisions.py"),
                 str(ROOT / "eval" / "memory_maintenance_manual_apply_decisions_regression.py"),
+                str(ROOT / "eval" / "memory_maintenance_apply_plan.py"),
+                str(ROOT / "eval" / "memory_maintenance_apply_plan_regression.py"),
+                str(ROOT / "eval" / "memory_maintenance_apply_backend_regression.py"),
+                str(ROOT / "eval" / "memory_maintenance_apply_store_adapter_regression.py"),
+                str(ROOT / "eval" / "memory_maintenance_real_db_adapter_regression.py"),
+                str(ROOT / "eval" / "memory_maintenance_apply_operator_command.py"),
+                str(ROOT / "eval" / "memory_maintenance_apply_operator_command_regression.py"),
+                str(ROOT / "eval" / "memory_maintenance_copied_db_rehearsal.py"),
+                str(ROOT / "eval" / "memory_maintenance_copied_db_rehearsal_regression.py"),
+                str(ROOT / "eval" / "memory_maintenance_rich_copied_db_target_quality_regression.py"),
+                str(ROOT / "eval" / "memory_maintenance_rehearsal_review_summary_regression.py"),
+                str(ROOT / "eval" / "memory_maintenance_rehearsal_review_memory_bank.py"),
+                str(ROOT / "eval" / "memory_maintenance_rehearsal_review_memory_bank_regression.py"),
+                str(ROOT / "eval" / "memory_maintenance_rehearsal_candidate_guard.py"),
+                str(ROOT / "eval" / "memory_maintenance_rehearsal_candidate_guard_regression.py"),
+                str(ROOT / "eval" / "memory_maintenance_rpg_rehearsal_calibration.py"),
+                str(ROOT / "eval" / "memory_maintenance_rpg_rehearsal_calibration_regression.py"),
+                str(ROOT / "eval" / "memory_maintenance_rpg_copied_real_calibration.py"),
+                str(ROOT / "eval" / "memory_maintenance_rpg_copied_real_calibration_regression.py"),
+                str(ROOT / "eval" / "memory_maintenance_rpg_natural_candidate_calibration.py"),
+                str(ROOT / "eval" / "memory_maintenance_rpg_natural_candidate_calibration_regression.py"),
+                str(ROOT / "eval" / "memory_maintenance_rpg_natural_candidate_review_packet.py"),
+                str(ROOT / "eval" / "memory_maintenance_rpg_natural_candidate_review_packet_regression.py"),
+                str(ROOT / "eval" / "memory_maintenance_rpg_natural_label_bank.py"),
+                str(ROOT / "eval" / "memory_maintenance_rpg_natural_label_bank_regression.py"),
+                str(ROOT / "eval" / "memory_maintenance_rpg_label_scorer.py"),
+                str(ROOT / "eval" / "memory_maintenance_rpg_label_scorer_regression.py"),
+                str(ROOT / "eval" / "memory_maintenance_rpg_label_quality_report.py"),
+                str(ROOT / "eval" / "memory_maintenance_rpg_label_quality_report_regression.py"),
+                str(ROOT / "eval" / "memory_maintenance_operator_review_packet.py"),
+                str(ROOT / "eval" / "memory_maintenance_operator_review_packet_regression.py"),
+                str(ROOT / "eval" / "memory_maintenance_operator_outcome_capture.py"),
+                str(ROOT / "eval" / "memory_maintenance_operator_outcome_capture_regression.py"),
+                str(ROOT / "eval" / "memory_maintenance_operator_outcome_rpg_feedback.py"),
+                str(ROOT / "eval" / "memory_maintenance_operator_outcome_rpg_feedback_regression.py"),
+                str(ROOT / "eval" / "memory_maintenance_rpg_feedback_merge_evaluation.py"),
+                str(ROOT / "eval" / "memory_maintenance_rpg_feedback_merge_evaluation_regression.py"),
+                str(ROOT / "eval" / "architecture_valuation_report.py"),
+                str(ROOT / "eval" / "architecture_valuation_report_regression.py"),
+                str(ROOT / "eval" / "architecture_readiness_dashboard.py"),
+                str(ROOT / "eval" / "architecture_readiness_dashboard_regression.py"),
                 str(ROOT / "eval" / "adaptive_behavior_shadow_runtime_regression.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_runtime_regression.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_runtime_view_regression.py"),
@@ -755,6 +895,10 @@ def main() -> int:
             [python, str(ROOT / "eval" / "ogcf_erg_curvature_regression.py")],
         ),
         run_step(
+            "rpg_relational_substrate_probe_regression",
+            [python, str(ROOT / "eval" / "rpg_relational_substrate_probe_regression.py")],
+        ),
+        run_step(
             "ogcf_erg_signal_provider_regression",
             [python, str(ROOT / "eval" / "ogcf_erg_signal_provider_regression.py")],
         ),
@@ -789,6 +933,98 @@ def main() -> int:
         run_step(
             "memory_maintenance_manual_apply_decisions_regression",
             [python, str(ROOT / "eval" / "memory_maintenance_manual_apply_decisions_regression.py")],
+        ),
+        run_step(
+            "memory_maintenance_apply_plan_regression",
+            [python, str(ROOT / "eval" / "memory_maintenance_apply_plan_regression.py")],
+        ),
+        run_step(
+            "memory_maintenance_apply_backend_regression",
+            [python, str(ROOT / "eval" / "memory_maintenance_apply_backend_regression.py")],
+        ),
+        run_step(
+            "memory_maintenance_apply_store_adapter_regression",
+            [python, str(ROOT / "eval" / "memory_maintenance_apply_store_adapter_regression.py")],
+        ),
+        run_step(
+            "memory_maintenance_real_db_adapter_regression",
+            [python, str(ROOT / "eval" / "memory_maintenance_real_db_adapter_regression.py")],
+        ),
+        run_step(
+            "memory_maintenance_apply_operator_command_regression",
+            [python, str(ROOT / "eval" / "memory_maintenance_apply_operator_command_regression.py")],
+        ),
+        run_step(
+            "memory_maintenance_copied_db_rehearsal_regression",
+            [python, str(ROOT / "eval" / "memory_maintenance_copied_db_rehearsal_regression.py")],
+        ),
+        run_step(
+            "memory_maintenance_rich_copied_db_target_quality_regression",
+            [python, str(ROOT / "eval" / "memory_maintenance_rich_copied_db_target_quality_regression.py")],
+        ),
+        run_step(
+            "memory_maintenance_rehearsal_review_summary_regression",
+            [python, str(ROOT / "eval" / "memory_maintenance_rehearsal_review_summary_regression.py")],
+        ),
+        run_step(
+            "memory_maintenance_rehearsal_review_memory_bank_regression",
+            [python, str(ROOT / "eval" / "memory_maintenance_rehearsal_review_memory_bank_regression.py")],
+        ),
+        run_step(
+            "memory_maintenance_rehearsal_candidate_guard_regression",
+            [python, str(ROOT / "eval" / "memory_maintenance_rehearsal_candidate_guard_regression.py")],
+        ),
+        run_step(
+            "memory_maintenance_rpg_rehearsal_calibration_regression",
+            [python, str(ROOT / "eval" / "memory_maintenance_rpg_rehearsal_calibration_regression.py")],
+        ),
+        run_step(
+            "memory_maintenance_rpg_copied_real_calibration_regression",
+            [python, str(ROOT / "eval" / "memory_maintenance_rpg_copied_real_calibration_regression.py")],
+        ),
+        run_step(
+            "memory_maintenance_rpg_natural_candidate_calibration_regression",
+            [python, str(ROOT / "eval" / "memory_maintenance_rpg_natural_candidate_calibration_regression.py")],
+        ),
+        run_step(
+            "memory_maintenance_rpg_natural_candidate_review_packet_regression",
+            [python, str(ROOT / "eval" / "memory_maintenance_rpg_natural_candidate_review_packet_regression.py")],
+        ),
+        run_step(
+            "memory_maintenance_rpg_natural_label_bank_regression",
+            [python, str(ROOT / "eval" / "memory_maintenance_rpg_natural_label_bank_regression.py")],
+        ),
+        run_step(
+            "memory_maintenance_rpg_label_scorer_regression",
+            [python, str(ROOT / "eval" / "memory_maintenance_rpg_label_scorer_regression.py")],
+        ),
+        run_step(
+            "memory_maintenance_rpg_label_quality_report_regression",
+            [python, str(ROOT / "eval" / "memory_maintenance_rpg_label_quality_report_regression.py")],
+        ),
+        run_step(
+            "memory_maintenance_operator_review_packet_regression",
+            [python, str(ROOT / "eval" / "memory_maintenance_operator_review_packet_regression.py")],
+        ),
+        run_step(
+            "memory_maintenance_operator_outcome_capture_regression",
+            [python, str(ROOT / "eval" / "memory_maintenance_operator_outcome_capture_regression.py")],
+        ),
+        run_step(
+            "memory_maintenance_operator_outcome_rpg_feedback_regression",
+            [python, str(ROOT / "eval" / "memory_maintenance_operator_outcome_rpg_feedback_regression.py")],
+        ),
+        run_step(
+            "memory_maintenance_rpg_feedback_merge_evaluation_regression",
+            [python, str(ROOT / "eval" / "memory_maintenance_rpg_feedback_merge_evaluation_regression.py")],
+        ),
+        run_step(
+            "architecture_valuation_report_regression",
+            [python, str(ROOT / "eval" / "architecture_valuation_report_regression.py")],
+        ),
+        run_step(
+            "architecture_readiness_dashboard_regression",
+            [python, str(ROOT / "eval" / "architecture_readiness_dashboard_regression.py")],
         ),
         run_step(
             "adaptive_behavior_shadow_runtime_regression",

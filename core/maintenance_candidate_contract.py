@@ -11,6 +11,7 @@ PLAN_SCHEMA = "memory_maintenance_candidate_review_plan/v1"
 OUTCOME_SCHEMA = "memory_maintenance_candidate_review_outcomes/v1"
 OUTCOME_SUMMARY_SCHEMA = "memory_maintenance_candidate_review_outcome_summary/v1"
 APPLY_DECISION_SCHEMA = "memory_maintenance_manual_apply_decisions/v1"
+APPLY_PLAN_SCHEMA = "memory_maintenance_apply_plan/v1"
 
 ALLOWED_OUTCOMES = {
     "accept",
@@ -309,6 +310,125 @@ def build_manual_apply_decisions(plan: dict[str, Any], outcomes_raw: Any, *, dry
         "applied_count": 0,
         "promotion_ready": False,
         "promotion_blockers": ["operator_apply_command_required", "database_mutation_disabled_by_default"],
+        "report_only": True,
+        "mutates_db": False,
+        "mutates_runtime": False,
+        "mutates_config": False,
+    }
+
+
+def build_manual_apply_plan(
+    manual_decisions: dict[str, Any],
+    *,
+    dry_run: bool = True,
+    operator_id: str = "",
+) -> dict[str, Any]:
+    """Build a guarded memory-maintenance apply plan without mutating memory.
+
+    The first supported operation is deliberately narrow: accepted duplicate
+    deprecation reviews can become planned operations, but they still require
+    explicit operator confirmation and before/after audit capture before any
+    future mutation backend is allowed to execute them.
+    """
+
+    source_ok = manual_decisions.get("schema") == APPLY_DECISION_SCHEMA
+    planned_operations: list[dict[str, Any]] = []
+    blocked_operations: list[dict[str, Any]] = []
+    for decision in manual_decisions.get("decisions") or []:
+        if not isinstance(decision, dict):
+            continue
+        candidate_id = _string(decision.get("candidate_id"))
+        review_kind = _string(decision.get("memory_review_kind"))
+        decision_label = _string(decision.get("decision"))
+        base = {
+            "schema": "memory_maintenance_apply_operation/v1",
+            "candidate_id": candidate_id,
+            "memory_review_kind": review_kind,
+            "source_decision": decision_label,
+            "source_outcome": _string(decision.get("outcome")),
+            "example_memory_ids": list(decision.get("example_memory_ids") or []),
+            "operator_id": _string(operator_id),
+            "operator_confirmation_required": True,
+            "operator_confirmed": False,
+            "dry_run": bool(dry_run),
+            "ready_to_execute": False,
+            "applied": False,
+            "mutates_db": False,
+        }
+        if decision_label == "ready_for_manual_apply" and review_kind == "duplicate_deprecation_review":
+            example_ids = list(decision.get("example_memory_ids") or [])
+            operation = {
+                **base,
+                "operation_kind": "duplicate_deprecation",
+                "recommended_backend": "mark_duplicate_memory_rows_deprecated",
+                "keeper_memory_id": example_ids[0] if example_ids else "",
+                "deprecate_memory_ids": example_ids[1:],
+                "blocked_reasons": ["operator_confirmation_required", "dry_run_enabled"]
+                if dry_run
+                else ["operator_confirmation_required", "mutation_backend_disabled"],
+                "rollback": {
+                    "required": True,
+                    "strategy": "restore_duplicate_rows_and_clear_deprecation_marker",
+                    "metadata_required": [
+                        "candidate_id",
+                        "operator_id",
+                        "before_memory_rows",
+                        "after_memory_rows",
+                        "audit_event_id",
+                    ],
+                },
+                "before_after_audit": {
+                    "before_required": True,
+                    "after_required": True,
+                    "captured": False,
+                    "audit_event_required": True,
+                },
+            }
+            planned_operations.append(operation)
+            continue
+        reason = "decision_not_ready_for_apply"
+        if decision_label == "ready_for_manual_apply":
+            reason = "unsupported_memory_review_kind"
+        elif decision_label in {"manual_reject_logged", "hold_for_more_evidence", "manual_noop_logged"}:
+            reason = f"{decision_label}_cannot_mutate"
+        blocked_operations.append(
+            {
+                **base,
+                "operation_kind": "blocked_memory_maintenance_operation",
+                "blocked_reasons": [reason],
+                "rollback": {"required": False, "strategy": "no_mutation_to_rollback"},
+                "before_after_audit": {
+                    "before_required": False,
+                    "after_required": False,
+                    "captured": False,
+                    "audit_event_required": True,
+                },
+            }
+        )
+    return {
+        "schema": APPLY_PLAN_SCHEMA,
+        "source_apply_decision_schema": manual_decisions.get("schema"),
+        "source_apply_decision_ok": source_ok,
+        "operation_count": len(planned_operations) + len(blocked_operations),
+        "planned_operation_count": len(planned_operations),
+        "duplicate_deprecation_operation_count": sum(
+            1 for item in planned_operations if item.get("operation_kind") == "duplicate_deprecation"
+        ),
+        "blocked_operation_count": len(blocked_operations),
+        "ready_to_execute_count": 0,
+        "applied_count": 0,
+        "planned_operations": planned_operations,
+        "blocked_operations": blocked_operations,
+        "next_action": "operator_confirmation_and_audit_backend_design"
+        if planned_operations
+        else "collect_or_review_more_manual_apply_decisions",
+        "promotion_ready": False,
+        "promotion_blockers": [
+            "operator_confirmation_required",
+            "before_after_audit_not_captured",
+            "database_mutation_backend_disabled",
+        ],
+        "dry_run": bool(dry_run),
         "report_only": True,
         "mutates_db": False,
         "mutates_runtime": False,
