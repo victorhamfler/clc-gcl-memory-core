@@ -28,6 +28,7 @@ if not Path("E:/").exists():
     WORK_ROOT = REPO_ROOT / "experiments" / "memory_maintenance_rpg_copied_real_calibration"
 OUT_JSON = REPO_ROOT / "experiments" / "memory_maintenance_rpg_copied_real_calibration_results.json"
 OUT_MD = REPO_ROOT / "experiments" / "memory_maintenance_rpg_copied_real_calibration_report.md"
+FIXTURE_ROOT = REPO_ROOT / "experiments" / "memory_maintenance_rpg_fixture_dbs"
 
 
 def clean_cell(value: Any, limit: int = 140) -> str:
@@ -42,6 +43,61 @@ def table_exists(conn: sqlite3.Connection, name: str) -> bool:
         conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
         is not None
     )
+
+
+def setup_copied_real_fixture_db(path: Path) -> None:
+    if path.exists():
+        path.unlink()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute(
+            """
+            CREATE TABLE memories (
+                id TEXT PRIMARY KEY,
+                text TEXT NOT NULL,
+                domain_id TEXT,
+                memory_type TEXT,
+                namespace TEXT,
+                importance REAL,
+                confidence REAL,
+                created_at TEXT,
+                updated_at TEXT,
+                deprecated INTEGER DEFAULT 0
+            )
+            """
+        )
+        rows = [
+            (
+                "fixture_seed",
+                "Copied-real RPG fixture seed memory for calibration context.",
+                "fixture_context",
+            ),
+            (
+                "fixture_context_a",
+                "Selector maintenance context explains duplicate review and operator feedback.",
+                "selector_context",
+            ),
+            (
+                "fixture_context_b",
+                "RPG diagnostics context explains bridge review and rehearsal safety.",
+                "rpg_context",
+            ),
+        ]
+        for index, (memory_id, text, domain) in enumerate(rows, start=1):
+            conn.execute(
+                """
+                INSERT INTO memories (
+                    id, text, domain_id, memory_type, namespace, importance,
+                    confidence, created_at, updated_at, deprecated
+                )
+                VALUES (?, ?, ?, 'fact', 'fixture', 0.6, 0.8, ?, ?, 0)
+                """,
+                (memory_id, text, domain, f"2026-06-05T00:01:{index:02d}Z", f"2026-06-05T00:01:{index:02d}Z"),
+            )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def memory_columns(conn: sqlite3.Connection) -> list[str]:
@@ -311,7 +367,14 @@ def write_report(report: dict[str, Any], out_json: Path, out_md: Path) -> None:
 
 def parse_db_args(values: list[str] | None) -> list[Path]:
     if not values:
-        return [path for path in DEFAULT_DBS if path.exists()]
+        existing = [path for path in DEFAULT_DBS if path.exists()]
+        if existing:
+            return existing
+        FIXTURE_ROOT.mkdir(parents=True, exist_ok=True)
+        paths = [FIXTURE_ROOT / "copied_real_fixture_a.db", FIXTURE_ROOT / "copied_real_fixture_b.db"]
+        for path in paths:
+            setup_copied_real_fixture_db(path)
+        return paths
     paths = []
     for value in values:
         for part in str(value).split(";"):

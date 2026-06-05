@@ -16,6 +16,7 @@ REPO_ROOT = ROOT.parent
 OUT_JSON = REPO_ROOT / "experiments" / "memory_maintenance_rpg_natural_candidate_calibration_results.json"
 OUT_MD = REPO_ROOT / "experiments" / "memory_maintenance_rpg_natural_candidate_calibration_report.md"
 DEFAULT_DBS = [ROOT / "memory_experiment_clean.db", ROOT / "memory_gemma.db", ROOT / "memory.db"]
+FIXTURE_ROOT = REPO_ROOT / "experiments" / "memory_maintenance_rpg_fixture_dbs"
 
 import sys
 
@@ -95,6 +96,95 @@ def table_exists(conn: sqlite3.Connection, name: str) -> bool:
         conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
         is not None
     )
+
+
+def create_fixture_db(path: Path) -> None:
+    if path.exists():
+        path.unlink()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute(
+            """
+            CREATE TABLE memories (
+                id TEXT PRIMARY KEY,
+                text TEXT NOT NULL,
+                domain_id TEXT,
+                namespace TEXT,
+                importance REAL,
+                confidence REAL,
+                created_at TEXT,
+                updated_at TEXT,
+                deprecated INTEGER DEFAULT 0
+            )
+            """
+        )
+        rows = [
+            (
+                "fixture_dup_a",
+                "Atlas project codename is blue nova and the status is ready for review.",
+                "project_atlas",
+            ),
+            (
+                "fixture_dup_b",
+                "Atlas project codename is blue nova and the status is ready for review.",
+                "project_atlas",
+            ),
+            (
+                "fixture_near_a",
+                "The pizza preference memory says the user likes thin crust with basil.",
+                "food_profile",
+            ),
+            (
+                "fixture_near_b",
+                "The pizza preference memory says the user likes thin crust pizza with fresh basil.",
+                "food_profile",
+            ),
+            (
+                "fixture_stale_new",
+                "Current radar route uses beta corridor after the route update.",
+                "navigation",
+            ),
+            (
+                "fixture_stale_old",
+                "Old radar route used to use alpha corridor before the route update.",
+                "navigation",
+            ),
+            (
+                "fixture_bridge_a",
+                "CSD selector bridge connects retrieval evidence with memory maintenance review.",
+                "selector",
+            ),
+            (
+                "fixture_bridge_b",
+                "OGCF ERG bridge connects graph pressure with cross-domain memory review.",
+                "maintenance",
+            ),
+            (
+                "fixture_cross_a",
+                "Travel preference says morning train plans should preserve station context.",
+                "travel",
+            ),
+            (
+                "fixture_cross_b",
+                "Planner memory says station context is useful when scheduling morning train trips.",
+                "planner",
+            ),
+        ]
+        for index, (memory_id, text, domain) in enumerate(rows, start=1):
+            conn.execute(
+                """
+                INSERT INTO memories (
+                    id, text, domain_id, namespace, importance, confidence,
+                    created_at, updated_at, deprecated
+                )
+                VALUES (?, ?, ?, 'fixture', 0.6, 0.8, ?, ?, 0)
+                """,
+                (memory_id, text, domain, f"2026-06-05T00:00:{index:02d}Z", f"2026-06-05T00:00:{index:02d}Z"),
+            )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def load_records(db_path: Path, *, limit: int = 220) -> list[RPGMemoryRecord]:
@@ -327,7 +417,12 @@ def write_report(report: dict[str, Any], out_json: Path, out_md: Path) -> None:
 
 def parse_db_args(values: list[str] | None) -> list[Path]:
     if not values:
-        return [path for path in DEFAULT_DBS if path.exists()]
+        existing = [path for path in DEFAULT_DBS if path.exists()]
+        if existing:
+            return existing
+        fixture = FIXTURE_ROOT / "natural_candidate_fixture.db"
+        create_fixture_db(fixture)
+        return [fixture]
     paths = []
     for value in values:
         for part in str(value).split(";"):
