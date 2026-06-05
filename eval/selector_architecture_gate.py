@@ -219,6 +219,9 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
         "memory_maintenance_rpg_label_quality_report_ok": bool(
             (step_json(steps, "memory_maintenance_rpg_label_quality_report_regression") or {}).get("ok")
         ),
+        "memory_maintenance_rpg_reviewed_label_batch_ok": bool(
+            (step_json(steps, "memory_maintenance_rpg_reviewed_label_batch_regression") or {}).get("ok")
+        ),
         "memory_maintenance_operator_review_packet_ok": bool(
             (step_json(steps, "memory_maintenance_operator_review_packet_regression") or {}).get("ok")
         ),
@@ -236,6 +239,9 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
         ),
         "architecture_readiness_dashboard_ok": bool(
             (step_json(steps, "architecture_readiness_dashboard_regression") or {}).get("ok")
+        ),
+        "architecture_transition_map_ok": bool(
+            (step_json(steps, "architecture_transition_map_regression") or {}).get("ok")
         ),
         "adaptive_behavior_shadow_runtime_ok": bool(
             (step_json(steps, "adaptive_behavior_shadow_runtime_regression") or {}).get("ok")
@@ -435,6 +441,9 @@ def build_report(args: argparse.Namespace, steps: list[dict[str, Any]], artifact
         "adaptive_behavior_feature_scorer_hybrid_ok": bool(
             (step_json(steps, "adaptive_behavior_feature_scorer_hybrid_regression") or {}).get("ok")
         ),
+        "adaptive_behavior_feature_scorer_hybrid_bootstrap_ok": bool(
+            (step_json(steps, "adaptive_behavior_feature_scorer_hybrid_bootstrap_regression") or {}).get("ok")
+        ),
         "adaptive_behavior_feature_challenge_ok": bool(
             (step_json(steps, "adaptive_behavior_feature_challenge_regression") or {}).get("ok")
         ),
@@ -508,12 +517,14 @@ def write_markdown(report: dict[str, Any], out_md: Path) -> None:
         "memory_maintenance_rpg_natural_label_bank_ok",
         "memory_maintenance_rpg_label_scorer_ok",
         "memory_maintenance_rpg_label_quality_report_ok",
+        "memory_maintenance_rpg_reviewed_label_batch_ok",
         "memory_maintenance_operator_review_packet_ok",
         "memory_maintenance_operator_outcome_capture_ok",
         "memory_maintenance_operator_outcome_rpg_feedback_ok",
         "memory_maintenance_rpg_feedback_merge_evaluation_ok",
         "architecture_valuation_report_ok",
         "architecture_readiness_dashboard_ok",
+        "architecture_transition_map_ok",
         "adaptive_behavior_shadow_runtime_ok",
         "adaptive_residual_shadow_runtime_ok",
         "adaptive_residual_shadow_runtime_view_ok",
@@ -575,6 +586,7 @@ def write_markdown(report: dict[str, Any], out_md: Path) -> None:
         "controller_packet_ogcf_bridge_leave_one_source_out_ok",
         "adaptive_behavior_feature_scorer_ok",
         "adaptive_behavior_feature_scorer_hybrid_ok",
+        "adaptive_behavior_feature_scorer_hybrid_bootstrap_ok",
         "adaptive_behavior_feature_challenge_ok",
     ):
         lines.append(f"| `{key}` | `{report['required_summary'].get(key)}` |")
@@ -730,6 +742,8 @@ def main() -> int:
                 str(ROOT / "eval" / "memory_maintenance_rpg_label_scorer_regression.py"),
                 str(ROOT / "eval" / "memory_maintenance_rpg_label_quality_report.py"),
                 str(ROOT / "eval" / "memory_maintenance_rpg_label_quality_report_regression.py"),
+                str(ROOT / "eval" / "memory_maintenance_rpg_reviewed_label_batch.py"),
+                str(ROOT / "eval" / "memory_maintenance_rpg_reviewed_label_batch_regression.py"),
                 str(ROOT / "eval" / "memory_maintenance_operator_review_packet.py"),
                 str(ROOT / "eval" / "memory_maintenance_operator_review_packet_regression.py"),
                 str(ROOT / "eval" / "memory_maintenance_operator_outcome_capture.py"),
@@ -742,6 +756,8 @@ def main() -> int:
                 str(ROOT / "eval" / "architecture_valuation_report_regression.py"),
                 str(ROOT / "eval" / "architecture_readiness_dashboard.py"),
                 str(ROOT / "eval" / "architecture_readiness_dashboard_regression.py"),
+                str(ROOT / "eval" / "architecture_transition_map.py"),
+                str(ROOT / "eval" / "architecture_transition_map_regression.py"),
                 str(ROOT / "eval" / "adaptive_behavior_shadow_runtime_regression.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_runtime_regression.py"),
                 str(ROOT / "eval" / "adaptive_residual_shadow_runtime_view_regression.py"),
@@ -790,6 +806,7 @@ def main() -> int:
                 str(ROOT / "eval" / "adaptive_behavior_feature_scorer_regression.py"),
                 str(ROOT / "eval" / "adaptive_behavior_feature_scorer_hybrid_eval.py"),
                 str(ROOT / "eval" / "adaptive_behavior_feature_scorer_hybrid_regression.py"),
+                str(ROOT / "eval" / "adaptive_behavior_feature_scorer_hybrid_bootstrap_regression.py"),
                 str(ROOT / "eval" / "adaptive_behavior_feature_challenge_log.py"),
                 str(ROOT / "eval" / "adaptive_behavior_feature_challenge_regression.py"),
                 str(ROOT / "eval" / "evidence_context_regression.py"),
@@ -1003,6 +1020,10 @@ def main() -> int:
             [python, str(ROOT / "eval" / "memory_maintenance_rpg_label_quality_report_regression.py")],
         ),
         run_step(
+            "memory_maintenance_rpg_reviewed_label_batch_regression",
+            [python, str(ROOT / "eval" / "memory_maintenance_rpg_reviewed_label_batch_regression.py")],
+        ),
+        run_step(
             "memory_maintenance_operator_review_packet_regression",
             [python, str(ROOT / "eval" / "memory_maintenance_operator_review_packet_regression.py")],
         ),
@@ -1025,6 +1046,10 @@ def main() -> int:
         run_step(
             "architecture_readiness_dashboard_regression",
             [python, str(ROOT / "eval" / "architecture_readiness_dashboard_regression.py")],
+        ),
+        run_step(
+            "architecture_transition_map_regression",
+            [python, str(ROOT / "eval" / "architecture_transition_map_regression.py")],
         ),
         run_step(
             "adaptive_behavior_shadow_runtime_regression",
@@ -1275,6 +1300,10 @@ def main() -> int:
         maybe_artifact_step(
             "adaptive_behavior_feature_scorer_hybrid_regression",
             [python, str(ROOT / "eval" / "adaptive_behavior_feature_scorer_hybrid_regression.py")],
+        ),
+        run_step(
+            "adaptive_behavior_feature_scorer_hybrid_bootstrap_regression",
+            [python, str(ROOT / "eval" / "adaptive_behavior_feature_scorer_hybrid_bootstrap_regression.py")],
         ),
         run_step(
             "adaptive_behavior_feature_challenge_regression",

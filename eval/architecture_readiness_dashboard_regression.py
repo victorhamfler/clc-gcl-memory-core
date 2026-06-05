@@ -73,11 +73,22 @@ def merge_fixture() -> dict:
     }
 
 
+def transition_fixture() -> dict:
+    return {
+        "schema": "architecture_transition_map/v1",
+        "ok": True,
+        "transition_state": "stable_report_only_learning_loop",
+        "blocked_subsystems": [],
+        "recommended_next_development": "collect_reviewed_rpg_labels_and_recheck_label_quality",
+        "report_only": True,
+    }
+
+
 def main() -> int:
-    good = build_dashboard(gate_fixture(), valuation_fixture(), merge_fixture())
+    good = build_dashboard(gate_fixture(), valuation_fixture(), merge_fixture(), transition_fixture())
     bad_gate = gate_fixture()
     bad_gate["required_summary"]["memory_maintenance_operator_outcome_capture_ok"] = False
-    blocked = build_dashboard(bad_gate, valuation_fixture(), merge_fixture())
+    blocked = build_dashboard(bad_gate, valuation_fixture(), merge_fixture(), transition_fixture())
     checks = {
         "schema_ok": good.get("schema") == "architecture_readiness_dashboard/v1",
         "all_chains_ready": good.get("chains_ok") is True
@@ -89,6 +100,9 @@ def main() -> int:
         and (good.get("policy_boundary") or {}).get("rpg_policy_use_allowed") is False,
         "merge_summary_present": (good.get("merge_evaluation") or {}).get("label_gain_from_operator_feedback") == 2
         and (good.get("merge_evaluation") or {}).get("combined_scorer_ready_for_policy") is False,
+        "transition_summary_present": (good.get("transition_map") or {}).get("transition_state")
+        == "stable_report_only_learning_loop"
+        and good.get("recommended_next_development") == "collect_reviewed_rpg_labels_and_recheck_label_quality",
         "blocked_fixture_not_handover_ready": blocked.get("handover_ready") is False
         and blocked.get("chains_ok") is False,
         "blocked_chain_names_failure": any(

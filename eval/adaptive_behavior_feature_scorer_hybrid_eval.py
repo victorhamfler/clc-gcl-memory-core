@@ -99,6 +99,8 @@ def train_binary_softmax(
 def softmax(logits: list[float]) -> list[float]:
     import math
 
+    if not logits:
+        return []
     peak = max(logits)
     exps = [math.exp(value - peak) for value in logits]
     total = sum(exps) or 1.0
@@ -106,9 +108,13 @@ def softmax(logits: list[float]) -> list[float]:
 
 
 def residual_predict(model: dict[str, Any], sample: dict[str, Any]) -> tuple[str, float]:
+    if not model.get("weights"):
+        return "symbolic_correct", 1.0
     vector = apply_standardization([vector_for(sample)], model["means"], model["scales"])[0]
     x = [1.0, *vector]
     probs = softmax([sum(w * v for w, v in zip(class_weights, x)) for class_weights in model["weights"]])
+    if not probs:
+        return "symbolic_correct", 1.0
     best_idx = max(range(len(probs)), key=lambda idx: probs[idx])
     return RESIDUAL_LABELS[best_idx], round(probs[best_idx], 6)
 

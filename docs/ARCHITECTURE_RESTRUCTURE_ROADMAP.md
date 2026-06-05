@@ -5633,3 +5633,63 @@ The dashboard summarizes:
 This is now the preferred pre-handover and pre-upload check. The dashboard keeps the architecture honest by showing that the current system is stable as a report-only adaptive memory learning loop, while real DB mutation and RPG policy use remain blocked.
 
 The next development step should be to run the dashboard on real/Hermes-generated artifacts after the next extended test, then use its summary to decide whether the memory session needs UI/API hooks for operator outcome capture or whether the selector side needs more scorer/quality work first.
+
+## Architecture Transition Map
+
+The restructuring roadmap now has a compact transition-state evaluator:
+
+```text
+selector architecture gate
++ architecture valuation
++ architecture readiness dashboard
++ RPG feedback merge evidence
+-> architecture transition map
+```
+
+Validation:
+
+```powershell
+py -3 eval/architecture_transition_map_regression.py
+```
+
+Architecture gate key:
+
+```text
+architecture_transition_map_ok
+```
+
+The transition map summarizes the neural-symbolic migration by subsystem:
+
+- retrieval/controller context is the stable configured feature spine;
+- maintenance apply lifecycle is operator-gated and copied-DB rehearsal-first;
+- RPG relational substrate is diagnostic and report-only;
+- operator feedback is ready as a non-mutating feedback loop;
+- RPG supervised learning is shadow-learning only and blocked by label evidence;
+- adaptive residual shadow is learned-veto shadow-only and blocked by fresh external validation.
+
+This gives the project a clearer control surface for the next restructuring phase. The next best development target remains evidence collection, not policy promotion: collect reviewed natural RPG labels and operator-derived maintenance outcomes, then re-run label quality, feedback merge, scorer, dashboard, and transition-map checks. Runtime mutation, real DB apply, and RPG policy use remain blocked by design.
+
+## RPG Reviewed Label Batch
+
+The supervised RPG path now has a richer local reviewed-label pressure test:
+
+```text
+balanced reviewed RPG candidate-label fixture
+-> natural label bank
+-> label-quality report
+-> transparent RPG label scorer
+```
+
+Validation:
+
+```powershell
+py -3 eval/memory_maintenance_rpg_reviewed_label_batch_regression.py
+```
+
+Architecture gate key:
+
+```text
+memory_maintenance_rpg_reviewed_label_batch_ok
+```
+
+This fixture is not real evidence and does not permit policy use. Its purpose is to prove the label-bank, quality, and scorer path can handle a balanced six-label candidate set before Hermes/user labels are collected. The next real architecture step is still to collect reviewed natural RPG labels and operator-derived maintenance outcomes, then compare real label quality against this clean local sanity baseline.

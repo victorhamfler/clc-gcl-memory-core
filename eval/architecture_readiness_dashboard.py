@@ -11,6 +11,7 @@ EXPERIMENTS = REPO_ROOT / "experiments"
 DEFAULT_GATE = EXPERIMENTS / "selector_architecture_gate_results.json"
 DEFAULT_VALUATION = EXPERIMENTS / "architecture_valuation_report_results.json"
 DEFAULT_MERGE_EVAL = EXPERIMENTS / "memory_maintenance_rpg_feedback_merge_evaluation_regression_results.json"
+DEFAULT_TRANSITION_MAP = EXPERIMENTS / "architecture_transition_map_results.json"
 OUT_JSON = EXPERIMENTS / "architecture_readiness_dashboard_results.json"
 OUT_MD = EXPERIMENTS / "architecture_readiness_dashboard.md"
 
@@ -69,6 +70,7 @@ CHAINS = [
             "memory_maintenance_rpg_natural_label_bank_ok",
             "memory_maintenance_rpg_label_quality_report_ok",
             "memory_maintenance_rpg_label_scorer_ok",
+            "memory_maintenance_rpg_reviewed_label_batch_ok",
             "memory_maintenance_rpg_feedback_merge_evaluation_ok",
         ],
         "policy": "shadow_learning_only",
@@ -130,7 +132,24 @@ def merge_summary(merge_eval_regression: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def build_dashboard(gate: dict[str, Any], valuation: dict[str, Any], merge_eval_regression: dict[str, Any]) -> dict[str, Any]:
+def transition_summary(transition_map: dict[str, Any]) -> dict[str, Any]:
+    if not transition_map:
+        return {}
+    return {
+        "schema": "architecture_readiness_transition_summary/v1",
+        "ok": bool(transition_map.get("ok")),
+        "transition_state": transition_map.get("transition_state"),
+        "blocked_subsystems": transition_map.get("blocked_subsystems") or [],
+        "recommended_next_development": transition_map.get("recommended_next_development"),
+    }
+
+
+def build_dashboard(
+    gate: dict[str, Any],
+    valuation: dict[str, Any],
+    merge_eval_regression: dict[str, Any],
+    transition_map: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     summary = gate.get("required_summary") if isinstance(gate.get("required_summary"), dict) else {}
     chains = [chain_status(summary, chain) for chain in CHAINS]
     policy_boundary = valuation.get("policy_boundary") if isinstance(valuation.get("policy_boundary"), dict) else {}
@@ -145,6 +164,8 @@ def build_dashboard(gate: dict[str, Any], valuation: dict[str, Any], merge_eval_
     if merge.get("combined_scorer_ready_for_policy") is True:
         hard_blockers.append("unexpected_policy_ready_scorer")
     all_chains_ok = all(item["ok"] for item in chains)
+    transition = transition_summary(transition_map or {})
+    transition_ok = transition.get("ok")
     return {
         "schema": "architecture_readiness_dashboard/v1",
         "description": "Compact readiness dashboard for the combined selector, memory maintenance, RPG, and operator-feedback architecture.",
@@ -154,6 +175,7 @@ def build_dashboard(gate: dict[str, Any], valuation: dict[str, Any], merge_eval_
         "chains_ok": all_chains_ok,
         "chains": chains,
         "merge_evaluation": merge,
+        "transition_map": transition,
         "policy_boundary": {
             "runtime_policy_mutation_allowed": False,
             "real_db_mutation_allowed_by_default": False,
@@ -167,7 +189,9 @@ def build_dashboard(gate: dict[str, Any], valuation: dict[str, Any], merge_eval_
         "next_action": "handover_or_upload_ready"
         if bool(gate.get("ok")) and bool(valuation.get("ok")) and all_chains_ok and not hard_blockers
         else "resolve_architecture_readiness_blockers",
-        "recommended_next_development": "collect_real_or_hermes_operator_feedback_and_recheck_merge_evaluation",
+        "recommended_next_development": transition.get("recommended_next_development")
+        or "collect_real_or_hermes_operator_feedback_and_recheck_merge_evaluation",
+        "transition_map_ok": transition_ok if transition else None,
         "report_only": True,
         "mutates_db": False,
         "mutates_runtime": False,
@@ -179,6 +203,7 @@ def write_report(dashboard: dict[str, Any], out_json: Path, out_md: Path) -> Non
     out_json.parent.mkdir(parents=True, exist_ok=True)
     out_json.write_text(json.dumps(dashboard, indent=2), encoding="utf-8")
     merge = dashboard.get("merge_evaluation") or {}
+    transition = dashboard.get("transition_map") or {}
     lines = [
         "# Architecture Readiness Dashboard",
         "",
@@ -189,7 +214,8 @@ def write_report(dashboard: dict[str, Any], out_json: Path, out_md: Path) -> Non
         f"Chains OK: `{dashboard['chains_ok']}`",
         f"Handover ready: `{dashboard['handover_ready']}`",
         f"GitHub upload ready: `{dashboard['github_upload_ready']}`",
-        f"Next action: `{dashboard['next_action']}`",
+            f"Next action: `{dashboard['next_action']}`",
+            f"Transition state: `{transition.get('transition_state')}`",
         "",
         "## Chains",
         "",
@@ -211,6 +237,12 @@ def write_report(dashboard: dict[str, Any], out_json: Path, out_md: Path) -> Non
             f"Combined labeled count: `{merge.get('combined_labeled_count')}`",
             f"Combined scorer policy ready: `{merge.get('combined_scorer_ready_for_policy')}`",
             "",
+            "## Transition Map",
+            "",
+            f"Transition map OK: `{transition.get('ok')}`",
+            f"Blocked subsystems: `{', '.join(transition.get('blocked_subsystems') or [])}`",
+            f"Transition recommendation: `{transition.get('recommended_next_development')}`",
+            "",
             "## Policy Boundary",
             "",
             "```json",
@@ -230,6 +262,7 @@ def main() -> int:
     parser.add_argument("--gate", default=str(DEFAULT_GATE))
     parser.add_argument("--valuation", default=str(DEFAULT_VALUATION))
     parser.add_argument("--merge-eval", default=str(DEFAULT_MERGE_EVAL))
+    parser.add_argument("--transition-map", default=str(DEFAULT_TRANSITION_MAP))
     parser.add_argument("--out-json", default=str(OUT_JSON))
     parser.add_argument("--out-md", default=str(OUT_MD))
     args = parser.parse_args()
@@ -237,6 +270,7 @@ def main() -> int:
         read_json(Path(args.gate)),
         read_json(Path(args.valuation)),
         read_json(Path(args.merge_eval)),
+        read_json(Path(args.transition_map)),
     )
     write_report(dashboard, Path(args.out_json), Path(args.out_md))
     print(
